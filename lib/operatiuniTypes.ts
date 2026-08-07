@@ -15,7 +15,7 @@ export const LABEL_OPERATIUNE: Record<TipOperatiune, string> = {
   Udat: 'Udat',
   Tuns: 'Tuns',
   Aspirat: 'Aspirat',
-  Suprainsamantare: 'Fertilizare foliară',
+  Suprainsamantare: 'Tratamente foliare',
   'Fertilizare/Tratamente': 'Fertilizare solidă',
   Recoltare: 'Recoltare',
 };
