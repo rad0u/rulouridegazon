@@ -84,7 +84,15 @@ export default function UtilajeScreen() {
 
       {loadedOnce && !error && utilaje.length > 0 && (
         <>
-          <div style={{ flex: 1, minHeight: '320px', borderRadius: '8px', overflow: 'hidden', border: '1px solid #ddd' }}>
+          <div
+            style={{
+              height: 'clamp(320px, 60vh, 600px)',
+              flexShrink: 0,
+              borderRadius: '8px',
+              overflow: 'hidden',
+              border: '1px solid #ddd',
+            }}
+          >
             <UtilajeMapView utilaje={utilaje} />
           </div>
 
