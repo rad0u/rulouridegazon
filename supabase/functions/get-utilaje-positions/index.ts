@@ -87,11 +87,31 @@ Deno.serve(async (req) => {
 
   const { data: utilaje, error: utilajeError } = await adminClient
     .from('utilaje')
-    .select('id, nume, tip, traccar_device_id, ferma_id, ferme(nume)')
+    .select('id, nume, tip, traccar_device_id, ferma_id, tanc_capacitate_litri, ferme(nume)')
     .eq('activ', true);
 
   if (utilajeError) {
     return jsonResponse({ error: `Eroare la citirea utilajelor: ${utilajeError.message}` }, 500);
+  }
+
+  // Ultima citire de combustibil per utilaj (nivel_litri e valoare BRUTĂ,
+  // necalibrată, până se face calibrarea senzorului DUT-E pe rezervorul real —
+  // vezi TODO în supabase/functions/sync-traccar-fuel/index.ts).
+  const utilajIds = (utilaje ?? []).map((u) => u.id);
+  const latestFuelByUtilaj = new Map<string, { nivel_litri: number; data_ora: string }>();
+
+  if (utilajIds.length > 0) {
+    const { data: citiri } = await adminClient
+      .from('combustibil_citiri')
+      .select('utilaj_id, nivel_litri, data_ora')
+      .in('utilaj_id', utilajIds)
+      .order('data_ora', { ascending: false });
+
+    for (const c of citiri ?? []) {
+      if (!latestFuelByUtilaj.has(c.utilaj_id)) {
+        latestFuelByUtilaj.set(c.utilaj_id, { nivel_litri: c.nivel_litri, data_ora: c.data_ora });
+      }
+    }
   }
 
   const auth = 'Basic ' + btoa(`${TRACCAR_USER}:${TRACCAR_PASSWORD}`);
@@ -114,6 +134,7 @@ Deno.serve(async (req) => {
   const rows = (utilaje ?? []).map((u: any) => {
     const device = u.traccar_device_id ? deviceByImei.get(u.traccar_device_id) : undefined;
     const position = device ? positionByDeviceId.get(device.id) : undefined;
+    const fuel = latestFuelByUtilaj.get(u.id);
 
     return {
       utilaj_id: u.id,
@@ -125,6 +146,9 @@ Deno.serve(async (req) => {
       lat: position?.latitude ?? null,
       lon: position?.longitude ?? null,
       ultima_actualizare: position?.fixTime ?? device?.lastUpdate ?? null,
+      combustibil_nivel: fuel?.nivel_litri ?? null,
+      combustibil_data: fuel?.data_ora ?? null,
+      combustibil_capacitate_litri: u.tanc_capacitate_litri ?? null,
     };
   });
 

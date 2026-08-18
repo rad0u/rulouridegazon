@@ -26,6 +26,9 @@ export type UtilajPozitie = {
   lat: number | null;
   lon: number | null;
   ultima_actualizare: string | null;
+  combustibil_nivel: number | null;
+  combustibil_data: string | null;
+  combustibil_capacitate_litri: number | null;
 };
 
 function formatOra(data: string | null) {

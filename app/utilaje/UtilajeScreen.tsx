@@ -12,6 +12,21 @@ const UtilajeMapView = dynamic(() => import('../../components/UtilajeMapView'), 
   loading: () => <p>Se încarcă harta...</p>,
 });
 
+// Cât timp utilajul nu are `tanc_capacitate_litri` setat în baza de date,
+// presupunem că senzorul DUT-E nu e încă (definitiv) calibrat pe rezervorul
+// real, deci valoarea e brută ("kvants"), nu litri. Odată setată capacitatea
+// (după calibrare pe teren), aceeași valoare e afișată direct ca litri.
+function formatCombustibil(u: UtilajPozitie): string {
+  if (u.combustibil_nivel === null) return '—';
+
+  if (u.combustibil_capacitate_litri && u.combustibil_capacitate_litri > 0) {
+    const procent = Math.round((u.combustibil_nivel / u.combustibil_capacitate_litri) * 100);
+    return `${Math.round(u.combustibil_nivel)} L / ${u.combustibil_capacitate_litri} L (${procent}%)`;
+  }
+
+  return `${u.combustibil_nivel} (brut, necalibrat)`;
+}
+
 export default function UtilajeScreen() {
   const [utilaje, setUtilaje] = useState<UtilajPozitie[]>([]);
   const [loading, setLoading] = useState(false);
@@ -104,6 +119,7 @@ export default function UtilajeScreen() {
                   <th style={{ padding: '0.4rem' }}>Fermă</th>
                   <th style={{ padding: '0.4rem' }}>Status</th>
                   <th style={{ padding: '0.4rem' }}>Ultima poziție</th>
+                  <th style={{ padding: '0.4rem' }}>Combustibil</th>
                 </tr>
               </thead>
               <tbody>
@@ -115,11 +131,21 @@ export default function UtilajeScreen() {
                     <td style={{ padding: '0.4rem' }}>
                       {u.ultima_actualizare ? new Date(u.ultima_actualizare).toLocaleString('ro-RO') : '—'}
                     </td>
+                    <td style={{ padding: '0.4rem' }}>{formatCombustibil(u)}</td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {utilaje.some((u) => u.combustibil_nivel !== null && !u.combustibil_capacitate_litri) && (
+            <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
+              Valorile de combustibil marcate „brut, necalibrat” sunt citirea directă a senzorului
+              DUT-E, nu litri reali — apar ca litri automat, fără nicio modificare de cod, imediat
+              ce senzorul e calibrat pe rezervorul real și capacitatea tancului (L) e completată
+              pentru utilajul respectiv.
+            </p>
+          )}
         </>
       )}
     </main>

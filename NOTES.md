@@ -5,7 +5,7 @@ deja, și de ce s-au ales anumite soluții. Scopul e ca informația să supravie
 chiar dacă o conversație cu Claude se pierde sau se rezumă. Se actualizează pe măsură
 ce apar decizii noi — nu e nevoie să reconstruim contextul din memorie de fiecare dată.
 
-Ultima actualizare: 2026-08-12.
+Ultima actualizare: 2026-08-18.
 
 ---
 
@@ -76,21 +76,53 @@ redenumire, se schimbă doar acolo — nu în baza de date.
 
 ## 5. Hardware GPS / combustibil — decizii
 
-### Pilot monitorizare combustibil (utilaje agricole)
-- **Tracker GPS**: Teltonika FMC125 (LTE, dual-SIM, RS232, fuel monitoring, acumulator
-  back-up inclus în cutie).
-- **Senzor combustibil**: Technoton DUT-E 232 (senzor digital RS232, capacitiv, 1%
+### Pilot monitorizare combustibil (utilaje agricole) — LIVE (2026-08-18)
+- **Tracker GPS**: Teltonika FMC125 (LTE, dual-SIM, RS232 **și** RS485, fuel monitoring,
+  acumulator back-up inclus în cutie).
+- **Senzor combustibil (pilot)**: Technoton DUT-E 232 (senzor digital RS232, capacitiv, 1%
   precizie). Link produs: https://e-shop.jv-technoton.com/product/dut-e-232/
 - **Interfață configurare senzor**: SK DUT-E (nu S6 SK — acela e pentru altă linie de
   produse, cu conector SC). Link: https://e-shop.jv-technoton.com/product/sk-dut-e/
-- Status: echipamentul pilot a fost comandat, urmează testare pe birou înainte de montaj
-  pe utilaj, apoi configurare SIM de date și integrare cu Traccar.
+  Necesită Service DUT-E software v6+ (v3.26 nu se conectează la unitățile noastre).
+- Pilot montat pe utilajul din Săbăreni (IMEI 862272083141426), funcțional end-to-end:
+  FMC125 (RS232 → mod LLS, Operand Monitoring) → Traccar → atribut **`io201`** →
+  Edge Function `sync-traccar-fuel` (cron la 15 min) → tabela `combustibil_citiri`.
+  Confirmat cu date reale în producție.
 - Server Traccar (self-hosted): http://135.181.45.175/. Dispozitivele se identifică în
   Traccar după IMEI (câmpul „Identifier").
-- Pas rămas pentru integrare în aplicație: după ce datele curg real în Traccar, se
-  confirmă numele exact al atributului de combustibil raportat și se finalizează/
-  deployează `supabase/functions/sync-traccar-fuel/index.ts` (momentan draft, cu TODO-uri).
-  Se populează și `utilaje.traccar_device_id` cu IMEI-urile reale.
+- **Important**: `io201` e valoarea BRUTĂ a senzorului („kvants"), nu litri. Devine litri
+  reali abia după calibrarea DUT-E pe rezervorul real (Service DUT-E → tabel de tarare +
+  „Output message” = „Volume of fuel (L)”). În aplicație, coloana „Combustibil” din
+  `/utilaje` trece automat de la afișare brută la litri reali în momentul în care se
+  completează `utilaje.tanc_capacitate_litri` pentru utilajul respectiv — fără cod nou.
+- Conector fizic: unitatea DUT-E fizică are conector rotund cu 5 pini (generație mai
+  veche); cablurile din kitul SK DUT-E pentru 232/485/KLIN au conector oval cu 6 pini
+  (generație nouă) — nu se potrivesc mecanic. Doar cablul „CAN” are conector rotund, dar
+  cablajul lui intern nu duce semnalele 232R/232T. Soluție folosită: cablare directă pe
+  firele libere ale senzorului (portocaliu/maro/albastru/alb/negru), conform fișei tehnice
+  oficiale a senzorului (nu manualul generic, care are o eroare de culoare pe firul TX).
+
+### Extindere la toată flota (36 de utilaje, recensământ 2026-08-18)
+- 36 de utilaje în total, din care **8 cu rezervor dublu** (necesită 2 sonde/utilaj) și
+  28 cu un singur rezervor.
+- FMC125 are un singur port RS232 **și** un singur port RS485. În mod LLS, RS232 suportă
+  o singură sondă; RS485 suportă până la 5 sonde pe același cablu (bus multi-drop, fiecare
+  sondă cu adresă LLS proprie — dropdown-ul „Addr” 101-108 din Service DUT-E). Deci **nu
+  e nevoie de alt tracker** pentru rezervoarele duble, doar de sonde RS485 pe același bus.
+- **Decizie**: pentru utilajele cu rezervor dublu se cumpără sonde **DUT-E 485** (nu 232 —
+  RS232 nu suportă mai multe sonde simultan), 2 bucăți/utilaj, pe același port RS485 al
+  FMC125-ului, adrese LLS diferite. Link: https://e-shop.jv-technoton.com/product/dut-e-485/
+- **Listă de comandă rămasă** (pilotul, 1x FMC125 + 1x DUT-E 232, e deja acoperit):
+  - 35x Teltonika FMC125 (restul utilajelor).
+  - 27x DUT-E 485 — pentru utilajele cu rezervor unic, în afară de pilot.
+  - 16x DUT-E 485 — pentru cele 8 utilaje cu rezervor dublu (2 buc/utilaj).
+  - Total sonde de comandat: 43x DUT-E 485. SK DUT-E (kitul de configurare) deja deținut,
+    reutilizabil pentru toate sondele — de luat în calcul un al doilea kit doar dacă se
+    configurează sonde în paralel, în locații diferite.
+- Pas rămas: pe măsură ce vine hardware-ul, se montează, se populează
+  `utilaje.traccar_device_id` (IMEI) pentru fiecare, iar la utilajele cu 2 sonde se
+  extinde `combustibil_citiri`/afișarea din `/utilaje` să arate ambele rezervoare separat
+  (momentan schema presupune un singur nivel de combustibil per utilaj).
 
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament
