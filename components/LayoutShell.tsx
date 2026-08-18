@@ -59,6 +59,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 <Link href="/utilizatori" style={navLinkStyle}>
                   Utilizatori
                 </Link>
+                <Link href="/utilaje" style={navLinkStyle}>
+                  Utilaje
+                </Link>
                 <a
                   href="http://135.181.45.175/"
                   target="_blank"

@@ -4,20 +4,20 @@
 // nivelul de combustibil (senzor DUT-E 232, citit prin RS232 pe FMC125) în
 // public.combustibil_citiri.
 //
-// STARE: DRAFT — nu e încă deployat/activat.
-// TODO înainte de activare:
-//   1. Montează + configurează primul FMC125 (RS232 -> Digital Fuel Sensor / LLS,
-//      Codec 8 Extended) și senzorul DUT-E 232, calibrat pe rezervor.
-//   2. În Traccar, deschide device-ul -> Latest position -> More info, și
-//      identifică exact numele atributului de combustibil (variază după codec,
-//      posibil "fuel1" / vreun id numeric de tip "io84" etc). Actualizează
-//      FUEL_ATTRIBUTE_CANDIDATES mai jos cu numele corect găsit.
-//   3. Creează un user Traccar dedicat (read-only, API) și pune-i
-//      credențialele ca secrete: TRACCAR_URL, TRACCAR_USER, TRACCAR_PASSWORD.
-//   4. Adaugă utilajele în tabela public.utilaje, cu traccar_device_id =
-//      IMEI-ul device-ului din Traccar (Devices -> Identifier).
-//   5. Deployează funcția și programează-o (Supabase -> Edge Functions -> Cron,
-//      sau pg_cron -> net.http_post) la un interval rezonabil (ex. la 15 min).
+// STARE: ACTIVĂ (deployată 2026-08-18) — secretele TRACCAR_URL/USER/PASSWORD
+// sunt setate, cron-ul rulează la interval regulat (vezi schema-fuel-tracking.sql).
+//
+// CONFIRMAT (2026-08-18, pilot Săbăreni): atributul de combustibil în Traccar
+// e "io201" (Teltonika FMC125, RS232 -> LLS, DUT-E 232).
+//
+// TODO rămase:
+//   1. Calibrează senzorul DUT-E pe rezervorul real (Service DUT-E, tabel de
+//      tarare) — abia după calibrare "io201" corespunde unor litri reali.
+//      Până atunci, nivel_litri din combustibil_citiri e valoarea brută
+//      necalibrată ("kvants"), nu litri adevărați.
+//   2. Adaugă restul utilajelor în tabela public.utilaje, cu traccar_device_id
+//      = IMEI-ul device-ului din Traccar (Devices -> Identifier). Pilotul
+//      (FMC125 Săbăreni, IMEI 862272083141426) e deja adăugat.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -28,8 +28,8 @@ const TRACCAR_PASSWORD = Deno.env.get('TRACCAR_PASSWORD') ?? '';
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL') ?? '';
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
 
-// TODO: confirmă numele real al atributului după prima citire reală din Traccar.
-const FUEL_ATTRIBUTE_CANDIDATES = ['fuel1', 'fuel', 'fuelLevel'];
+// Confirmat din Traccar (Latest position -> More info) pe pilotul Săbăreni.
+const FUEL_ATTRIBUTE_CANDIDATES = ['io201', 'fuel1', 'fuel', 'fuelLevel'];
 
 interface TraccarPosition {
   deviceId: number;
