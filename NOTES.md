@@ -103,26 +103,36 @@ redenumire, se schimbă doar acolo — nu în baza de date.
   oficiale a senzorului (nu manualul generic, care are o eroare de culoare pe firul TX).
 
 ### Extindere la toată flota (36 de utilaje, recensământ 2026-08-18)
-- 36 de utilaje în total, din care **8 cu rezervor dublu** (necesită 2 sonde/utilaj) și
-  28 cu un singur rezervor.
-- FMC125 are un singur port RS232 **și** un singur port RS485. În mod LLS, RS232 suportă
-  o singură sondă; RS485 suportă până la 5 sonde pe același cablu (bus multi-drop, fiecare
-  sondă cu adresă LLS proprie — dropdown-ul „Addr” 101-108 din Service DUT-E). Deci **nu
-  e nevoie de alt tracker** pentru rezervoarele duble, doar de sonde RS485 pe același bus.
-- **Decizie**: pentru utilajele cu rezervor dublu se cumpără sonde **DUT-E 485** (nu 232 —
-  RS232 nu suportă mai multe sonde simultan), 2 bucăți/utilaj, pe același port RS485 al
-  FMC125-ului, adrese LLS diferite. Link: https://e-shop.jv-technoton.com/product/dut-e-485/
+- 36 de utilaje în total, din care **8 cu rezervor dublu** (rezervoare interconectate
+  între ele — vase comunicante; doar unul are acces de umplere, celălalt e complet închis)
+  și 28 cu un singur rezervor.
+- **Decizie: 1 sondă per utilaj, chiar și la cele cu rezervor dublu — dar de revizuit
+  dacă apar anomalii.** Rezervoarele interconectate se echilibrează suficient de repede
+  încât o sondă montată în rezervorul cu acces la umplere (singurul unde se poate fizic
+  introduce proba) ar trebui să reflecte corect nivelul total al sistemului —
+  consumul/furtul din oricare parte scade nivelul combinat, nu doar local. Rămâne un risc
+  mecanic (înfundarea/blocarea tubului de interconectare, nedetectabilă direct din
+  citire). **Decizia nu e definitivă**: după montaj, dacă citirile de la utilajele cu
+  rezervor dublu arată anomalii (salturi neexplicate, valori care nu se potrivesc cu
+  alimentările/consumul real), se decide separat, per caz, instalarea unei a doua sonde.
+  FMC125 are deja portul RS485 necesar pentru asta (suportă multi-drop, până la 5 sonde),
+  deci upgrade-ul ulterior nu necesită schimbarea trackerului.
+- **Standardizare senzor: DUT-E 485** (nu 232) pentru toate instalările noi — decizie
+  luată din considerente de **consecvență** (nu de necesitate imediată — cu 1 sondă/utilaj
+  nu e nevoie de multi-drop acum), pentru că nu există diferență de preț față de 232, iar
+  RS485 e mai rezistent la interferențe electrice (semnal diferențial, relevant lângă
+  motor/alternator). Link: https://e-shop.jv-technoton.com/product/dut-e-485/. Pilotul
+  (Săbăreni) rămâne pe DUT-E 232 — deja montat și funcțional, nu se schimbă.
+- FMC125 are oricum ambele porturi, RS232 și RS485 — alegerea senzorului 232 vs. 485 e
+  independentă de tracker, doar de tipul de cablare/interfață dorit.
 - **Listă de comandă rămasă** (pilotul, 1x FMC125 + 1x DUT-E 232, e deja acoperit):
-  - 35x Teltonika FMC125 (restul utilajelor).
-  - 27x DUT-E 485 — pentru utilajele cu rezervor unic, în afară de pilot.
-  - 16x DUT-E 485 — pentru cele 8 utilaje cu rezervor dublu (2 buc/utilaj).
-  - Total sonde de comandat: 43x DUT-E 485. SK DUT-E (kitul de configurare) deja deținut,
-    reutilizabil pentru toate sondele — de luat în calcul un al doilea kit doar dacă se
-    configurează sonde în paralel, în locații diferite.
-- Pas rămas: pe măsură ce vine hardware-ul, se montează, se populează
-  `utilaje.traccar_device_id` (IMEI) pentru fiecare, iar la utilajele cu 2 sonde se
-  extinde `combustibil_citiri`/afișarea din `/utilaje` să arate ambele rezervoare separat
-  (momentan schema presupune un singur nivel de combustibil per utilaj).
+  - 35x Teltonika FMC125.
+  - 35x DUT-E 485 (1 per utilaj, inclusiv cele cu rezervor dublu).
+  - SK DUT-E (kitul de configurare) deja deținut, reutilizabil pentru toate sondele — de
+    luat în calcul un al doilea kit doar dacă se configurează sonde în paralel, în locații
+    diferite.
+- Pas rămas: pe măsură ce vine hardware-ul, se montează și se populează
+  `utilaje.traccar_device_id` (IMEI) pentru fiecare utilaj în tabela `utilaje`.
 
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament

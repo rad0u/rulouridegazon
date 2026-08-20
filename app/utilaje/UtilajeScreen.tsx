@@ -27,6 +27,26 @@ function formatCombustibil(u: UtilajPozitie): string {
   return `${u.combustibil_nivel} (brut, necalibrat)`;
 }
 
+// Cron-ul sincronizează din Traccar la fiecare 15 minute, deci un decalaj de
+// până la ~20-30 min e normal. Peste pragul de mai jos, cu utilajul online dar
+// fără citire nouă de combustibil, e semn că sonda a fost deconectată (fir
+// tăiat/scos) — scenariul clasic „deconectez sonda înainte să fur motorină”.
+const FUEL_STALE_MINUTES = 60;
+
+function fuelSignalAgeMinutes(u: UtilajPozitie): number | null {
+  if (!u.combustibil_data) return null;
+  return (Date.now() - new Date(u.combustibil_data).getTime()) / 60000;
+}
+
+function isFuelSignalStale(u: UtilajPozitie): boolean {
+  // Alertăm doar dacă utilajul a avut vreodată o citire (deci are sondă montată
+  // și funcțională) și utilajul e online — dacă nu are sondă deloc, nu e o
+  // anomalie, doar lipsă de echipament.
+  if (u.status !== 'online' || u.combustibil_nivel === null) return false;
+  const age = fuelSignalAgeMinutes(u);
+  return age !== null && age > FUEL_STALE_MINUTES;
+}
+
 export default function UtilajeScreen() {
   const [utilaje, setUtilaje] = useState<UtilajPozitie[]>([]);
   const [loading, setLoading] = useState(false);
@@ -97,6 +117,29 @@ export default function UtilajeScreen() {
 
       {loadedOnce && !error && utilaje.length === 0 && <p>Niciun utilaj activ înregistrat.</p>}
 
+      {loadedOnce && !error && utilaje.some((u) => isFuelSignalStale(u)) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            gap: '0.5rem',
+            padding: '0.75rem 1rem',
+            borderRadius: '8px',
+            background: '#fdecea',
+            border: '1px solid #f5c2c0',
+            color: '#8a1f13',
+            fontWeight: 600,
+          }}
+        >
+          <span aria-hidden>⚠️</span>
+          <span>
+            {utilaje.filter((u) => isFuelSignalStale(u)).length === 1
+              ? '1 utilaj e online, dar fără citire de combustibil de peste o oră — posibil sondă deconectată. Verifică rândul marcat mai jos.'
+              : `${utilaje.filter((u) => isFuelSignalStale(u)).length} utilaje sunt online, dar fără citire de combustibil de peste o oră — posibil sonde deconectate. Verifică rândurile marcate mai jos.`}
+          </span>
+        </div>
+      )}
+
       {loadedOnce && !error && utilaje.length > 0 && (
         <>
           <div
@@ -123,17 +166,35 @@ export default function UtilajeScreen() {
                 </tr>
               </thead>
               <tbody>
-                {utilaje.map((u) => (
-                  <tr key={u.utilaj_id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td style={{ padding: '0.4rem' }}>{u.nume}</td>
-                    <td style={{ padding: '0.4rem' }}>{u.ferma_nume ?? '—'}</td>
-                    <td style={{ padding: '0.4rem' }}>{u.status === 'online' ? 'online' : 'offline'}</td>
-                    <td style={{ padding: '0.4rem' }}>
-                      {u.ultima_actualizare ? new Date(u.ultima_actualizare).toLocaleString('ro-RO') : '—'}
-                    </td>
-                    <td style={{ padding: '0.4rem' }}>{formatCombustibil(u)}</td>
-                  </tr>
-                ))}
+                {utilaje.map((u) => {
+                  const stale = isFuelSignalStale(u);
+                  const age = fuelSignalAgeMinutes(u);
+
+                  return (
+                    <tr
+                      key={u.utilaj_id}
+                      style={{
+                        borderBottom: '1px solid #f0f0f0',
+                        background: stale ? '#fdecea' : undefined,
+                      }}
+                    >
+                      <td style={{ padding: '0.4rem' }}>{u.nume}</td>
+                      <td style={{ padding: '0.4rem' }}>{u.ferma_nume ?? '—'}</td>
+                      <td style={{ padding: '0.4rem' }}>{u.status === 'online' ? 'online' : 'offline'}</td>
+                      <td style={{ padding: '0.4rem' }}>
+                        {u.ultima_actualizare ? new Date(u.ultima_actualizare).toLocaleString('ro-RO') : '—'}
+                      </td>
+                      <td style={{ padding: '0.4rem', color: stale ? '#8a1f13' : undefined, fontWeight: stale ? 600 : undefined }}>
+                        {formatCombustibil(u)}
+                        {stale && (
+                          <div style={{ fontSize: '0.8rem' }}>
+                            ⚠️ fără citire de {age !== null ? Math.round(age / 60) : '?'}h — verifică sonda
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
