@@ -65,6 +65,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 <Link href="/combustibil" style={navLinkStyle}>
                   Combustibil
                 </Link>
+                <Link href="/rezervor-central" style={navLinkStyle}>
+                  Rezervor central
+                </Link>
                 <a
                   href="http://135.181.45.175/"
                   target="_blank"

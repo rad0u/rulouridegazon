@@ -5,7 +5,7 @@ deja, și de ce s-au ales anumite soluții. Scopul e ca informația să supravie
 chiar dacă o conversație cu Claude se pierde sau se rezumă. Se actualizează pe măsură
 ce apar decizii noi — nu e nevoie să reconstruim contextul din memorie de fiecare dată.
 
-Ultima actualizare: 2026-08-18.
+Ultima actualizare: 2026-08-21.
 
 ---
 
@@ -134,6 +134,36 @@ redenumire, se schimbă doar acolo — nu în baza de date.
 - Pas rămas: pe măsură ce vine hardware-ul, se montează și se populează
   `utilaje.traccar_device_id` (IMEI) pentru fiecare utilaj în tabela `utilaje`.
 
+### Rezervor central pe fermă (2026-08-21)
+Cerință: fiecare fermă are un rezervor mare de motorină; admin central introduce în
+aplicație capacitatea rezervorului și cantitatea la fiecare realimentare de la furnizor;
+aplicația scade automat consumul zilnic al utilajelor fermei și afișează cât a mai rămas.
+
+- **Schema** (`supabase/schema-rezervor-central.sql`, aplicată): `ferme` capătă
+  `rezervor_capacitate_litri`, `rezervor_nivel_initial_litri`, `rezervor_nivel_initial_data`.
+  Tabel nou `rezervor_alimentari` (ferma_id, data_ora, cantitate_litri, note, user_id),
+  RLS: admin_central vede/adaugă/șterge tot, admin_ferma vede doar fermei sale.
+- **Model de calcul** (simplificare asumată, de validat cu date reale — vezi comentarii în
+  cod): `nivel_curent = nivel_initial + Σ(alimentări rezervor central) − Σ(consum utilaje
+  calibrate ale fermei, din combustibil_citiri, toate scăderile inclusiv cele „suspecte”)`,
+  calculat de la `nivel_initial_data` încoace. Se scade CONSUMUL (arderea de motor), nu
+  evenimentele de realimentare individuală a utilajelor — presupunerea e că pe termen
+  mediu se echilibrează. Dacă valorile nu se potrivesc cu realitatea pe teren, de
+  reconsiderat modelul.
+- **Edge Function** `get-rezervor-central` (deployată, verify_jwt: true, admin_central
+  only) — calculează situația per fermă.
+- **Pagină** `/rezervor-central` (admin_central only, link în nav „Rezervor central”):
+  tabel cu capacitate/nivel curent/%/ultima alimentare, avertizare vizuală când nivelul
+  scade sub 15%, formular de configurare inițială per fermă (capacitate + nivel curent
+  acum → scrie direct în `ferme` via RLS), formular de înregistrare alimentare nouă (scrie
+  direct în `rezervor_alimentari` via RLS), istoric alimentări expandabil per fermă.
+- Fără Edge Function pentru scriere — `ferme` are deja politică UPDATE pentru admin_central,
+  iar `rezervor_alimentari` are politică INSERT pentru admin_central, deci scrierile merg
+  direct din frontend (`supabase-js`), protejate de RLS.
+- **Pas rămas**: admin central trebuie să configureze inițial fiecare fermă (capacitate +
+  nivel curent la o dată de referință) din pagina `/rezervor-central` înainte ca datele să
+  apară calculate.
+
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament
 la providerul GPS existent.
@@ -156,8 +186,12 @@ la providerul GPS existent.
 - `components/ParcelaPanel.tsx` — panoul de parcelă (descriere + operațiuni + istoric).
 - `app/utilizatori/` — ecran de administrare conturi.
 - `supabase/functions/admin-create-user/` — Edge Function pentru creare conturi (deployed).
-- `supabase/functions/sync-traccar-fuel/` — Edge Function pentru sincronizare combustibil
-  (draft, nedeployată încă — vezi secțiunea 5).
+- `supabase/functions/sync-traccar-fuel/` — Edge Function sincronizare combustibil
+  (ACTIVĂ, cron 15 min — vezi secțiunea 5).
+- `supabase/functions/get-combustibil-report/` — raport consum/realimentări/scăderi
+  suspecte per utilaj (`/combustibil`, admin_central only).
+- `supabase/functions/get-rezervor-central/` — situație rezervor central per fermă
+  (`/rezervor-central`, admin_central only).
 - `supabase/schema-*.sql` — copii sursă-de-adevăr ale migrărilor SQL aplicate în Supabase.
 
 ## 7. Ce rămâne pentru faza 2 (neschimbat față de spec-ul inițial din CLAUDE.md)
