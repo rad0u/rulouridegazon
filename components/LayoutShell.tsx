@@ -1,25 +1,31 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { supabase } from '../lib/supabaseClient';
 import { useUserRole } from '../lib/useUserRole';
 
 const navLinkStyle: React.CSSProperties = {
-  padding: '0.5rem 0.75rem',
+  padding: '0.75rem 1rem',
   borderRadius: '6px',
-  display: 'inline-flex',
-  alignItems: 'center',
+  display: 'block',
+  fontSize: '1.05rem',
 };
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { role } = useUserRole();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   async function handleLogout() {
     await supabase.auth.signOut();
     router.replace('/auth/login');
+  }
+
+  function closeMenu() {
+    setMenuOpen(false);
   }
 
   return (
@@ -31,67 +37,146 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
         minHeight: '100vh',
       }}
     >
-      <header style={{ padding: 'clamp(0.5rem, 3vw, 1rem)', borderBottom: '1px solid #ddd', flexShrink: 0 }}>
-        <nav
+      <header
+        style={{
+          borderBottom: '1px solid #ddd',
+          flexShrink: 0,
+          position: 'relative',
+          zIndex: 20,
+          background: '#fff',
+        }}
+      >
+        <div
           style={{
-            display: 'flex',
-            justifyContent: 'space-between',
+            display: 'grid',
+            gridTemplateColumns: '1fr auto 1fr',
             alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '0.5rem',
+            padding: 'clamp(0.5rem, 3vw, 0.75rem) clamp(0.75rem, 3vw, 1.25rem)',
           }}
         >
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem' }}>
-            <Link href="/" style={navLinkStyle}>
-              Acasă
-            </Link>
-            <Link href="/dashboard" style={navLinkStyle}>
-              Dashboard
-            </Link>
-            <Link href="/ferme" style={navLinkStyle}>
-              Ferme
-            </Link>
-            <Link href="/substante" style={navLinkStyle}>
-              Substanțe
-            </Link>
-            {role === 'admin_central' && (
-              <>
-                <Link href="/utilizatori" style={navLinkStyle}>
-                  Utilizatori
-                </Link>
-                <Link href="/utilaje" style={navLinkStyle}>
-                  Utilaje
-                </Link>
-                <Link href="/combustibil" style={navLinkStyle}>
-                  Combustibil
-                </Link>
-                <Link href="/rezervor-central" style={navLinkStyle}>
-                  Rezervor central
-                </Link>
-                <a
-                  href="http://135.181.45.175/"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  style={navLinkStyle}
-                >
-                  Tracking
-                </a>
-              </>
-            )}
-          </div>
           <button
-            onClick={handleLogout}
+            onClick={() => setMenuOpen((open) => !open)}
+            aria-expanded={menuOpen}
             style={{
+              justifySelf: 'start',
               cursor: 'pointer',
-              padding: '0.5rem 1rem',
+              padding: '0.5rem 0.9rem',
               border: '1px solid #ccc',
               borderRadius: '6px',
               background: '#f5f5f5',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              fontSize: '0.95rem',
             }}
           >
-            Logout
+            <span style={{ fontSize: '1.1rem', lineHeight: 1 }}>☰</span>
+            Meniu
           </button>
-        </nav>
+
+          <Link href="/" style={{ justifySelf: 'center', display: 'flex' }} onClick={closeMenu}>
+            <Image
+              src="/logo.png"
+              alt="Rulouri de Gazon"
+              width={994}
+              height={247}
+              priority
+              style={{ height: 'clamp(28px, 6vw, 40px)', width: 'auto' }}
+            />
+          </Link>
+
+          <div />
+        </div>
+
+        {menuOpen && (
+          <>
+            <div
+              onClick={closeMenu}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.15)',
+                zIndex: 10,
+              }}
+            />
+            <nav
+              style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                width: 'min(320px, 90vw)',
+                background: '#fff',
+                borderRight: '1px solid #ddd',
+                borderBottom: '1px solid #ddd',
+                borderBottomRightRadius: '10px',
+                boxShadow: '2px 4px 12px rgba(0,0,0,0.12)',
+                padding: '0.5rem',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.15rem',
+                zIndex: 20,
+              }}
+            >
+              <Link href="/" style={navLinkStyle} onClick={closeMenu}>
+                Acasă
+              </Link>
+              <Link href="/dashboard" style={navLinkStyle} onClick={closeMenu}>
+                Dashboard
+              </Link>
+              <Link href="/ferme" style={navLinkStyle} onClick={closeMenu}>
+                Ferme
+              </Link>
+              <Link href="/substante" style={navLinkStyle} onClick={closeMenu}>
+                Substanțe
+              </Link>
+              {role === 'admin_central' && (
+                <>
+                  <Link href="/utilizatori" style={navLinkStyle} onClick={closeMenu}>
+                    Utilizatori
+                  </Link>
+                  <Link href="/utilaje" style={navLinkStyle} onClick={closeMenu}>
+                    Utilaje
+                  </Link>
+                  <Link href="/combustibil" style={navLinkStyle} onClick={closeMenu}>
+                    Combustibil
+                  </Link>
+                  <Link href="/rezervor-central" style={navLinkStyle} onClick={closeMenu}>
+                    Rezervor central
+                  </Link>
+                  <a
+                    href="http://135.181.45.175/"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={navLinkStyle}
+                    onClick={closeMenu}
+                  >
+                    Tracking
+                  </a>
+                </>
+              )}
+              <div style={{ borderTop: '1px solid #eee', marginTop: '0.4rem', paddingTop: '0.5rem' }}>
+                <button
+                  onClick={() => {
+                    closeMenu();
+                    void handleLogout();
+                  }}
+                  style={{
+                    cursor: 'pointer',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '0.75rem 1rem',
+                    border: 'none',
+                    borderRadius: '6px',
+                    background: 'transparent',
+                    fontSize: '1.05rem',
+                  }}
+                >
+                  Logout
+                </button>
+              </div>
+            </nav>
+          </>
+        )}
       </header>
       <main style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
         {children}
