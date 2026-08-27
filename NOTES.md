@@ -350,15 +350,96 @@ fără parcele — cerere: să se vadă exact pe ce parcelă e fiecare utilaj.
 - Read-only — fără instrumentele de desenare/editare din `FarmMap.tsx` (acelea rămân doar
   pe `/ferme/[fermaId]`).
 
-### Flotă auto (mașini de pasageri) — caz de utilizare separat
-Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament
-la providerul GPS existent.
+### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
+Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
+monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
+Traccar-ul existent (http://135.181.45.175/).
+
+**Hardware**: 25x Teltonika FMC130 + 25x SIM-uri de date, deja achiziționate.
 - Opțiuni comparate: FMC920 (cel mai simplu/ieftin, suficient pentru tracking + foi de
   parcurs), FMC130 (intrări/ieșiri configurabile în plus, input negativ, input impuls),
   FMC125 (cel mai avansat, RS232/RS485 — nefolosit aici, gândit pentru senzori externi).
 - **Decizie finală: FMC130** — motiv: preț bun (50 EUR/buc în România), consultanță și
   garanție locală incluse. Se configurează identic în Traccar (IMEI + device nou),
   funcționează la fel pentru rapoarte de traseu.
+
+**Decizii de flux** (stabilite cu Radu înainte de implementare):
+- Curse detectate **automat** din segmente ignition on/off (ca orele de funcționare
+  de la utilaje) — șoferul NU pornește/oprește manual nimic.
+- Km oficiali = calculați automat din traseul GPS (haversine cumulat), nu introduși
+  manual de șofer.
+- Fiecare mașină are un **șofer implicit** (`masini.sofer_implicit_id`), editabil din
+  `/masini` — cursele noi se atribuie automat lui la detectare.
+- Flotă **centrală**, nu legată de o fermă anume (spre deosebire de utilaje).
+
+**Schema** (`supabase/schema-masini.sql`, aplicată direct prin Supabase MCP):
+tabele noi `masini`, `masini_pozitii`, `curse`, `geofences`, `alerte` + RLS
+(admin_central vede/gestionează tot; rolul nou `sofer` vede/completează doar
+cursele proprii, cu politică UPDATE care blochează modificarea după ce admin
+setează `status = 'validata'`). Rolul `sofer` nu are constrângere CHECK în
+bază (coloana `utilizatori.rol` e text liber, ca și până acum) — validat doar
+în `admin-create-user` și în formularul din `/utilizatori`.
+
+**Edge Function `sync-traccar-masini`** (cron, 5 min, `verify_jwt: false` —
+la fel ca `sync-traccar-fuel`): într-o singură rulare — (1) sincronizează tot
+istoricul de poziții noi din Traccar (aceeași strategie „from ultima citire
+salvată" ca la utilaje, nu doar poziția curentă), (2) detectează curse din
+segmentele ignition on/off și le ține „deschise" (`data_ora_stop = NULL`,
+km actualizat progresiv) cât timp contactul rămâne pornit, (3) detectează
+alerte de viteză (`masini.viteza_limita_kmh`, doar pe front crescător — nu
+spamează la condus continuu peste limită) și de geofencing (ray-casting,
+aceeași funcție ca `get-utilaj-istoric-parcele`, pe tabelul nou `geofences`).
+Curse sub 60s ȘI sub 50m sunt considerate zgomot de contact și șterse automat.
+
+**Alte Edge Functions noi**: `get-masini-positions` (hartă live `/masini`,
+analog `get-utilaje-positions` dar cu viteză + cursă activă în loc de
+combustibil), `get-foaie-parcurs` (date pentru raportul lunar per mașină,
+`/foi-parcurs`). `admin-create-user` actualizată să accepte rolul `sofer`.
+
+**Cron**: `sync-traccar-masini-5min` (`supabase/schema-cron-sync-traccar-masini.sql`),
+aceeași formulă `net.http_post` + `app.settings.anon_key` ca la utilaje.
+
+**Pagini noi**:
+- `/masini` (admin_central) — listă + hartă live (`components/MasiniMapView.tsx`,
+  analog `UtilajeMapView.tsx`) + formular adăugare mașină (nume, nr. înmatriculare,
+  IMEI, șofer implicit, limită viteză) + editare inline per mașină.
+- `/curse` — pagină unică, două randări după rol (fără `AdminCentralGuard` în
+  layout, control de acces în `CurseScreen.tsx` + RLS): șofer vede carduri
+  mobil-first cu formular de scop; admin vede tabel per mașină cu buton
+  „Validează".
+- `/foi-parcurs` (admin_central) — alege mașină + lună, generează tabel
+  printabil (CSS `@media print`, fără dependință nouă de PDF — „Printează /
+  Salvează PDF" e `window.print()`). **Nu e un formular fiscal oficial** —
+  obligativitatea unui format anume de foaie de parcurs pentru deducere TVA a
+  fost relaxată de ANAF; layout-ul acoperă câmpurile standard (dată, interval
+  orar, șofer, scop, km, total), de confirmat cu contabilul dacă e nevoie de
+  altceva.
+- `/geofences` (admin_central) — desenare zone pe hartă (poligon prin click
+  sau cerc, reutilizează `lib/geo.ts` — `generateCirclePolygon`,
+  `distantaMetri`), tip alertă (intrare/ieșire/ambele), listă + activare/
+  ștergere. Componentă nouă `components/GeofenceMapEditor.tsx`.
+- `/alerte` (admin_central) — listă alerte (viteză + geofencing), filtru
+  „doar necitite", marcare individuală/în masă ca citite.
+
+**Navigare/roluri**: `lib/useUserRole.ts` extins cu `'sofer'`.
+`lib/postLoginRedirect.ts`: sofer → `/curse` direct la login.
+`components/LayoutShell.tsx`: meniu complet diferit pentru sofer (doar
+„Cursele mele" + logout) față de admin (tot meniul + linkurile noi).
+
+**Pași manuali rămași** (montaj fizic, nu se pot face din Claude):
+1. Montare fizică FMC130 + SIM în fiecare mașină (25 buc).
+2. Pentru fiecare: notează IMEI-ul, adaugă-l în Traccar (Devices → Add,
+   Identifier = IMEI) — la fel ca la utilaje.
+3. Adaugă mașina în aplicație din `/masini` (nume, nr. înmatriculare, IMEI,
+   șofer implicit, limită viteză) — apare automat pe hartă și începe
+   detectarea curselor la următorul ciclu de cron (max 5 min).
+4. Creează un cont cu rol Șofer pentru fiecare șofer, din `/utilizatori`.
+5. (Opțional) Desenează zonele de geofencing relevante din `/geofences`
+   (ex. sediu, limite zonă de operare) — fără nicio zonă definită, doar
+   alertele de viteză funcționează.
+6. Secretele Traccar (`TRACCAR_URL`, `TRACCAR_USER`, `TRACCAR_PASSWORD`) sunt
+   deja setate în Supabase (reutilizate de la modulul utilaje) — nimic nou
+   de configurat acolo.
 
 ## 6. Structură fișiere / cod — reper rapid
 
@@ -381,6 +462,8 @@ la providerul GPS existent.
 - `supabase/functions/get-utilaj-istoric-parcele/` — istoric ore funcționare + ore per
   parcelă, pe zile, per utilaj (folosit din `/utilaje`, admin_central only).
 - `supabase/schema-*.sql` — copii sursă-de-adevăr ale migrărilor SQL aplicate în Supabase.
+- `supabase/functions/sync-traccar-masini/`, `get-masini-positions/`, `get-foaie-parcurs/` — modulul flotă auto (vezi secțiunea 5, „Flotă auto").
+- `components/MasiniMapView.tsx`, `components/GeofenceMapEditor.tsx`, `app/masini/`, `app/curse/`, `app/foi-parcurs/`, `app/geofences/`, `app/alerte/` — paginile modulului flotă auto.
 
 ## 7. Ce rămâne pentru faza 2 (neschimbat față de spec-ul inițial din CLAUDE.md)
 

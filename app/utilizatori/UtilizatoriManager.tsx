@@ -9,7 +9,7 @@ type Utilizator = {
   id: string;
   nume: string;
   email: string | null;
-  rol: 'admin_central' | 'admin_ferma';
+  rol: 'admin_central' | 'admin_ferma' | 'sofer';
   ferma_id: string | null;
   ferme: { nume: string } | null;
 };
@@ -18,7 +18,7 @@ const initialForm = {
   nume: '',
   email: '',
   parola: '',
-  rol: 'admin_ferma' as 'admin_central' | 'admin_ferma',
+  rol: 'admin_ferma' as 'admin_central' | 'admin_ferma' | 'sofer',
   ferma_id: '',
 };
 
@@ -172,6 +172,7 @@ export default function UtilizatoriManager() {
               >
                 <option value="admin_ferma">Admin de fermă</option>
                 <option value="admin_central">Admin general</option>
+                <option value="sofer">Șofer (mobil, foi de parcurs)</option>
               </select>
             </label>
 
@@ -221,7 +222,11 @@ export default function UtilizatoriManager() {
                 <tr key={u.id}>
                   <td style={{ padding: '0.5rem', borderBottom: '1px solid #f0f0f0' }}>{u.email}</td>
                   <td style={{ padding: '0.5rem', borderBottom: '1px solid #f0f0f0' }}>
-                    {u.rol === 'admin_central' ? 'Admin general' : 'Admin de fermă'}
+                    {u.rol === 'admin_central'
+                      ? 'Admin general'
+                      : u.rol === 'sofer'
+                        ? 'Șofer'
+                        : 'Admin de fermă'}
                   </td>
                   <td style={{ padding: '0.5rem', borderBottom: '1px solid #f0f0f0' }}>
                     {u.ferme?.nume ?? '—'}

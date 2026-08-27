@@ -121,41 +121,64 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 zIndex: 20,
               }}
             >
-              <Link href="/" style={navLinkStyle} onClick={closeMenu}>
-                Acasă
-              </Link>
-              <Link href="/dashboard" style={navLinkStyle} onClick={closeMenu}>
-                Dashboard
-              </Link>
-              <Link href="/ferme" style={navLinkStyle} onClick={closeMenu}>
-                Ferme
-              </Link>
-              <Link href="/substante" style={navLinkStyle} onClick={closeMenu}>
-                Substanțe
-              </Link>
-              {role === 'admin_central' && (
+              {role === 'sofer' ? (
+                <Link href="/curse" style={navLinkStyle} onClick={closeMenu}>
+                  Cursele mele
+                </Link>
+              ) : (
                 <>
-                  <Link href="/utilizatori" style={navLinkStyle} onClick={closeMenu}>
-                    Utilizatori
+                  <Link href="/" style={navLinkStyle} onClick={closeMenu}>
+                    Acasă
                   </Link>
-                  <Link href="/utilaje" style={navLinkStyle} onClick={closeMenu}>
-                    Utilaje
+                  <Link href="/dashboard" style={navLinkStyle} onClick={closeMenu}>
+                    Dashboard
                   </Link>
-                  <Link href="/combustibil" style={navLinkStyle} onClick={closeMenu}>
-                    Combustibil
+                  <Link href="/ferme" style={navLinkStyle} onClick={closeMenu}>
+                    Ferme
                   </Link>
-                  <Link href="/rezervor-central" style={navLinkStyle} onClick={closeMenu}>
-                    Rezervor central
+                  <Link href="/substante" style={navLinkStyle} onClick={closeMenu}>
+                    Substanțe
                   </Link>
-                  <a
-                    href="http://135.181.45.175/"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={navLinkStyle}
-                    onClick={closeMenu}
-                  >
-                    Tracking
-                  </a>
+                  {role === 'admin_central' && (
+                    <>
+                      <Link href="/utilizatori" style={navLinkStyle} onClick={closeMenu}>
+                        Utilizatori
+                      </Link>
+                      <Link href="/utilaje" style={navLinkStyle} onClick={closeMenu}>
+                        Utilaje
+                      </Link>
+                      <Link href="/combustibil" style={navLinkStyle} onClick={closeMenu}>
+                        Combustibil
+                      </Link>
+                      <Link href="/rezervor-central" style={navLinkStyle} onClick={closeMenu}>
+                        Rezervor central
+                      </Link>
+                      <Link href="/masini" style={navLinkStyle} onClick={closeMenu}>
+                        Mașini
+                      </Link>
+                      <Link href="/curse" style={navLinkStyle} onClick={closeMenu}>
+                        Curse
+                      </Link>
+                      <Link href="/foi-parcurs" style={navLinkStyle} onClick={closeMenu}>
+                        Foi de parcurs
+                      </Link>
+                      <Link href="/geofences" style={navLinkStyle} onClick={closeMenu}>
+                        Zone
+                      </Link>
+                      <Link href="/alerte" style={navLinkStyle} onClick={closeMenu}>
+                        Alerte
+                      </Link>
+                      <a
+                        href="http://135.181.45.175/"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={navLinkStyle}
+                        onClick={closeMenu}
+                      >
+                        Tracking
+                      </a>
+                    </>
+                  )}
                 </>
               )}
               <div style={{ borderTop: '1px solid #eee', marginTop: '0.4rem', paddingTop: '0.5rem' }}>

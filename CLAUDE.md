@@ -71,3 +71,51 @@ Sistemul scade automat din stocul de substanțe la înregistrarea unei operațiu
 - `recoltari` (id, parcela_id, data, tip_gazon, suprafata_mp)
 - `livrari` (id, ferma_id, data, client, cantitate_mp, paleti_vanduti, paleti_returnati)
 - `utilizatori` (id, nume, rol, ferma_id — null dacă e admin central)
+
+## Modul Flotă auto (mașini de pasageri) — foi de parcurs
+
+Adăugat 2026-08-27. Complet separat conceptual de modulul utilaje/combustibil
+(fermă, tractor, DUT-E) — flotă centrală de mașini de pasageri, fără senzor
+de combustibil, scop unic: foi de parcurs lunare + geofencing/alerte viteză.
+
+### Hardware
+- **Tracker GPS**: Teltonika FMC130 (25 bucăți achiziționate + 25 SIM-uri de
+  date). Fără senzor de combustibil — doar poziție GPS + stare contact
+  (ignition) + viteză.
+- Configurare identică cu utilajele: dispozitiv nou în **același Traccar**
+  (http://135.181.45.175/), Identifier = IMEI.
+
+### Roluri
+- **Șofer** (`utilizatori.rol = 'sofer'`) — vede/completează doar cursele
+  proprii (`curse.sofer_id = auth.uid()`), din mobil. Nu are `ferma_id`.
+- **Admin general** — gestionează mașinile, validează cursele, generează
+  foile de parcurs, definește zonele de geofencing.
+
+### Flux
+1. Șoferul urcă în mașină → contactul pornește → `sync-traccar-masini`
+   (cron, 5 min) detectează automat o cursă nouă (segment ignition on/off,
+   la fel ca orele de funcționare de la utilaje).
+2. Km parcurși = calculați automat din traseul GPS (haversine cumulat), NU
+   introduși manual.
+3. Șoferul completează doar **scopul cursei** din `/curse` (mobil) — nu
+   pornește/oprește nimic manual.
+4. Admin validează cursele completate din `/curse` (desktop) → generează
+   foaia de parcurs lunară din `/foi-parcurs` (tabel printabil / PDF prin
+   `window.print()`).
+5. Geofencing (`/geofences`) + alerte de viteză (`viteza_limita_kmh` per
+   mașină) — detectate în același job cron, afișate în `/alerte`.
+
+### Model de date
+- `masini` (id, nume, numar_inmatriculare, marca_model, traccar_device_id,
+  sofer_implicit_id → utilizatori, viteza_limita_kmh, activ)
+- `masini_pozitii` (id, masina_id, data_ora, latitudine, longitudine,
+  viteza_kmh, contact, sursa)
+- `curse` (id, masina_id, sofer_id, data_ora_start, data_ora_stop, km, scop,
+  status: detectata → completata → validata, note)
+- `geofences` (id, nume, poligon GeoJSON — același format ca
+  `parcele.poligon_harta`, tip_alerta: intrare/iesire/ambele, activ)
+- `alerte` (id, masina_id, tip: viteza/intrare_zona/iesire_zona, geofence_id,
+  viteza_masurata, viteza_limita, data_ora, latitudine, longitudine, vazuta)
+
+Detalii complete de implementare, decizii și pași manuali rămași: vezi
+`NOTES.md`, secțiunea „Flotă auto".

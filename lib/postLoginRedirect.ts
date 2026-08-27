@@ -1,6 +1,7 @@
 import { supabase } from './supabaseClient';
 
 // Calculează unde trebuie dus utilizatorul după autentificare:
+// - sofer -> direct pe /curse (lista lui de curse, mobil-first)
 // - admin_ferma cu ferma_id setat -> direct pe tarlaua fermei lui
 // - admin_central (sau admin_ferma fără fermă atribuită) -> /dashboard
 export async function resolvePostLoginPath(): Promise<string> {
@@ -15,6 +16,10 @@ export async function resolvePostLoginPath(): Promise<string> {
     .select('rol, ferma_id')
     .eq('id', user.id)
     .maybeSingle();
+
+  if (data?.rol === 'sofer') {
+    return '/curse';
+  }
 
   if (data?.rol === 'admin_ferma' && data.ferma_id) {
     return `/ferme/${data.ferma_id}`;

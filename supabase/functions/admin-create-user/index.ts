@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: 'Parola trebuie să aibă minim 6 caractere.' }, 400);
   }
 
-  if (rol !== 'admin_central' && rol !== 'admin_ferma') {
+  if (rol !== 'admin_central' && rol !== 'admin_ferma' && rol !== 'sofer') {
     return jsonResponse({ error: 'Rol invalid.' }, 400);
   }
 
