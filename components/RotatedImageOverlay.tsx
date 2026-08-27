@@ -15,6 +15,7 @@ export default function RotatedImageOverlay({
   bottomLeft,
   opacity,
   visible,
+  onNaturalSize,
 }: {
   imageUrl: string;
   topLeft: [number, number];
@@ -22,6 +23,7 @@ export default function RotatedImageOverlay({
   bottomLeft: [number, number];
   opacity: number;
   visible: boolean;
+  onNaturalSize?: (width: number, height: number) => void;
 }) {
   const map = useMap();
   const imgElRef = useRef<HTMLImageElement | null>(null);
@@ -59,6 +61,7 @@ export default function RotatedImageOverlay({
     function onLoad() {
       naturalSizeRef.current = { w: img.naturalWidth, h: img.naturalHeight };
       reset();
+      onNaturalSize?.(img.naturalWidth, img.naturalHeight);
     }
 
     img.addEventListener('load', onLoad);

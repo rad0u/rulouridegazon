@@ -34,6 +34,15 @@ export function destinationPoint(
   return [(φ2 * 180) / Math.PI, (((λ2 * 180) / Math.PI + 540) % 360) - 180];
 }
 
+// Nivelul de zoom (proiecție Web Mercator) la care rezoluția hărții atinge
+// `metersPerPixel` la latitudinea `latDeg`. Folosit ca să limităm zoom-ul
+// maxim la rezoluția reală a unei imagini suprapuse — dincolo de acel nivel,
+// mărirea nu mai arată detalii noi, doar pixeli măriți.
+export function zoomForResolution(metersPerPixel: number, latDeg: number): number {
+  const metersPerPixelAtZoom0 = 156543.03392 * Math.cos((latDeg * Math.PI) / 180);
+  return Math.log2(metersPerPixelAtZoom0 / metersPerPixel);
+}
+
 // Generează un poligon regulat cu `puncte` colțuri care aproximează un cerc —
 // pentru parcele perfect rotunde (ex. sub pivot de irigații). Rezultatul e o
 // listă de [lat, lon], nedeschisă (fără repetarea primului punct la final —

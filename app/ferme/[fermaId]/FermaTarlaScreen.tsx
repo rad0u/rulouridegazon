@@ -172,6 +172,8 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
           onParcelaUpdated={(updated) =>
             setParcele((prev) => prev.map((p) => (p.id === updated.id ? updated : p)))
           }
+          onParcelaAdaugata={(noua) => setParcele((prev) => [...prev, noua].sort((a, b) => a.nume.localeCompare(b.nume)))}
+          onParcelaStearsa={(id) => setParcele((prev) => prev.filter((p) => p.id !== id))}
         />
       </div>
     </main>

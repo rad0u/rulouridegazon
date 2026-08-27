@@ -18,6 +18,7 @@ interface ParcelaPanelProps {
   showRedrawButton: boolean;
   editable: boolean;
   onParcelaUpdated?: (parcela: Parcela) => void;
+  onParcelaDeleted?: (parcelaId: string) => void;
 }
 
 type SubstantaLinie = { substanta_id: string; cantitate: string };
@@ -32,6 +33,7 @@ export default function ParcelaPanel({
   showRedrawButton,
   editable,
   onParcelaUpdated,
+  onParcelaDeleted,
 }: ParcelaPanelProps) {
   const [istoric, setIstoric] = useState<Operatiune[]>([]);
   const [loadingIstoric, setLoadingIstoric] = useState(true);
@@ -46,6 +48,10 @@ export default function ParcelaPanel({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [editingDescriere, setEditingDescriere] = useState(false);
   const [editNume, setEditNume] = useState(parcela.nume);
@@ -63,6 +69,8 @@ export default function ParcelaPanel({
     setEditTipGazon(parcela.tip_gazon ?? '');
     setEditSuprafata(parcela.suprafata_mp?.toString() ?? '');
     setErrorDescriere(null);
+    setConfirmingDelete(false);
+    setDeleteError(null);
   }, [parcela.id]);
 
   async function handleSaveDescriere() {
@@ -101,6 +109,26 @@ export default function ParcelaPanel({
     onParcelaUpdated?.({ ...parcela, ...payload });
     setEditingDescriere(false);
     setSavingDescriere(false);
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    setDeleteError(null);
+
+    const { error: deleteErr } = await supabase.from('parcele').delete().eq('id', parcela.id);
+
+    setDeleting(false);
+
+    if (deleteErr) {
+      if (deleteErr.code === '23503') {
+        setDeleteError('Nu poți șterge — parcela are operațiuni sau recoltări înregistrate în istoric.');
+      } else {
+        setDeleteError(deleteErr.message);
+      }
+      return;
+    }
+
+    onParcelaDeleted?.(parcela.id);
   }
 
   async function loadIstoric() {
@@ -326,9 +354,28 @@ export default function ParcelaPanel({
       )}
 
       {showRedrawButton && onRedraw && (
-        <button onClick={onRedraw} style={{ marginBottom: '1rem' }}>
+        <button onClick={onRedraw} style={{ marginBottom: '1rem', marginRight: '0.5rem' }}>
           Redesenează conturul
         </button>
+      )}
+
+      {editable && (
+        <div style={{ marginBottom: '1rem', display: 'inline-block' }}>
+          {!confirmingDelete ? (
+            <button onClick={() => setConfirmingDelete(true)}>Șterge parcela</button>
+          ) : (
+            <span style={{ display: 'inline-flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              Sigur ștergi „{parcela.nume}"?
+              <button onClick={() => void handleDelete()} disabled={deleting}>
+                {deleting ? 'Șterg...' : 'Da, șterge'}
+              </button>
+              <button onClick={() => setConfirmingDelete(false)} disabled={deleting}>
+                Anulează
+              </button>
+            </span>
+          )}
+          {deleteError && <p style={{ color: '#b00020', margin: '0.4rem 0 0' }}>{deleteError}</p>}
+        </div>
       )}
 
       <hr style={{ margin: '1rem 0' }} />

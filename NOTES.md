@@ -246,6 +246,24 @@ punct-cu-punct pe un poligon neregulat ar fi imprecisă pentru o formă perfect 
   s-a aflat (point-in-polygon) și durata — pentru pre-completare automată a parcelei +
   orelor de lucru la înregistrarea unei operațiuni.
 
+### 5e. Gestiune liberă a parcelelor + zoom limitat la rezoluția imaginii (2026-08-22)
+- `FarmMap.tsx`: buton „➕ Adaugă parcelă nouă" (admin central) — formular nume (obligatoriu)
+  + tip gazon/suprafață (opționale), scrie direct în `parcele` (INSERT, RLS deja permite
+  admin_central). Numărul și denumirile parcelelor nu mai sunt fixate din seed/SQL — se
+  definesc liber din interfață.
+- `ParcelaPanel.tsx`: buton „Șterge parcela" (admin central) cu confirmare inline. Nou:
+  politică RLS DELETE pentru admin_central pe `parcele` (nu exista înainte). FK-urile spre
+  `operatiuni`/`recoltari` sunt `NO ACTION` — ștergerea unei parcele cu istoric eșuează
+  automat la nivel de bază de date; interfața prinde eroarea (cod Postgres `23503`) și
+  arată un mesaj clar în loc de eroarea brută SQL.
+- Redenumirea rămâne prin „Editează descrierea" (funcționalitate existentă, neschimbată).
+- **Zoom maxim = rezoluția reală a imaginii suprapuse**: `lib/geo.ts` →
+  `zoomForResolution()`. La încărcarea imaginii calibrate, se calculează metri/pixel din
+  distanța reală dintre colțurile calibrate (`distantaMetri`) împărțită la dimensiunea
+  naturală a fișierului, apoi zoom-ul Web Mercator corespunzător (clamped 14-22). Aplicat
+  cu `map.setMaxZoom()` — peste acel nivel, nici imaginea suprapusă, nici satelitul de bază
+  nu mai arată detalii reale, doar pixeli măriți, deci zoom-ul e blocat acolo.
+
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament
 la providerul GPS existent.

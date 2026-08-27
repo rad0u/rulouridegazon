@@ -1,14 +1,18 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
 import { MapContainer, Polygon, Polyline, Circle, CircleMarker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import { supabase } from '../lib/supabaseClient';
 import { Parcela, PARCELA_COLORS, polygonLatLngs } from '../lib/parcelaTypes';
-import { distantaMetri, generateCirclePolygon } from '../lib/geo';
+import { distantaMetri, generateCirclePolygon, zoomForResolution } from '../lib/geo';
 import ParcelaPanel from './ParcelaPanel';
 import RotatedImageOverlay from './RotatedImageOverlay';
+
+// Zoom maxim implicit cât timp nu e nicio imagine suprapusă calibrată (sau
+// încă nu s-a calculat rezoluția ei).
+const MAX_ZOOM_IMPLICIT = 20;
 
 interface FarmMapProps {
   fermaId: string;
@@ -30,6 +34,8 @@ interface FarmMapProps {
   ) => void;
   onPolygonSaved: (parcelaId: string, poligon: Parcela['poligon_harta']) => void;
   onParcelaUpdated: (parcela: Parcela) => void;
+  onParcelaAdaugata: (parcela: Parcela) => void;
+  onParcelaStearsa: (parcelaId: string) => void;
 }
 
 // Centrul aproximativ al României — folosit doar cât timp ferma n-are încă
@@ -72,6 +78,8 @@ export default function FarmMap({
   onImagineSaved,
   onPolygonSaved,
   onParcelaUpdated,
+  onParcelaAdaugata,
+  onParcelaStearsa,
 }: FarmMapProps) {
   const [strat, setStrat] = useState<'strada' | 'satelit'>('satelit');
   const [selectedParcelaId, setSelectedParcelaId] = useState<string | null>(null);
@@ -95,6 +103,15 @@ export default function FarmMap({
   const [calibrareError, setCalibrareError] = useState<string | null>(null);
   const [overlayOpacity, setOverlayOpacity] = useState(0.85);
   const [overlayVisible, setOverlayVisible] = useState(true);
+  const [imgMaxZoom, setImgMaxZoom] = useState<number | null>(null);
+
+  // Adăugare parcelă nouă (nume + număr definite liber de admin central).
+  const [adaugaParcelaOpen, setAdaugaParcelaOpen] = useState(false);
+  const [nouaParcelaNume, setNouaParcelaNume] = useState('');
+  const [nouaParcelaTipGazon, setNouaParcelaTipGazon] = useState('');
+  const [nouaParcelaSuprafata, setNouaParcelaSuprafata] = useState('');
+  const [adaugaParcelaSaving, setAdaugaParcelaSaving] = useState(false);
+  const [adaugaParcelaError, setAdaugaParcelaError] = useState<string | null>(null);
 
   const mapRef = useRef<LeafletMap | null>(null);
 
@@ -103,6 +120,28 @@ export default function FarmMap({
   const zoom = centruZoom ?? (centruLat !== null ? 17 : 7);
 
   const areOverlayCalibrat = !!(imagineUrl && imagineColtSS && imagineColtDS && imagineColtSJ);
+
+  // Limitează zoom-ul maxim la rezoluția reală a imaginii suprapuse — dincolo
+  // de acel nivel, harta doar mărește pixelii, fără detalii noi.
+  function handleOverlayNaturalSize(width: number, height: number) {
+    if (!imagineColtSS || !imagineColtDS || !imagineColtSJ) return;
+
+    const latimeMetri = distantaMetri(imagineColtSS, imagineColtDS);
+    const inaltimeMetri = distantaMetri(imagineColtSS, imagineColtSJ);
+    const metriPerPixel = (latimeMetri / width + inaltimeMetri / height) / 2;
+
+    if (!Number.isFinite(metriPerPixel) || metriPerPixel <= 0) return;
+
+    const zoomCalculat = zoomForResolution(metriPerPixel, imagineColtSS[0]);
+    const zoomLimitat = Math.min(22, Math.max(14, Math.floor(zoomCalculat)));
+    setImgMaxZoom(zoomLimitat);
+  }
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    map.setMaxZoom(areOverlayCalibrat && imgMaxZoom !== null ? imgMaxZoom : MAX_ZOOM_IMPLICIT);
+  }, [imgMaxZoom, areOverlayCalibrat]);
 
   function startDrawing(parcelaId: string) {
     setCalibrating(false);
@@ -324,6 +363,52 @@ export default function FarmMap({
     }
   }
 
+  async function adaugaParcela() {
+    if (!nouaParcelaNume.trim()) {
+      setAdaugaParcelaError('Numele parcelei e obligatoriu.');
+      return;
+    }
+
+    const suprafataNum = nouaParcelaSuprafata === '' ? null : Number(nouaParcelaSuprafata);
+    if (nouaParcelaSuprafata !== '' && (Number.isNaN(suprafataNum) || (suprafataNum ?? 0) < 0)) {
+      setAdaugaParcelaError('Suprafața trebuie să fie un număr pozitiv.');
+      return;
+    }
+
+    setAdaugaParcelaSaving(true);
+    setAdaugaParcelaError(null);
+
+    const { data, error } = await supabase
+      .from('parcele')
+      .insert({
+        ferma_id: fermaId,
+        nume: nouaParcelaNume.trim(),
+        tip_gazon: nouaParcelaTipGazon || null,
+        suprafata_mp: suprafataNum,
+        poligon_harta: null,
+      })
+      .select('id,ferma_id,nume,tip_gazon,stadiu,suprafata_mp,poligon_harta')
+      .single();
+
+    setAdaugaParcelaSaving(false);
+
+    if (error || !data) {
+      setAdaugaParcelaError(error?.message ?? 'Eroare la adăugarea parcelei.');
+      return;
+    }
+
+    onParcelaAdaugata(data as Parcela);
+    setNouaParcelaNume('');
+    setNouaParcelaTipGazon('');
+    setNouaParcelaSuprafata('');
+    setAdaugaParcelaOpen(false);
+  }
+
+  function handleParcelaStearsa(parcelaId: string) {
+    onParcelaStearsa(parcelaId);
+    setSelectedParcelaId(null);
+  }
+
   const selectedParcela = parcele.find((p) => p.id === selectedParcelaId) ?? null;
   const parcelaInDrawing = parcele.find((p) => p.id === drawingParcelaId) ?? null;
   const parceleFaraContur = parcele.filter((p) => polygonLatLngs(p).length < 3);
@@ -430,6 +515,7 @@ export default function FarmMap({
               bottomLeft={imagineColtSJ as [number, number]}
               opacity={overlayOpacity}
               visible={overlayVisible}
+              onNaturalSize={handleOverlayNaturalSize}
             />
           )}
 
@@ -614,6 +700,69 @@ export default function FarmMap({
         </div>
       )}
 
+      {editable && !calibrating && !drawingParcelaId && (
+        <div style={{ marginTop: '1rem' }}>
+          {!adaugaParcelaOpen ? (
+            <button onClick={() => setAdaugaParcelaOpen(true)} style={{ padding: '0.5rem 0.85rem' }}>
+              ➕ Adaugă parcelă nouă
+            </button>
+          ) : (
+            <div style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
+              <p style={{ fontWeight: 'bold', marginTop: 0 }}>Parcelă nouă</p>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.85rem' }}>
+                  Nume
+                  <input
+                    type="text"
+                    value={nouaParcelaNume}
+                    onChange={(e) => setNouaParcelaNume(e.target.value)}
+                    placeholder="ex. Parcelă 7"
+                    style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '160px' }}
+                  />
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.85rem' }}>
+                  Tip gazon (opțional)
+                  <select
+                    value={nouaParcelaTipGazon}
+                    onChange={(e) => setNouaParcelaTipGazon(e.target.value)}
+                    style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc' }}
+                  >
+                    <option value="">—</option>
+                    <option value="rustic">rustic</option>
+                    <option value="sport">sport</option>
+                    <option value="în pregătire">în pregătire</option>
+                  </select>
+                </label>
+                <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.85rem' }}>
+                  Suprafață mp (opțional)
+                  <input
+                    type="number"
+                    min="0"
+                    value={nouaParcelaSuprafata}
+                    onChange={(e) => setNouaParcelaSuprafata(e.target.value)}
+                    style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '140px' }}
+                  />
+                </label>
+              </div>
+              {adaugaParcelaError && <p style={{ color: '#b00020' }}>{adaugaParcelaError}</p>}
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem' }}>
+                <button onClick={() => void adaugaParcela()} disabled={adaugaParcelaSaving}>
+                  {adaugaParcelaSaving ? 'Salvez...' : 'Salvează'}
+                </button>
+                <button
+                  onClick={() => {
+                    setAdaugaParcelaOpen(false);
+                    setAdaugaParcelaError(null);
+                  }}
+                >
+                  Renunță
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {editable && !calibrating && (
         <div style={{ marginTop: '1rem' }}>
           {!drawingParcelaId ? (
@@ -721,6 +870,7 @@ export default function FarmMap({
             onRedraw={() => startDrawing(selectedParcela.id)}
             editable={editable}
             onParcelaUpdated={onParcelaUpdated}
+            onParcelaDeleted={handleParcelaStearsa}
           />
         </div>
       ) : (
