@@ -178,11 +178,56 @@ reale, nu coordonate relative la o imagine încărcată manual.
   al hărții per fermă. Admin central navighează o singură dată pe satelit până la fermă
   și apasă „📍 Setează ca centru implicit"; fără el, harta se deschide pe centrul
   aproximativ al României la zoom mic.
-- Upload-ul de imagine (`ferme.harta_url`) a fost eliminat din interfață — coloana rămâne
-  în schema DB, neutilizată, fără risc.
 - `lib/parcelaTypes.ts`: `polygonLatLngs()` filtrează automat orice poligon cu coordonate
   în afara bounding-box-ului României — protecție împotriva poligoanelor vechi (format
   pixeli 0..1) afișate greșit ca GPS.
+- Săbăreni (F5, ferma pilot) are acum 9 parcele (A1-A9) în `parcele`, gata de desenat pe
+  satelit — A1-A3 aveau deja tip_gazon/suprafață din datele vechi, A4-A9 sunt goale (de
+  completat din „Editează descrierea" după desenare). Pilotul FMC125 e deja pe această
+  fermă (`utilaje.ferma_id` corect din instalarea inițială).
+
+### 5c. Imagine suprapusă calibrată (2026-08-22)
+Motiv: satelitul de bază (Esri) și Mapbox Satellite au fost verificate manual de Radu pe
+zona Săbăreni — ambele cu imagine veche. Google Earth are imagine mult mai recentă
+(sub 1 an) pe multe zone, dar nu poate fi folosit ca strat de tile-uri (necesită cont
+Google Cloud cu card + API separat, vezi discuția de mai sus) — soluție aleasă: upload
+manual al unui screenshot din Google Earth, suprapus și ancorat pe harta reală.
+
+- `components/RotatedImageOverlay.tsx` (nou): poziționează o imagine peste harta Leaflet
+  printr-o transformare afină calculată din 3 puncte GPS (colț stânga-sus, dreapta-sus,
+  stânga-jos) — nu e un plugin extern, e calculat direct (matrice CSS `matrix(a,b,c,d,e,f)`
+  aplicată pe element, recalculată la fiecare pan/zoom via `map.latLngToLayerPoint`).
+- `ferme` are coloane noi: `imagine_colt_ss_lat/lon`, `imagine_colt_ds_lat/lon`,
+  `imagine_colt_sj_lat/lon`. URL-ul imaginii refolosește `ferme.harta_url` (coloana veche,
+  reactivată cu sens nou).
+- Flux în `FarmMap.tsx` (admin central): „Adaugă imagine suprapusă" → upload în bucket-ul
+  existent `harti-ferme` → mod calibrare (3 click-uri pe hartă, unul per colț, cu imaginea
+  afișată alături ca referință vizuală) → „Salvează calibrarea" scrie URL + 3 puncte
+  împreună într-un singur update (evită stări intermediare cu imagine nouă + colțuri
+  vechi). „Recalibrează" și „Șterge imaginea" disponibile oricând.
+- Control pentru toți utilizatorii (nu doar admin central) odată calibrată: transparență
+  (slider) + arată/ascunde — util să compari overlay-ul cu satelitul de bază. Nu se
+  persistă (revine la valorile implicite la reîncărcare — nu am considerat necesar mai
+  mult pentru MVP).
+- Poligoanele parcelelor rămân desenate independent, în coordonate GPS reale pe harta de
+  bază — imaginea suprapusă e doar referință vizuală, nu afectează stocarea parcelelor.
+- **Decizie**: nu s-a mai integrat tokenul Mapbox (Radu a verificat manual — imagine la
+  fel de veche ca Esri pe zona fermelor) — rămas neutilizat, poate fi reconsiderat dacă
+  Mapbox actualizează imagine pe altă zonă în viitor.
+
+### 5d. Parcele circulare (pivot de irigații) — mod „Cerc" la desenare (2026-08-22)
+Parcela 7 de la Săbăreni e perfect rotundă, cu un pivot de irigații în centru. Desenarea
+punct-cu-punct pe un poligon neregulat ar fi imprecisă pentru o formă perfect circulară.
+
+- `lib/geo.ts` (nou): `distantaMetri()` (haversine), `destinationPoint()` (punct la
+  distanță+azimut dat), `generateCirclePolygon()` (generează un poligon regulat cu 64 de
+  colțuri care aproximează un cerc).
+- `FarmMap.tsx`: la desenarea unei parcele, toggle „Poligon" / „Cerc (pivot)". În mod
+  Cerc: primul click = centru (locul pivotului), al doilea = un punct pe margine (stabilește
+  raza, afișată live în metri; click-urile ulterioare ajustează raza). La salvare, cercul e
+  convertit într-un poligon obișnuit cu 64 de puncte și scris în `poligon_harta` — **exact
+  același format ca poligoanele desenate manual**, deci nimic altceva din aplicație (afișare,
+  viitorul point-in-polygon utilaj↔parcelă) nu trebuie să știe că a fost un cerc.
 - **Pas manual rămas** (blocat de un clasificator automat de siguranță — operațiune de
   golire în masă a datelor, necesită rulare directă în Supabase, nu prin Claude): rulează
   în Supabase Dashboard → SQL Editor:

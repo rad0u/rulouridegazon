@@ -2,20 +2,32 @@
 
 import { useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
-import { MapContainer, Polygon, Polyline, CircleMarker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
+import { MapContainer, Polygon, Polyline, Circle, CircleMarker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
 import type { Map as LeafletMap } from 'leaflet';
 import { supabase } from '../lib/supabaseClient';
 import { Parcela, PARCELA_COLORS, polygonLatLngs } from '../lib/parcelaTypes';
+import { distantaMetri, generateCirclePolygon } from '../lib/geo';
 import ParcelaPanel from './ParcelaPanel';
+import RotatedImageOverlay from './RotatedImageOverlay';
 
 interface FarmMapProps {
   fermaId: string;
   centruLat: number | null;
   centruLon: number | null;
   centruZoom: number | null;
+  imagineUrl: string | null;
+  imagineColtSS: [number, number] | null;
+  imagineColtDS: [number, number] | null;
+  imagineColtSJ: [number, number] | null;
   parcele: Parcela[];
   editable: boolean;
   onCentruSaved: (lat: number, lon: number, zoom: number) => void;
+  onImagineSaved: (
+    url: string | null,
+    coltSS: [number, number] | null,
+    coltDS: [number, number] | null,
+    coltSJ: [number, number] | null,
+  ) => void;
   onPolygonSaved: (parcelaId: string, poligon: Parcela['poligon_harta']) => void;
   onParcelaUpdated: (parcela: Parcela) => void;
 }
@@ -23,6 +35,12 @@ interface FarmMapProps {
 // Centrul aproximativ al României — folosit doar cât timp ferma n-are încă
 // un centru implicit setat.
 const CENTRU_ROMANIA: [number, number] = [45.9, 24.97];
+
+const PASI_CALIBRARE = [
+  'Click pe hartă unde este colțul STÂNGA-SUS al imaginii',
+  'Click pe hartă unde este colțul DREAPTA-SUS al imaginii',
+  'Click pe hartă unde este colțul STÂNGA-JOS al imaginii',
+];
 
 function MapClickCapture({ onClick }: { onClick: (lat: number, lon: number) => void }) {
   useMapEvents({
@@ -44,9 +62,14 @@ export default function FarmMap({
   centruLat,
   centruLon,
   centruZoom,
+  imagineUrl,
+  imagineColtSS,
+  imagineColtDS,
+  imagineColtSJ,
   parcele,
   editable,
   onCentruSaved,
+  onImagineSaved,
   onPolygonSaved,
   onParcelaUpdated,
 }: FarmMapProps) {
@@ -54,10 +77,24 @@ export default function FarmMap({
   const [selectedParcelaId, setSelectedParcelaId] = useState<string | null>(null);
   const [drawingParcelaId, setDrawingParcelaId] = useState<string | null>(null);
   const [drawingPoints, setDrawingPoints] = useState<[number, number][]>([]);
+  const [drawMode, setDrawMode] = useState<'poligon' | 'cerc'>('poligon');
+  const [cercCentru, setCercCentru] = useState<[number, number] | null>(null);
+  const [cercMargine, setCercMargine] = useState<[number, number] | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [savingCentru, setSavingCentru] = useState(false);
   const [centruMsg, setCentruMsg] = useState<string | null>(null);
+
+  // Imagine suprapusă (ex. captură Google Earth) ancorată prin 3 puncte GPS.
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [calibrating, setCalibrating] = useState(false);
+  const [calibrationUrl, setCalibrationUrl] = useState<string | null>(null);
+  const [calibrationPoints, setCalibrationPoints] = useState<[number, number][]>([]);
+  const [savingCalibrare, setSavingCalibrare] = useState(false);
+  const [calibrareError, setCalibrareError] = useState<string | null>(null);
+  const [overlayOpacity, setOverlayOpacity] = useState(0.85);
+  const [overlayVisible, setOverlayVisible] = useState(true);
 
   const mapRef = useRef<LeafletMap | null>(null);
 
@@ -65,21 +102,67 @@ export default function FarmMap({
     centruLat !== null && centruLon !== null ? [centruLat, centruLon] : CENTRU_ROMANIA;
   const zoom = centruZoom ?? (centruLat !== null ? 17 : 7);
 
+  const areOverlayCalibrat = !!(imagineUrl && imagineColtSS && imagineColtDS && imagineColtSJ);
+
   function startDrawing(parcelaId: string) {
+    setCalibrating(false);
     setSelectedParcelaId(null);
     setDrawingParcelaId(parcelaId);
     setDrawingPoints([]);
+    setDrawMode('poligon');
+    setCercCentru(null);
+    setCercMargine(null);
     setSaveError(null);
   }
 
   function cancelDrawing() {
     setDrawingParcelaId(null);
     setDrawingPoints([]);
+    setCercCentru(null);
+    setCercMargine(null);
     setSaveError(null);
   }
 
+  function schimbaModDesenare(mod: 'poligon' | 'cerc') {
+    setDrawMode(mod);
+    setDrawingPoints([]);
+    setCercCentru(null);
+    setCercMargine(null);
+    setSaveError(null);
+  }
+
+  function startCalibrare(url: string) {
+    setDrawingParcelaId(null);
+    setSelectedParcelaId(null);
+    setCalibrationUrl(url);
+    setCalibrationPoints([]);
+    setCalibrareError(null);
+    setCalibrating(true);
+  }
+
+  function cancelCalibrare() {
+    setCalibrating(false);
+    setCalibrationUrl(null);
+    setCalibrationPoints([]);
+    setCalibrareError(null);
+  }
+
   function handleMapClick(lat: number, lon: number) {
+    if (calibrating) {
+      setCalibrationPoints((prev) => (prev.length < 3 ? [...prev, [lat, lon]] : prev));
+      return;
+    }
     if (!drawingParcelaId) return;
+
+    if (drawMode === 'cerc') {
+      if (!cercCentru) {
+        setCercCentru([lat, lon]);
+      } else {
+        setCercMargine([lat, lon]);
+      }
+      return;
+    }
+
     setDrawingPoints((prev) => [...prev, [lat, lon]]);
   }
 
@@ -87,13 +170,37 @@ export default function FarmMap({
     setDrawingPoints((prev) => prev.slice(0, -1));
   }
 
+  function undoCerc() {
+    if (cercMargine) {
+      setCercMargine(null);
+    } else {
+      setCercCentru(null);
+    }
+  }
+
+  function undoLastCalibrationPoint() {
+    setCalibrationPoints((prev) => prev.slice(0, -1));
+  }
+
+  const razaCerc = cercCentru && cercMargine ? distantaMetri(cercCentru, cercMargine) : null;
+
   async function saveDrawing() {
-    if (!drawingParcelaId || drawingPoints.length < 3) return;
+    if (!drawingParcelaId) return;
+
+    let ringLatLng: [number, number][];
+
+    if (drawMode === 'cerc') {
+      if (!cercCentru || !cercMargine) return;
+      ringLatLng = generateCirclePolygon(cercCentru, distantaMetri(cercCentru, cercMargine), 64);
+    } else {
+      if (drawingPoints.length < 3) return;
+      ringLatLng = drawingPoints;
+    }
 
     setSaving(true);
     setSaveError(null);
 
-    const ring = [...drawingPoints, drawingPoints[0]].map(([lat, lon]) => [lon, lat]);
+    const ring = [...ringLatLng, ringLatLng[0]].map(([lat, lon]) => [lon, lat]);
     const poligon = { type: 'Polygon' as const, coordinates: [ring] };
 
     const { error } = await supabase
@@ -110,6 +217,8 @@ export default function FarmMap({
     onPolygonSaved(drawingParcelaId, poligon);
     setDrawingParcelaId(null);
     setDrawingPoints([]);
+    setCercCentru(null);
+    setCercMargine(null);
     setSaving(false);
   }
 
@@ -138,6 +247,81 @@ export default function FarmMap({
     onCentruSaved(c.lat, c.lng, z);
     setCentruMsg('Centru salvat.');
     setTimeout(() => setCentruMsg(null), 3000);
+  }
+
+  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setUploading(true);
+    setUploadError(null);
+
+    const path = `${fermaId}/${Date.now()}-${file.name}`;
+    const { error: uploadErr } = await supabase.storage
+      .from('harti-ferme')
+      .upload(path, file, { upsert: true });
+
+    setUploading(false);
+    event.target.value = '';
+
+    if (uploadErr) {
+      setUploadError(uploadErr.message);
+      return;
+    }
+
+    const { data } = supabase.storage.from('harti-ferme').getPublicUrl(path);
+    startCalibrare(data.publicUrl);
+  }
+
+  async function salveazaCalibrarea() {
+    if (!calibrationUrl || calibrationPoints.length < 3) return;
+
+    setSavingCalibrare(true);
+    setCalibrareError(null);
+
+    const [coltSS, coltDS, coltSJ] = calibrationPoints;
+
+    const { error } = await supabase
+      .from('ferme')
+      .update({
+        harta_url: calibrationUrl,
+        imagine_colt_ss_lat: coltSS[0],
+        imagine_colt_ss_lon: coltSS[1],
+        imagine_colt_ds_lat: coltDS[0],
+        imagine_colt_ds_lon: coltDS[1],
+        imagine_colt_sj_lat: coltSJ[0],
+        imagine_colt_sj_lon: coltSJ[1],
+      })
+      .eq('id', fermaId);
+
+    setSavingCalibrare(false);
+
+    if (error) {
+      setCalibrareError(error.message);
+      return;
+    }
+
+    onImagineSaved(calibrationUrl, coltSS, coltDS, coltSJ);
+    cancelCalibrare();
+  }
+
+  async function stergeImaginea() {
+    const { error } = await supabase
+      .from('ferme')
+      .update({
+        harta_url: null,
+        imagine_colt_ss_lat: null,
+        imagine_colt_ss_lon: null,
+        imagine_colt_ds_lat: null,
+        imagine_colt_ds_lon: null,
+        imagine_colt_sj_lat: null,
+        imagine_colt_sj_lon: null,
+      })
+      .eq('id', fermaId);
+
+    if (!error) {
+      onImagineSaved(null, null, null, null);
+    }
   }
 
   const selectedParcela = parcele.find((p) => p.id === selectedParcelaId) ?? null;
@@ -224,7 +408,7 @@ export default function FarmMap({
 
         <MapContainer center={centru} zoom={zoom} style={{ height: '100%', width: '100%' }}>
           <MapRefCapture mapRef={mapRef} />
-          {drawingParcelaId && <MapClickCapture onClick={handleMapClick} />}
+          {(drawingParcelaId || calibrating) && <MapClickCapture onClick={handleMapClick} />}
 
           {strat === 'strada' ? (
             <TileLayer
@@ -235,6 +419,17 @@ export default function FarmMap({
             <TileLayer
               attribution="Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
               url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            />
+          )}
+
+          {areOverlayCalibrat && !calibrating && (
+            <RotatedImageOverlay
+              imageUrl={imagineUrl as string}
+              topLeft={imagineColtSS as [number, number]}
+              topRight={imagineColtDS as [number, number]}
+              bottomLeft={imagineColtSJ as [number, number]}
+              opacity={overlayOpacity}
+              visible={overlayVisible}
             />
           )}
 
@@ -255,14 +450,14 @@ export default function FarmMap({
                 }}
                 eventHandlers={{
                   click: () => {
-                    if (!drawingParcelaId) setSelectedParcelaId(parcela.id);
+                    if (!drawingParcelaId && !calibrating) setSelectedParcelaId(parcela.id);
                   },
                 }}
               />
             );
           })}
 
-          {drawingPoints.length > 0 && (
+          {drawMode === 'poligon' && drawingPoints.length > 0 && (
             <>
               <Polyline positions={drawingPoints} pathOptions={{ color: '#d21919', weight: 2 }} />
               {drawingPoints.map((p, i) => (
@@ -275,10 +470,151 @@ export default function FarmMap({
               ))}
             </>
           )}
+
+          {drawMode === 'cerc' && cercCentru && (
+            <CircleMarker
+              center={cercCentru}
+              radius={7}
+              pathOptions={{ color: '#d21919', fillColor: '#d21919', fillOpacity: 1 }}
+            />
+          )}
+          {drawMode === 'cerc' && cercMargine && (
+            <CircleMarker
+              center={cercMargine}
+              radius={6}
+              pathOptions={{ color: '#d21919', fillColor: '#fff', fillOpacity: 1 }}
+            />
+          )}
+          {drawMode === 'cerc' && cercCentru && cercMargine && razaCerc !== null && (
+            <Circle
+              center={cercCentru}
+              radius={razaCerc}
+              pathOptions={{ color: '#d21919', fillColor: 'rgba(210,25,25,0.15)', weight: 2 }}
+            />
+          )}
+
+          {calibrating &&
+            calibrationPoints.map((p, i) => (
+              <CircleMarker
+                key={i}
+                center={p}
+                radius={7}
+                pathOptions={{ color: '#1f4e8c', fillColor: '#3070c4', fillOpacity: 1 }}
+              />
+            ))}
         </MapContainer>
       </div>
 
-      {editable && (
+      {editable && !calibrating && !drawingParcelaId && (
+        <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <label
+            style={{
+              display: 'inline-block',
+              padding: '0.5rem 0.9rem',
+              border: '1px solid #ccc',
+              borderRadius: '6px',
+              background: '#f5f5f5',
+              cursor: 'pointer',
+              fontSize: '0.9rem',
+            }}
+          >
+            {uploading
+              ? 'Se încarcă...'
+              : imagineUrl
+                ? 'Schimbă imaginea suprapusă'
+                : 'Adaugă imagine suprapusă (ex. captură Google Earth)'}
+            <input type="file" accept="image/*" onChange={handleFileChange} disabled={uploading} style={{ display: 'none' }} />
+          </label>
+          {imagineUrl && (
+            <>
+              {!areOverlayCalibrat && (
+                <button onClick={() => startCalibrare(imagineUrl)} style={{ padding: '0.5rem 0.9rem' }}>
+                  Calibrează imaginea
+                </button>
+              )}
+              {areOverlayCalibrat && (
+                <button onClick={() => startCalibrare(imagineUrl)} style={{ padding: '0.5rem 0.9rem' }}>
+                  Recalibrează
+                </button>
+              )}
+              <button onClick={() => void stergeImaginea()} style={{ padding: '0.5rem 0.9rem' }}>
+                Șterge imaginea
+              </button>
+            </>
+          )}
+        </div>
+      )}
+      {uploadError && <p style={{ color: '#b00020' }}>{uploadError}</p>}
+
+      {calibrating && (
+        <div style={{ marginTop: '1rem', border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-start' }}>
+            {calibrationUrl && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={calibrationUrl}
+                alt="Imagine de calibrat"
+                style={{ maxWidth: '220px', maxHeight: '220px', border: '1px solid #ccc', borderRadius: '4px' }}
+              />
+            )}
+            <div style={{ flex: '1 1 240px' }}>
+              <p style={{ fontWeight: 'bold', marginTop: 0 }}>
+                {calibrationPoints.length < 3
+                  ? PASI_CALIBRARE[calibrationPoints.length]
+                  : 'Toate cele 3 puncte sunt adăugate.'}
+              </p>
+              <p style={{ fontSize: '0.85rem', color: '#666' }}>
+                Uită-te la imaginea din stânga, identifică pe harta de dedesubt exact ce se vede în
+                colțul respectiv, apoi dă click acolo. Punct {calibrationPoints.length}/3.
+              </p>
+              {calibrareError && <p style={{ color: '#b00020' }}>{calibrareError}</p>}
+              <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
+                <button onClick={undoLastCalibrationPoint} disabled={calibrationPoints.length === 0}>
+                  Șterge ultimul punct
+                </button>
+                <button
+                  onClick={() => void salveazaCalibrarea()}
+                  disabled={calibrationPoints.length < 3 || savingCalibrare}
+                >
+                  {savingCalibrare ? 'Salvez...' : 'Salvează calibrarea'}
+                </button>
+                <button onClick={cancelCalibrare}>Renunță</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {areOverlayCalibrat && !calibrating && (
+        <div
+          style={{
+            marginTop: '1rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.75rem',
+            flexWrap: 'wrap',
+            fontSize: '0.85rem',
+          }}
+        >
+          <button onClick={() => setOverlayVisible((v) => !v)} style={{ padding: '0.4rem 0.75rem' }}>
+            {overlayVisible ? 'Ascunde imaginea suprapusă' : 'Arată imaginea suprapusă'}
+          </button>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+            Transparență
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={overlayOpacity}
+              onChange={(e) => setOverlayOpacity(Number(e.target.value))}
+              disabled={!overlayVisible}
+            />
+          </label>
+        </div>
+      )}
+
+      {editable && !calibrating && (
         <div style={{ marginTop: '1rem' }}>
           {!drawingParcelaId ? (
             parceleFaraContur.length > 0 && (
@@ -301,18 +637,75 @@ export default function FarmMap({
             )
           ) : (
             <div style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
-              <p>
-                Desenezi conturul pentru <strong>{parcelaInDrawing?.nume}</strong>. Dă click pe hartă
-                ca să adaugi colțuri ({drawingPoints.length} puncte adăugate, minim 3).
+              <p style={{ marginTop: 0 }}>
+                Desenezi conturul pentru <strong>{parcelaInDrawing?.nume}</strong>.
               </p>
+
+              <div style={{ display: 'flex', gap: '0.4rem', marginBottom: '0.75rem' }}>
+                <button
+                  onClick={() => schimbaModDesenare('poligon')}
+                  style={{
+                    padding: '0.4rem 0.75rem',
+                    fontSize: '0.85rem',
+                    background: drawMode === 'poligon' ? '#2e7d32' : '#f5f5f5',
+                    color: drawMode === 'poligon' ? '#fff' : '#333',
+                    border: '1px solid #ccc',
+                    borderRadius: '6px',
+                  }}
+                >
+                  Poligon
+                </button>
+                <button
+                  onClick={() => schimbaModDesenare('cerc')}
+                  style={{
+                    padding: '0.4rem 0.75rem',
+                    fontSize: '0.85rem',
+                    background: drawMode === 'cerc' ? '#2e7d32' : '#f5f5f5',
+                    color: drawMode === 'cerc' ? '#fff' : '#333',
+                    border: '1px solid #ccc',
+                    borderRadius: '6px',
+                  }}
+                >
+                  Cerc (pivot)
+                </button>
+              </div>
+
+              {drawMode === 'poligon' ? (
+                <p style={{ fontSize: '0.85rem', color: '#666' }}>
+                  Dă click pe hartă ca să adaugi colțuri ({drawingPoints.length} puncte adăugate,
+                  minim 3).
+                </p>
+              ) : (
+                <p style={{ fontSize: '0.85rem', color: '#666' }}>
+                  {!cercCentru
+                    ? 'Click pe centrul cercului (locul pivotului de irigații).'
+                    : `Click pe marginea cercului, ca să stabilești raza${
+                        razaCerc !== null ? ` (~${Math.round(razaCerc)} m)` : ''
+                      }. Poți da click din nou ca s-o ajustezi.`}
+                </p>
+              )}
+
               {saveError && <p style={{ color: '#b00020' }}>{saveError}</p>}
               <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-                <button onClick={undoLastPoint} disabled={drawingPoints.length === 0}>
-                  Șterge ultimul punct
-                </button>
-                <button onClick={() => void saveDrawing()} disabled={drawingPoints.length < 3 || saving}>
-                  {saving ? 'Salvez...' : 'Salvează conturul'}
-                </button>
+                {drawMode === 'poligon' ? (
+                  <>
+                    <button onClick={undoLastPoint} disabled={drawingPoints.length === 0}>
+                      Șterge ultimul punct
+                    </button>
+                    <button onClick={() => void saveDrawing()} disabled={drawingPoints.length < 3 || saving}>
+                      {saving ? 'Salvez...' : 'Salvează conturul'}
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button onClick={undoCerc} disabled={!cercCentru}>
+                      Șterge ultimul punct
+                    </button>
+                    <button onClick={() => void saveDrawing()} disabled={!cercCentru || !cercMargine || saving}>
+                      {saving ? 'Salvez...' : 'Salvează conturul'}
+                    </button>
+                  </>
+                )}
                 <button onClick={cancelDrawing}>Renunță</button>
               </div>
             </div>
@@ -331,9 +724,11 @@ export default function FarmMap({
           />
         </div>
       ) : (
-        <p style={{ color: '#666', marginTop: '1rem' }}>
-          Atinge o parcelă pe hartă ca să înregistrezi ce ai lucrat.
-        </p>
+        !calibrating && (
+          <p style={{ color: '#666', marginTop: '1rem' }}>
+            Atinge o parcelă pe hartă ca să înregistrezi ce ai lucrat.
+          </p>
+        )
       )}
     </div>
   );

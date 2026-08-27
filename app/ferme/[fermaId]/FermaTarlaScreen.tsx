@@ -21,6 +21,13 @@ type Ferma = {
   centru_lat: number | null;
   centru_lon: number | null;
   centru_zoom: number | null;
+  harta_url: string | null;
+  imagine_colt_ss_lat: number | null;
+  imagine_colt_ss_lon: number | null;
+  imagine_colt_ds_lat: number | null;
+  imagine_colt_ds_lon: number | null;
+  imagine_colt_sj_lat: number | null;
+  imagine_colt_sj_lon: number | null;
 };
 
 interface FermaTarlaScreenProps {
@@ -45,7 +52,9 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
     const [fermaRes, parceleRes] = await Promise.all([
       supabase
         .from('ferme')
-        .select('id,nume,locatie,centru_lat,centru_lon,centru_zoom')
+        .select(
+          'id,nume,locatie,centru_lat,centru_lon,centru_zoom,harta_url,imagine_colt_ss_lat,imagine_colt_ss_lon,imagine_colt_ds_lat,imagine_colt_ds_lon,imagine_colt_sj_lat,imagine_colt_sj_lon',
+        )
         .eq('id', fermaId)
         .maybeSingle(),
       supabase
@@ -118,10 +127,42 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
           centruLat={ferma.centru_lat}
           centruLon={ferma.centru_lon}
           centruZoom={ferma.centru_zoom}
+          imagineUrl={ferma.harta_url}
+          imagineColtSS={
+            ferma.imagine_colt_ss_lat !== null && ferma.imagine_colt_ss_lon !== null
+              ? [ferma.imagine_colt_ss_lat, ferma.imagine_colt_ss_lon]
+              : null
+          }
+          imagineColtDS={
+            ferma.imagine_colt_ds_lat !== null && ferma.imagine_colt_ds_lon !== null
+              ? [ferma.imagine_colt_ds_lat, ferma.imagine_colt_ds_lon]
+              : null
+          }
+          imagineColtSJ={
+            ferma.imagine_colt_sj_lat !== null && ferma.imagine_colt_sj_lon !== null
+              ? [ferma.imagine_colt_sj_lat, ferma.imagine_colt_sj_lon]
+              : null
+          }
           parcele={parcele}
           editable={role === 'admin_central'}
           onCentruSaved={(lat, lon, zoom) =>
             setFerma((prev) => (prev ? { ...prev, centru_lat: lat, centru_lon: lon, centru_zoom: zoom } : prev))
+          }
+          onImagineSaved={(url, coltSS, coltDS, coltSJ) =>
+            setFerma((prev) =>
+              prev
+                ? {
+                    ...prev,
+                    harta_url: url,
+                    imagine_colt_ss_lat: coltSS?.[0] ?? null,
+                    imagine_colt_ss_lon: coltSS?.[1] ?? null,
+                    imagine_colt_ds_lat: coltDS?.[0] ?? null,
+                    imagine_colt_ds_lon: coltDS?.[1] ?? null,
+                    imagine_colt_sj_lat: coltSJ?.[0] ?? null,
+                    imagine_colt_sj_lon: coltSJ?.[1] ?? null,
+                  }
+                : prev,
+            )
           }
           onPolygonSaved={(parcelaId, poligon) =>
             setParcele((prev) =>
