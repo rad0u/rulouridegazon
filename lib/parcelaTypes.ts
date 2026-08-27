@@ -1,6 +1,14 @@
+// Poligonul parcelei e stocat ca GeoJSON Polygon cu coordonate GPS reale
+// [longitudine, latitudine] (convenția GeoJSON), ring închis (primul punct
+// repetat la final). Se desenează direct pe harta satelit — vezi FarmMap.tsx.
+//
+// Notă: parcelele desenate în versiunea veche a aplicației (coordonate 0..1
+// relative la o imagine încărcată manual) au coordonate complet diferite ca
+// scară — bounding-box-ul de mai jos le filtrează automat ca "nedesenate",
+// ca să nu apară poligoane absurde undeva în Golful Guineei.
 export type PoligonHarta = {
   type: 'Polygon';
-  coordinates: number[][][]; // fracții 0..1 din lățimea/înălțimea imaginii, ring închis
+  coordinates: number[][][]; // [ring][punct][lon, lat]
 };
 
 export type Parcela = {
@@ -13,18 +21,33 @@ export type Parcela = {
   poligon_harta: PoligonHarta | null;
 };
 
-export type Point = { x: number; y: number };
+// Bounding box larg pentru România (cu marjă) — orice poligon în afara lui
+// e aproape sigur o rămășiță din formatul vechi (pixeli 0..1), nu GPS real.
+const RO_LAT_MIN = 42;
+const RO_LAT_MAX = 50;
+const RO_LON_MIN = 18;
+const RO_LON_MAX = 32;
 
-export function polygonPoints(parcela: Parcela): Point[] {
+export function polygonLatLngs(parcela: Parcela): [number, number][] {
   const ring = parcela.poligon_harta?.coordinates?.[0];
-  if (!ring) return [];
-  return ring.map(([x, y]) => ({ x, y }));
+  if (!ring || ring.length < 3) return [];
+
+  const latLngs: [number, number][] = ring.map(([lon, lat]) => [lat, lon]);
+  const plauzibil = latLngs.every(
+    ([lat, lon]) => lat >= RO_LAT_MIN && lat <= RO_LAT_MAX && lon >= RO_LON_MIN && lon <= RO_LON_MAX,
+  );
+
+  return plauzibil ? latLngs : [];
 }
 
-export function centroid(points: Point[]): Point {
-  if (points.length === 0) return { x: 0.5, y: 0.5 };
-  const sum = points.reduce((acc, p) => ({ x: acc.x + p.x, y: acc.y + p.y }), { x: 0, y: 0 });
-  return { x: sum.x / points.length, y: sum.y / points.length };
+export function areContur(parcela: Parcela): boolean {
+  return polygonLatLngs(parcela).length >= 3;
+}
+
+export function centroidLatLng(latLngs: [number, number][]): [number, number] | null {
+  if (latLngs.length === 0) return null;
+  const sum = latLngs.reduce((acc, [lat, lon]) => [acc[0] + lat, acc[1] + lon], [0, 0]);
+  return [sum[0] / latLngs.length, sum[1] / latLngs.length];
 }
 
 export const PARCELA_COLORS = [

@@ -5,7 +5,7 @@ deja, și de ce s-au ales anumite soluții. Scopul e ca informația să supravie
 chiar dacă o conversație cu Claude se pierde sau se rezumă. Se actualizează pe măsură
 ce apar decizii noi — nu e nevoie să reconstruim contextul din memorie de fiecare dată.
 
-Ultima actualizare: 2026-08-21.
+Ultima actualizare: 2026-08-22.
 
 ---
 
@@ -26,8 +26,9 @@ sunt setate direct în Vercel → Settings → Environment Variables, nu în cod
 
 - Login clasic + logout; redirect automat: admin_ferma → direct pe tarlaua fermei lui;
   admin_central → dashboard cu toate fermele.
-- Hartă interactivă per fermă: imagine încărcată de admin central, parcele desenate ca
-  poligoane click-abile direct pe imagine.
+- Hartă interactivă per fermă: **satelit real (Leaflet + Esri World Imagery)**, parcele
+  desenate ca poligoane cu coordonate GPS reale, click-abile direct pe hartă (vezi
+  secțiunea 5b — schimbat 2026-08-22, înlocuiește imaginea statică încărcată manual).
 - Panou parcelă: descriere (nume, tip gazon, suprafață — editabile doar de admin central),
   istoric operațiuni, formular de înregistrare operațiune nouă.
 - 6 tipuri de operațiuni: Udat, Tuns, Aspirat, Tratamente foliare, Fertilizare solidă,
@@ -163,6 +164,42 @@ aplicația scade automat consumul zilnic al utilajelor fermei și afișează câ
 - **Pas rămas**: admin central trebuie să configureze inițial fiecare fermă (capacitate +
   nivel curent la o dată de referință) din pagina `/rezervor-central` înainte ca datele să
   apară calculate.
+
+### 5b. Hartă parcele: trecere de la imagine statică la satelit real (2026-08-22)
+Motiv: pentru a putea în viitor asocia traseul GPS al utilajelor cu parcela pe care se
+aflau (point-in-polygon, vezi mai jos), poligoanele parcelelor trebuie coordonate GPS
+reale, nu coordonate relative la o imagine încărcată manual.
+
+- `components/FarmMap.tsx` rescris: hartă Leaflet cu toggle Stradă/Satelit (Esri World
+  Imagery, la fel ca `/utilaje`), desenare poligoane prin click direct pe hartă
+  (coordonate GPS reale, stocate tot ca GeoJSON Polygon în `parcele.poligon_harta`, dar
+  acum `[lon, lat]` în loc de fracții 0..1 pe imagine).
+- `ferme` are coloane noi: `centru_lat`, `centru_lon`, `centru_zoom` — centrul implicit
+  al hărții per fermă. Admin central navighează o singură dată pe satelit până la fermă
+  și apasă „📍 Setează ca centru implicit"; fără el, harta se deschide pe centrul
+  aproximativ al României la zoom mic.
+- Upload-ul de imagine (`ferme.harta_url`) a fost eliminat din interfață — coloana rămâne
+  în schema DB, neutilizată, fără risc.
+- `lib/parcelaTypes.ts`: `polygonLatLngs()` filtrează automat orice poligon cu coordonate
+  în afara bounding-box-ului României — protecție împotriva poligoanelor vechi (format
+  pixeli 0..1) afișate greșit ca GPS.
+- **Pas manual rămas** (blocat de un clasificator automat de siguranță — operațiune de
+  golire în masă a datelor, necesită rulare directă în Supabase, nu prin Claude): rulează
+  în Supabase Dashboard → SQL Editor:
+  ```sql
+  ALTER TABLE public.parcele DISABLE TRIGGER protejeaza_poligon_harta_trigger;
+  UPDATE public.parcele SET poligon_harta = NULL WHERE poligon_harta IS NOT NULL;
+  ALTER TABLE public.parcele ENABLE TRIGGER protejeaza_poligon_harta_trigger;
+  ```
+  Golește poligoanele vechi (coordonate pixeli, deja filtrate/ignorate de aplicație, dar
+  tot merită curățate din DB). Fără acest pas, aplicația funcționează corect oricum
+  (poligoanele vechi sunt ignorate automat), dar parcelele apar ca „fără contur" până se
+  redesenează pe satelit — ceea ce oricum trebuie făcut din nou pentru toate parcelele.
+- **Idee viitoare (nu implementată încă)**: odată parcelele redesenate pe satelit, se
+  poate construi un raport care asociază traseul GPS al fiecărui utilaj (din
+  `combustibil_citiri.latitudine/longitudine`, sincronizat la 15 min) cu parcela pe care
+  s-a aflat (point-in-polygon) și durata — pentru pre-completare automată a parcelei +
+  orelor de lucru la înregistrarea unei operațiuni.
 
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament

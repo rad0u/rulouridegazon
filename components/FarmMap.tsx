@@ -1,73 +1,69 @@
 'use client';
 
 import { useRef, useState } from 'react';
+import 'leaflet/dist/leaflet.css';
+import { MapContainer, Polygon, Polyline, CircleMarker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
+import type { Map as LeafletMap } from 'leaflet';
 import { supabase } from '../lib/supabaseClient';
-import { Parcela, Point, PARCELA_COLORS, polygonPoints } from '../lib/parcelaTypes';
+import { Parcela, PARCELA_COLORS, polygonLatLngs } from '../lib/parcelaTypes';
 import ParcelaPanel from './ParcelaPanel';
 
 interface FarmMapProps {
   fermaId: string;
-  hartaUrl: string | null;
+  centruLat: number | null;
+  centruLon: number | null;
+  centruZoom: number | null;
   parcele: Parcela[];
   editable: boolean;
-  onHartaUploaded: (url: string) => void;
+  onCentruSaved: (lat: number, lon: number, zoom: number) => void;
   onPolygonSaved: (parcelaId: string, poligon: Parcela['poligon_harta']) => void;
   onParcelaUpdated: (parcela: Parcela) => void;
 }
 
+// Centrul aproximativ al României — folosit doar cât timp ferma n-are încă
+// un centru implicit setat.
+const CENTRU_ROMANIA: [number, number] = [45.9, 24.97];
+
+function MapClickCapture({ onClick }: { onClick: (lat: number, lon: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onClick(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
+
+function MapRefCapture({ mapRef }: { mapRef: React.MutableRefObject<LeafletMap | null> }) {
+  const map = useMap();
+  mapRef.current = map;
+  return null;
+}
+
 export default function FarmMap({
   fermaId,
-  hartaUrl,
+  centruLat,
+  centruLon,
+  centruZoom,
   parcele,
   editable,
-  onHartaUploaded,
+  onCentruSaved,
   onPolygonSaved,
   onParcelaUpdated,
 }: FarmMapProps) {
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-
+  const [strat, setStrat] = useState<'strada' | 'satelit'>('satelit');
   const [selectedParcelaId, setSelectedParcelaId] = useState<string | null>(null);
   const [drawingParcelaId, setDrawingParcelaId] = useState<string | null>(null);
-  const [drawingPoints, setDrawingPoints] = useState<Point[]>([]);
+  const [drawingPoints, setDrawingPoints] = useState<[number, number][]>([]);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingCentru, setSavingCentru] = useState(false);
+  const [centruMsg, setCentruMsg] = useState<string | null>(null);
 
-  const imgWrapRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
 
-  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setUploading(true);
-    setUploadError(null);
-
-    const path = `${fermaId}/${Date.now()}-${file.name}`;
-    const { error: uploadErr } = await supabase.storage
-      .from('harti-ferme')
-      .upload(path, file, { upsert: true });
-
-    if (uploadErr) {
-      setUploadError(uploadErr.message);
-      setUploading(false);
-      return;
-    }
-
-    const { data } = supabase.storage.from('harti-ferme').getPublicUrl(path);
-    const { error: updateErr } = await supabase
-      .from('ferme')
-      .update({ harta_url: data.publicUrl })
-      .eq('id', fermaId);
-
-    if (updateErr) {
-      setUploadError(updateErr.message);
-      setUploading(false);
-      return;
-    }
-
-    onHartaUploaded(data.publicUrl);
-    setUploading(false);
-  }
+  const centru: [number, number] =
+    centruLat !== null && centruLon !== null ? [centruLat, centruLon] : CENTRU_ROMANIA;
+  const zoom = centruZoom ?? (centruLat !== null ? 17 : 7);
 
   function startDrawing(parcelaId: string) {
     setSelectedParcelaId(null);
@@ -82,14 +78,9 @@ export default function FarmMap({
     setSaveError(null);
   }
 
-  function handleMapClick(event: React.MouseEvent<HTMLDivElement>) {
-    if (!drawingParcelaId || !imgWrapRef.current) return;
-
-    const rect = imgWrapRef.current.getBoundingClientRect();
-    const x = Math.min(1, Math.max(0, (event.clientX - rect.left) / rect.width));
-    const y = Math.min(1, Math.max(0, (event.clientY - rect.top) / rect.height));
-
-    setDrawingPoints((prev) => [...prev, { x, y }]);
+  function handleMapClick(lat: number, lon: number) {
+    if (!drawingParcelaId) return;
+    setDrawingPoints((prev) => [...prev, [lat, lon]]);
   }
 
   function undoLastPoint() {
@@ -102,7 +93,7 @@ export default function FarmMap({
     setSaving(true);
     setSaveError(null);
 
-    const ring = [...drawingPoints, drawingPoints[0]].map((p) => [p.x, p.y]);
+    const ring = [...drawingPoints, drawingPoints[0]].map(([lat, lon]) => [lon, lat]);
     const poligon = { type: 'Polygon' as const, coordinates: [ring] };
 
     const { error } = await supabase
@@ -122,115 +113,172 @@ export default function FarmMap({
     setSaving(false);
   }
 
+  async function salveazaCentru() {
+    const map = mapRef.current;
+    if (!map) return;
+
+    setSavingCentru(true);
+    setCentruMsg(null);
+
+    const c = map.getCenter();
+    const z = map.getZoom();
+
+    const { error } = await supabase
+      .from('ferme')
+      .update({ centru_lat: c.lat, centru_lon: c.lng, centru_zoom: z })
+      .eq('id', fermaId);
+
+    setSavingCentru(false);
+
+    if (error) {
+      setCentruMsg(`Eroare: ${error.message}`);
+      return;
+    }
+
+    onCentruSaved(c.lat, c.lng, z);
+    setCentruMsg('Centru salvat.');
+    setTimeout(() => setCentruMsg(null), 3000);
+  }
+
   const selectedParcela = parcele.find((p) => p.id === selectedParcelaId) ?? null;
   const parcelaInDrawing = parcele.find((p) => p.id === drawingParcelaId) ?? null;
-  const parceleFaraContur = parcele.filter((p) => !p.poligon_harta);
+  const parceleFaraContur = parcele.filter((p) => polygonLatLngs(p).length < 3);
 
   return (
     <div>
-      {editable && (
-        <div style={{ marginBottom: '1rem' }}>
-          <label style={{ display: 'inline-block' }}>
-            <span style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.9rem' }}>
-              {hartaUrl ? 'Schimbă imaginea hărții' : 'Încarcă imaginea hărții (captură Google Maps)'}
-            </span>
-            <input type="file" accept="image/*" onChange={handleFileChange} disabled={uploading} />
-          </label>
-          {uploading && <p>Se încarcă...</p>}
-          {uploadError && <p style={{ color: '#b00020' }}>{uploadError}</p>}
-        </div>
-      )}
-
-      {hartaUrl ? (
+      <div style={{ position: 'relative', height: 'clamp(320px, 60vh, 600px)', width: '100%' }}>
         <div
-          ref={imgWrapRef}
-          onClick={handleMapClick}
           style={{
-            position: 'relative',
-            width: '100%',
-            maxWidth: '420px',
-            lineHeight: 0,
-            cursor: drawingParcelaId ? 'crosshair' : 'default',
+            position: 'absolute',
+            top: '10px',
+            right: '10px',
+            zIndex: 1000,
+            display: 'flex',
+            borderRadius: '6px',
+            overflow: 'hidden',
+            border: '1px solid #ccc',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
           }}
         >
-          <img src={hartaUrl} alt="Hartă fermă" style={{ width: '100%', height: 'auto', display: 'block' }} />
-          <svg
-            viewBox="0 0 1 1"
-            preserveAspectRatio="none"
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%' }}
+          <button
+            onClick={() => setStrat('strada')}
+            style={{
+              padding: '0.4rem 0.75rem',
+              border: 'none',
+              cursor: 'pointer',
+              background: strat === 'strada' ? '#2e7d32' : '#fff',
+              color: strat === 'strada' ? '#fff' : '#333',
+              fontSize: '0.85rem',
+            }}
           >
-            {parcele.map((parcela, index) => {
-              const points = polygonPoints(parcela);
-              if (points.length < 3) return null;
-              const color = PARCELA_COLORS[index % PARCELA_COLORS.length];
-              const isSelected = parcela.id === selectedParcelaId;
-              return (
-                <polygon
-                  key={parcela.id}
-                  points={points.map((p) => `${p.x},${p.y}`).join(' ')}
-                  fill={color.fill}
-                  stroke={color.stroke}
-                  strokeWidth={isSelected ? 4 : 2}
-                  vectorEffect="non-scaling-stroke"
-                  style={{ cursor: 'pointer', pointerEvents: drawingParcelaId ? 'none' : 'auto' }}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    setSelectedParcelaId(parcela.id);
-                  }}
-                />
-              );
-            })}
+            Stradă
+          </button>
+          <button
+            onClick={() => setStrat('satelit')}
+            style={{
+              padding: '0.4rem 0.75rem',
+              border: 'none',
+              cursor: 'pointer',
+              background: strat === 'satelit' ? '#2e7d32' : '#fff',
+              color: strat === 'satelit' ? '#fff' : '#333',
+              fontSize: '0.85rem',
+            }}
+          >
+            Satelit
+          </button>
+        </div>
 
-            {drawingPoints.length > 0 && (
-              <polyline
-                points={drawingPoints.map((p) => `${p.x},${p.y}`).join(' ')}
-                fill="none"
-                stroke="#d21919"
-                strokeWidth={2}
-                vectorEffect="non-scaling-stroke"
-              />
-            )}
-          </svg>
-          {drawingPoints.map((p, i) => (
-            <div
-              key={i}
+        {editable && (
+          <div style={{ position: 'absolute', top: '10px', left: '10px', zIndex: 1000 }}>
+            <button
+              onClick={() => void salveazaCentru()}
+              disabled={savingCentru}
               style={{
-                position: 'absolute',
-                left: `${p.x * 100}%`,
-                top: `${p.y * 100}%`,
-                width: '14px',
-                height: '14px',
-                borderRadius: '50%',
-                background: '#d21919',
-                border: '2px solid white',
-                transform: 'translate(-50%, -50%)',
-                pointerEvents: 'none',
+                padding: '0.4rem 0.75rem',
+                borderRadius: '6px',
+                border: '1px solid #ccc',
+                background: '#fff',
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
               }}
-            />
-          ))}
-        </div>
-      ) : (
-        <div>
-          <p style={{ color: '#666' }}>
-            {editable ? 'Încarcă imaginea hărții mai sus.' : 'Harta fermei nu a fost încărcată încă.'}
-          </p>
-          {parcele.length > 0 && (
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '0.5rem' }}>
-              {parcele.map((parcela) => (
-                <button
-                  key={parcela.id}
-                  onClick={() => setSelectedParcelaId(parcela.id)}
-                  style={{ padding: '0.7rem 1rem' }}
-                >
-                  {parcela.nume}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+            >
+              📍 {savingCentru ? 'Salvez...' : 'Setează ca centru implicit'}
+            </button>
+            {centruMsg && (
+              <div
+                style={{
+                  marginTop: '0.3rem',
+                  padding: '0.3rem 0.5rem',
+                  background: '#fff',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+                }}
+              >
+                {centruMsg}
+              </div>
+            )}
+          </div>
+        )}
 
-      {editable && hartaUrl && (
+        <MapContainer center={centru} zoom={zoom} style={{ height: '100%', width: '100%' }}>
+          <MapRefCapture mapRef={mapRef} />
+          {drawingParcelaId && <MapClickCapture onClick={handleMapClick} />}
+
+          {strat === 'strada' ? (
+            <TileLayer
+              attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+              url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+            />
+          ) : (
+            <TileLayer
+              attribution="Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics, and the GIS User Community"
+              url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+            />
+          )}
+
+          {parcele.map((parcela, index) => {
+            const latLngs = polygonLatLngs(parcela);
+            if (latLngs.length < 3) return null;
+            const color = PARCELA_COLORS[index % PARCELA_COLORS.length];
+            const isSelected = parcela.id === selectedParcelaId;
+            return (
+              <Polygon
+                key={parcela.id}
+                positions={latLngs}
+                pathOptions={{
+                  color: color.stroke,
+                  fillColor: color.fill,
+                  fillOpacity: 0.35,
+                  weight: isSelected ? 4 : 2,
+                }}
+                eventHandlers={{
+                  click: () => {
+                    if (!drawingParcelaId) setSelectedParcelaId(parcela.id);
+                  },
+                }}
+              />
+            );
+          })}
+
+          {drawingPoints.length > 0 && (
+            <>
+              <Polyline positions={drawingPoints} pathOptions={{ color: '#d21919', weight: 2 }} />
+              {drawingPoints.map((p, i) => (
+                <CircleMarker
+                  key={i}
+                  center={p}
+                  radius={6}
+                  pathOptions={{ color: '#d21919', fillColor: '#d21919', fillOpacity: 1 }}
+                />
+              ))}
+            </>
+          )}
+        </MapContainer>
+      </div>
+
+      {editable && (
         <div style={{ marginTop: '1rem' }}>
           {!drawingParcelaId ? (
             parceleFaraContur.length > 0 && (
@@ -276,18 +324,16 @@ export default function FarmMap({
         <div style={{ marginTop: '1.5rem' }}>
           <ParcelaPanel
             parcela={selectedParcela}
-            showRedrawButton={editable && !!hartaUrl}
+            showRedrawButton={editable}
             onRedraw={() => startDrawing(selectedParcela.id)}
             editable={editable}
             onParcelaUpdated={onParcelaUpdated}
           />
         </div>
       ) : (
-        hartaUrl && (
-          <p style={{ color: '#666', marginTop: '1rem' }}>
-            Atinge o parcelă pe hartă ca să înregistrezi ce ai lucrat.
-          </p>
-        )
+        <p style={{ color: '#666', marginTop: '1rem' }}>
+          Atinge o parcelă pe hartă ca să înregistrezi ce ai lucrat.
+        </p>
       )}
     </div>
   );

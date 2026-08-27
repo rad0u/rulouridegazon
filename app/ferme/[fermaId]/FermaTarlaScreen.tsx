@@ -2,16 +2,25 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
+import dynamic from 'next/dynamic';
 import { supabase } from '../../../lib/supabaseClient';
 import { useUserRole } from '../../../lib/useUserRole';
-import FarmMap from '../../../components/FarmMap';
 import { Parcela } from '../../../lib/parcelaTypes';
+
+// react-leaflet foloseşte `window`/`document` la import, deci se încarcă
+// doar în browser, nu şi la randare pe server.
+const FarmMap = dynamic(() => import('../../../components/FarmMap'), {
+  ssr: false,
+  loading: () => <p>Se încarcă harta...</p>,
+});
 
 type Ferma = {
   id: string;
   nume: string;
   locatie: string | null;
-  harta_url: string | null;
+  centru_lat: number | null;
+  centru_lon: number | null;
+  centru_zoom: number | null;
 };
 
 interface FermaTarlaScreenProps {
@@ -34,7 +43,11 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
     setError(null);
 
     const [fermaRes, parceleRes] = await Promise.all([
-      supabase.from('ferme').select('id,nume,locatie,harta_url').eq('id', fermaId).maybeSingle(),
+      supabase
+        .from('ferme')
+        .select('id,nume,locatie,centru_lat,centru_lon,centru_zoom')
+        .eq('id', fermaId)
+        .maybeSingle(),
       supabase
         .from('parcele')
         .select('id,ferma_id,nume,tip_gazon,stadiu,suprafata_mp,poligon_harta')
@@ -92,13 +105,24 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
       <h1 style={{ fontSize: 'clamp(1.3rem, 5vw, 2rem)', marginBottom: '0.25rem' }}>{ferma.nume}</h1>
       {ferma.locatie && <p style={{ color: '#666', marginTop: 0 }}>{ferma.locatie}</p>}
 
+      {role === 'admin_central' && ferma.centru_lat === null && (
+        <p style={{ color: '#8a5a00', background: '#fff7e6', padding: '0.6rem 0.9rem', borderRadius: '6px' }}>
+          Harta se deschide deocamdată pe centrul aproximativ al României. Navighează pe satelit
+          până la fermă și apasă „📍 Setează ca centru implicit" ca s-o salvezi.
+        </p>
+      )}
+
       <div style={{ marginTop: '1rem' }}>
         <FarmMap
           fermaId={ferma.id}
-          hartaUrl={ferma.harta_url}
+          centruLat={ferma.centru_lat}
+          centruLon={ferma.centru_lon}
+          centruZoom={ferma.centru_zoom}
           parcele={parcele}
           editable={role === 'admin_central'}
-          onHartaUploaded={(url) => setFerma((prev) => (prev ? { ...prev, harta_url: url } : prev))}
+          onCentruSaved={(lat, lon, zoom) =>
+            setFerma((prev) => (prev ? { ...prev, centru_lat: lat, centru_lon: lon, centru_zoom: zoom } : prev))
+          }
           onPolygonSaved={(parcelaId, poligon) =>
             setParcele((prev) =>
               prev.map((p) => (p.id === parcelaId ? { ...p, poligon_harta: poligon } : p))
