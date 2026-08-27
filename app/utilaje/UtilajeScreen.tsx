@@ -1,9 +1,31 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import dynamic from 'next/dynamic';
-import { supabase } from '../../lib/supabaseClient';
+import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 import type { UtilajPozitie } from '../../components/UtilajeMapView';
+
+type ZiIstoric = {
+  data: string;
+  total_ore_functionare: number;
+  parcele: { nume: string; ore: number }[];
+};
+
+type IstoricParcele = {
+  utilaj_id: string;
+  utilaj_nume: string;
+  zile: number;
+  are_parcele_desenate: boolean;
+  zile_istoric: ZiIstoric[];
+};
+
+function formatDataZi(data: string): string {
+  // `data` e YYYY-MM-DD (fus orar România) — construim data locală direct din
+  // componente, ca să nu depindem de fusul orar al browserului la parsare.
+  const [an, luna, zi] = data.split('-').map(Number);
+  const d = new Date(an, luna - 1, zi);
+  return d.toLocaleDateString('ro-RO', { day: 'numeric', month: 'long', year: 'numeric' });
+}
 
 // react-leaflet foloseşte `window`/`document` la import, deci se încarcă
 // doar în browser, nu şi la randare pe server.
@@ -52,6 +74,53 @@ export default function UtilajeScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
+
+  const [utilajExtins, setUtilajExtins] = useState<string | null>(null);
+  const [istoricZile, setIstoricZile] = useState(14);
+  const [istoric, setIstoric] = useState<IstoricParcele | null>(null);
+  const [istoricLoading, setIstoricLoading] = useState(false);
+  const [istoricError, setIstoricError] = useState<string | null>(null);
+
+  async function incarcaIstoric(utilajId: string, zileDeFolosit: number) {
+    setIstoricLoading(true);
+    setIstoricError(null);
+
+    const { data: session } = await supabase.auth.getSession();
+    const token = session.session?.access_token;
+
+    try {
+      const res = await fetch(
+        `${supabaseUrl}/functions/v1/get-utilaj-istoric-parcele?utilaj_id=${utilajId}&zile=${zileDeFolosit}`,
+        { headers: { Authorization: `Bearer ${token}` } },
+      );
+      const json = await res.json();
+
+      setIstoricLoading(false);
+
+      if (!res.ok) {
+        setIstoricError(json?.error ?? 'Eroare la încărcarea istoricului.');
+        return;
+      }
+
+      setIstoric(json as IstoricParcele);
+    } catch (e) {
+      setIstoricLoading(false);
+      setIstoricError('Eroare de rețea la încărcarea istoricului.');
+    }
+  }
+
+  function toggleIstoric(utilajId: string) {
+    if (utilajExtins === utilajId) {
+      setUtilajExtins(null);
+      setIstoric(null);
+      setIstoricError(null);
+      return;
+    }
+    setUtilajExtins(utilajId);
+    setIstoric(null);
+    setIstoricError(null);
+    void incarcaIstoric(utilajId, istoricZile);
+  }
 
   async function reincarca() {
     setLoading(true);
@@ -163,36 +232,117 @@ export default function UtilajeScreen() {
                   <th style={{ padding: '0.4rem' }}>Status</th>
                   <th style={{ padding: '0.4rem' }}>Ultima poziție</th>
                   <th style={{ padding: '0.4rem' }}>Combustibil</th>
+                  <th style={{ padding: '0.4rem' }}></th>
                 </tr>
               </thead>
               <tbody>
                 {utilaje.map((u) => {
                   const stale = isFuelSignalStale(u);
                   const age = fuelSignalAgeMinutes(u);
+                  const extins = utilajExtins === u.utilaj_id;
 
                   return (
-                    <tr
-                      key={u.utilaj_id}
-                      style={{
-                        borderBottom: '1px solid #f0f0f0',
-                        background: stale ? '#fdecea' : undefined,
-                      }}
-                    >
-                      <td style={{ padding: '0.4rem' }}>{u.nume}</td>
-                      <td style={{ padding: '0.4rem' }}>{u.ferma_nume ?? '—'}</td>
-                      <td style={{ padding: '0.4rem' }}>{u.status === 'online' ? 'online' : 'offline'}</td>
-                      <td style={{ padding: '0.4rem' }}>
-                        {u.ultima_actualizare ? new Date(u.ultima_actualizare).toLocaleString('ro-RO') : '—'}
-                      </td>
-                      <td style={{ padding: '0.4rem', color: stale ? '#8a1f13' : undefined, fontWeight: stale ? 600 : undefined }}>
-                        {formatCombustibil(u)}
-                        {stale && (
-                          <div style={{ fontSize: '0.8rem' }}>
-                            ⚠️ fără citire de {age !== null ? Math.round(age / 60) : '?'}h — verifică sonda
-                          </div>
-                        )}
-                      </td>
-                    </tr>
+                    <Fragment key={u.utilaj_id}>
+                      <tr
+                        onClick={() => toggleIstoric(u.utilaj_id)}
+                        style={{
+                          borderBottom: '1px solid #f0f0f0',
+                          background: extins ? '#eef6ff' : stale ? '#fdecea' : undefined,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <td style={{ padding: '0.4rem' }}>{u.nume}</td>
+                        <td style={{ padding: '0.4rem' }}>{u.ferma_nume ?? '—'}</td>
+                        <td style={{ padding: '0.4rem' }}>{u.status === 'online' ? 'online' : 'offline'}</td>
+                        <td style={{ padding: '0.4rem' }}>
+                          {u.ultima_actualizare ? new Date(u.ultima_actualizare).toLocaleString('ro-RO') : '—'}
+                        </td>
+                        <td style={{ padding: '0.4rem', color: stale ? '#8a1f13' : undefined, fontWeight: stale ? 600 : undefined }}>
+                          {formatCombustibil(u)}
+                          {stale && (
+                            <div style={{ fontSize: '0.8rem' }}>
+                              ⚠️ fără citire de {age !== null ? Math.round(age / 60) : '?'}h — verifică sonda
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: '0.4rem', color: '#666', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                          {extins ? 'Ascunde istoric ▲' : 'Istoric parcele ▼'}
+                        </td>
+                      </tr>
+                      {extins && (
+                        <tr key={`${u.utilaj_id}-istoric`}>
+                          <td colSpan={6} style={{ padding: '0.75rem', background: '#fafafa' }}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
+                              <strong>Istoric ore pe parcele — {u.nume}</strong>
+                              <select
+                                value={istoricZile}
+                                onChange={(e) => {
+                                  const v = Number(e.target.value);
+                                  setIstoricZile(v);
+                                  void incarcaIstoric(u.utilaj_id, v);
+                                }}
+                                onClick={(e) => e.stopPropagation()}
+                                style={{ padding: '0.35rem', borderRadius: '6px', border: '1px solid #ccc' }}
+                              >
+                                <option value={7}>Ultimele 7 zile</option>
+                                <option value={14}>Ultimele 14 zile</option>
+                                <option value={30}>Ultimele 30 zile</option>
+                              </select>
+                            </div>
+
+                            {istoricLoading && <p style={{ margin: 0 }}>Se încarcă istoricul...</p>}
+
+                            {istoricError && (
+                              <p style={{ color: '#b00020', margin: 0 }}>{istoricError}</p>
+                            )}
+
+                            {!istoricLoading && !istoricError && istoric && !istoric.are_parcele_desenate && (
+                              <p style={{ margin: 0, color: '#666' }}>
+                                Ferma acestui utilaj nu are încă parcele desenate pe hartă — se poate
+                                calcula doar totalul orelor de funcționare, fără defalcare pe parcele.
+                              </p>
+                            )}
+
+                            {!istoricLoading && !istoricError && istoric && istoric.zile_istoric.length === 0 && (
+                              <p style={{ margin: 0, color: '#666' }}>
+                                Niciun interval de funcționare înregistrat în perioada selectată.
+                              </p>
+                            )}
+
+                            {!istoricLoading && !istoricError && istoric && istoric.zile_istoric.length > 0 && (
+                              <div style={{ overflowX: 'auto' }}>
+                                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' }}>
+                                  <thead>
+                                    <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                                      <th style={{ padding: '0.35rem' }}>Data</th>
+                                      <th style={{ padding: '0.35rem' }}>Ore pe parcele</th>
+                                      <th style={{ padding: '0.35rem' }}>Total ore funcționare</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {istoric.zile_istoric.map((zi) => (
+                                      <tr key={zi.data} style={{ borderBottom: '1px solid #eee' }}>
+                                        <td style={{ padding: '0.35rem', whiteSpace: 'nowrap' }}>
+                                          {formatDataZi(zi.data)}
+                                        </td>
+                                        <td style={{ padding: '0.35rem' }}>
+                                          {zi.parcele.length > 0
+                                            ? zi.parcele.map((p) => `${p.ore}h ${p.nume}`).join(', ')
+                                            : '—'}
+                                        </td>
+                                        <td style={{ padding: '0.35rem', fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                          {zi.total_ore_functionare}h
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>

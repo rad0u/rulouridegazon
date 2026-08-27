@@ -105,6 +105,7 @@ Deno.serve(async (req) => {
       .from('combustibil_citiri')
       .select('utilaj_id, nivel_litri, data_ora')
       .in('utilaj_id', utilajIds)
+      .not('nivel_litri', 'is', null)
       .order('data_ora', { ascending: false });
 
     for (const c of citiri ?? []) {

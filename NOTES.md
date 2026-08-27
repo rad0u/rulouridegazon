@@ -5,7 +5,7 @@ deja, și de ce s-au ales anumite soluții. Scopul e ca informația să supravie
 chiar dacă o conversație cu Claude se pierde sau se rezumă. Se actualizează pe măsură
 ce apar decizii noi — nu e nevoie să reconstruim contextul din memorie de fiecare dată.
 
-Ultima actualizare: 2026-08-22.
+Ultima actualizare: 2026-08-27.
 
 ---
 
@@ -292,6 +292,34 @@ selectează înainte să dea click. Implementat cu `L.divIcon` + `Marker` non-in
 precisă pentru forme convexe/aproape convexe ca parcelele noastre, inclusiv cercurile).
 Click-ul trece prin etichetă direct la poligonul de dedesubt.
 
+### 5h. Istoric ore de funcționare pe parcele, per utilaj (2026-08-27)
+Din același traseu GPS folosit pentru harta live, se calculează acum câte ore a
+funcționat fiecare utilaj (motor pornit — atribut Traccar `ignition`) și pe ce parcele,
+pe zile. Cerere: „click pe utilaj → istoric pe zile, ore + parcele, tabel".
+
+- `combustibil_citiri` (redenumire conceptuală, nu de tabel — vezi mai jos) capturează
+  acum o citire pentru **orice** utilaj cu poziție GPS validă, indiferent dacă are sau nu
+  senzor de combustibil calibrat — altfel utilajele fără DUT-E n-ar avea deloc traseu
+  salvat. Coloană nouă `contact` (boolean, din `attributes.ignition` Traccar).
+  `nivel_litri` a devenit nullable (rânduri doar-poziție nu au valoare de combustibil).
+- **Efect colateral corectat**: `nivel_litri` nullable ar fi stricat calculul deltelor de
+  consum (`Number(null) = 0` → salturi false) în `get-combustibil-report`,
+  `get-rezervor-central` și `get-utilaje-positions` — toate trei au primit
+  `.not('nivel_litri', 'is', null)` pe interogările relevante, redeployate.
+- Edge Function nouă `supabase/functions/get-utilaj-istoric-parcele/` (admin_central only,
+  param `utilaj_id` + `zile`, implicit 14): parcurge traseul cronologic al utilajului,
+  pentru fiecare interval între două citiri consecutive — dacă la începutul intervalului
+  contactul era pornit și golul dintre citiri ≤ 1h (peste, presupunem device offline, nu
+  funcționare continuă) — adaugă durata la total ore/zi; dacă poziția de la începutul
+  intervalului cade în interiorul unui poligon de parcelă (ray-casting, aceeași logică
+  RO-bounding-box de validare ca în `lib/parcelaTypes.ts`), adaugă și la ore/parcelă/zi.
+  Zilele sunt calculate în fus orar România (`Europe/Bucharest`), nu UTC.
+- UI: `app/utilaje/UtilajeScreen.tsx` — click pe orice rând din tabelul de utilaje extinde
+  un rând cu istoricul (dropdown 7/14/30 zile), tabel Dată / Ore pe parcele / Total ore
+  funcționare. Dacă ferma nu are parcele desenate, se arată doar totalul de ore.
+- Suma orelor pe parcele poate fi < totalul de funcționare — diferența e timp cu motorul
+  pornit în afara oricărei parcele (deplasare, drum).
+
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament
 la providerul GPS existent.
@@ -320,6 +348,8 @@ la providerul GPS existent.
   suspecte per utilaj (`/combustibil`, admin_central only).
 - `supabase/functions/get-rezervor-central/` — situație rezervor central per fermă
   (`/rezervor-central`, admin_central only).
+- `supabase/functions/get-utilaj-istoric-parcele/` — istoric ore funcționare + ore per
+  parcelă, pe zile, per utilaj (folosit din `/utilaje`, admin_central only).
 - `supabase/schema-*.sql` — copii sursă-de-adevăr ale migrărilor SQL aplicate în Supabase.
 
 ## 7. Ce rămâne pentru faza 2 (neschimbat față de spec-ul inițial din CLAUDE.md)

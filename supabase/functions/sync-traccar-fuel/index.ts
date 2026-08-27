@@ -1,20 +1,26 @@
 // supabase/functions/sync-traccar-fuel/index.ts
 //
 // Job programat (cron) care trage pozițiile curente din Traccar și salvează
-// nivelul de combustibil (senzor DUT-E 232, citit prin RS232 pe FMC125) în
+// poziția (lat/lon), starea de contact (ignition) și — dacă e disponibil —
+// nivelul de combustibil (senzor DUT-E, citit prin FMC125) în
 // public.combustibil_citiri.
 //
-// STARE: ACTIVĂ (deployată 2026-08-18) — secretele TRACCAR_URL/USER/PASSWORD
-// sunt setate, cron-ul rulează la interval regulat (vezi schema-fuel-tracking.sql).
+// STARE: ACTIVĂ (deployată 2026-08-18, extinsă 2026-08-27) — secretele
+// TRACCAR_URL/USER/PASSWORD sunt setate, cron-ul rulează la interval regulat
+// (vezi schema-fuel-tracking.sql).
 //
 // CONFIRMAT (2026-08-18, pilot Săbăreni): atributul de combustibil în Traccar
-// e "io201" (Teltonika FMC125, RS232 -> LLS, DUT-E 232).
+// e "io201" (Teltonika FMC125, RS232 -> LLS, DUT-E 232). Atributul de contact
+// e "ignition" (boolean) — confirmat 2026-08-27.
+//
+// 2026-08-27: se salvează o citire pentru ORICE utilaj cu poziție validă,
+// chiar dacă n-are (încă) valoare de combustibil — altfel utilajele fără
+// senzor de combustibil calibrat nu ar avea deloc istoric de poziție/traseu,
+// necesar pentru raportul „ore lucrate pe parcelă" (get-utilaj-istoric-parcele).
 //
 // TODO rămase:
 //   1. Calibrează senzorul DUT-E pe rezervorul real (Service DUT-E, tabel de
 //      tarare) — abia după calibrare "io201" corespunde unor litri reali.
-//      Până atunci, nivel_litri din combustibil_citiri e valoarea brută
-//      necalibrată ("kvants"), nu litri adevărați.
 //   2. Adaugă restul utilajelor în tabela public.utilaje, cu traccar_device_id
 //      = IMEI-ul device-ului din Traccar (Devices -> Identifier). Pilotul
 //      (FMC125 Săbăreni, IMEI 862272083141426) e deja adăugat.
@@ -50,6 +56,11 @@ function extractFuelLiters(attributes: Record<string, unknown>): number | null {
     if (typeof value === 'number') return value;
   }
   return null;
+}
+
+function extractContact(attributes: Record<string, unknown>): boolean | null {
+  const value = attributes['ignition'];
+  return typeof value === 'boolean' ? value : null;
 }
 
 Deno.serve(async () => {
@@ -96,13 +107,13 @@ Deno.serve(async () => {
     const utilajId = utilajByImei.get(device.uniqueId);
     if (!utilajId) continue; // device Traccar fără utilaj mapat încă
 
-    const nivelLitri = extractFuelLiters(position.attributes);
-    if (nivelLitri === null) continue; // fără dată de fuel în această poziție
+    if (position.latitude === undefined || position.longitude === undefined) continue;
 
     rows.push({
       utilaj_id: utilajId,
       data_ora: position.fixTime,
-      nivel_litri: nivelLitri,
+      nivel_litri: extractFuelLiters(position.attributes),
+      contact: extractContact(position.attributes),
       latitudine: position.latitude,
       longitudine: position.longitude,
       sursa: 'traccar',

@@ -119,6 +119,7 @@ Deno.serve(async (req) => {
       .from('combustibil_citiri')
       .select('data_ora, nivel_litri')
       .eq('utilaj_id', u.id)
+      .not('nivel_litri', 'is', null)
       .gte('data_ora', de_la)
       .order('data_ora', { ascending: true });
 
