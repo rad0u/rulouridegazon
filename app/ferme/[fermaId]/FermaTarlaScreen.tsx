@@ -38,6 +38,7 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
   const { role, loading: roleLoading } = useUserRole();
   const [ferma, setFerma] = useState<Ferma | null>(null);
   const [parcele, setParcele] = useState<Parcela[]>([]);
+  const [tipuriGazon, setTipuriGazon] = useState<{ id: string; nume: string }[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,7 +50,7 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
     setLoading(true);
     setError(null);
 
-    const [fermaRes, parceleRes] = await Promise.all([
+    const [fermaRes, parceleRes, tipuriRes] = await Promise.all([
       supabase
         .from('ferme')
         .select(
@@ -62,6 +63,7 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
         .select('id,ferma_id,nume,tip_gazon,stadiu,suprafata_mp,poligon_harta')
         .eq('ferma_id', fermaId)
         .order('nume'),
+      supabase.from('tipuri_gazon').select('id,nume').order('nume'),
     ]);
 
     if (fermaRes.error) {
@@ -78,7 +80,13 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
 
     setFerma(fermaRes.data as Ferma | null);
     setParcele((parceleRes.data as Parcela[]) ?? []);
+    setTipuriGazon((tipuriRes.data as { id: string; nume: string }[]) ?? []);
     setLoading(false);
+  }
+
+  async function reloadTipuriGazon() {
+    const { data } = await supabase.from('tipuri_gazon').select('id,nume').order('nume');
+    setTipuriGazon((data as { id: string; nume: string }[]) ?? []);
   }
 
   if (loading || roleLoading) {
@@ -144,7 +152,9 @@ export default function FermaTarlaScreen({ fermaId }: FermaTarlaScreenProps) {
               : null
           }
           parcele={parcele}
+          tipuriGazon={tipuriGazon}
           editable={role === 'admin_central'}
+          onTipuriGazonSchimbate={() => void reloadTipuriGazon()}
           onCentruSaved={(lat, lon, zoom) =>
             setFerma((prev) => (prev ? { ...prev, centru_lat: lat, centru_lon: lon, centru_zoom: zoom } : prev))
           }

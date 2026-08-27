@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
-import { MapContainer, Polygon, Polyline, Circle, CircleMarker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
-import type { Map as LeafletMap } from 'leaflet';
+import { MapContainer, Polygon, Polyline, Circle, CircleMarker, Marker, TileLayer, useMapEvents, useMap } from 'react-leaflet';
+import L, { type Map as LeafletMap } from 'leaflet';
 import { supabase } from '../lib/supabaseClient';
-import { Parcela, PARCELA_COLORS, polygonLatLngs } from '../lib/parcelaTypes';
+import { Parcela, PARCELA_COLORS, polygonLatLngs, centroidLatLng } from '../lib/parcelaTypes';
 import { distantaMetri, generateCirclePolygon, zoomForResolution } from '../lib/geo';
 import ParcelaPanel from './ParcelaPanel';
 import RotatedImageOverlay from './RotatedImageOverlay';
@@ -24,8 +24,10 @@ interface FarmMapProps {
   imagineColtDS: [number, number] | null;
   imagineColtSJ: [number, number] | null;
   parcele: Parcela[];
+  tipuriGazon: { id: string; nume: string }[];
   editable: boolean;
   onCentruSaved: (lat: number, lon: number, zoom: number) => void;
+  onTipuriGazonSchimbate: () => void;
   onImagineSaved: (
     url: string | null,
     coltSS: [number, number] | null,
@@ -47,6 +49,29 @@ const PASI_CALIBRARE = [
   'Click pe hartă unde este colțul DREAPTA-SUS al imaginii',
   'Click pe hartă unde este colțul STÂNGA-JOS al imaginii',
 ];
+
+function escapeHtml(text: string) {
+  return text.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] as string));
+}
+
+// Etichetă text (numele parcelei) afișată în centrul poligonului ei, ca
+// admin-ul fermei să știe ce selectează pe hartă. Non-interactivă — click-ul
+// trece prin ea direct la poligonul de dedesubt.
+function parcelaLabelIcon(text: string) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      transform: translate(-50%, -50%);
+      white-space: nowrap;
+      font-weight: 700;
+      font-size: 13px;
+      color: #fff;
+      text-shadow: 0 0 3px #000, 0 0 3px #000, 0 1px 2px #000;
+      pointer-events: none;
+    ">${escapeHtml(text)}</div>`,
+    iconSize: [0, 0],
+  });
+}
 
 function MapClickCapture({ onClick }: { onClick: (lat: number, lon: number) => void }) {
   useMapEvents({
@@ -73,8 +98,10 @@ export default function FarmMap({
   imagineColtDS,
   imagineColtSJ,
   parcele,
+  tipuriGazon,
   editable,
   onCentruSaved,
+  onTipuriGazonSchimbate,
   onImagineSaved,
   onPolygonSaved,
   onParcelaUpdated,
@@ -112,6 +139,12 @@ export default function FarmMap({
   const [nouaParcelaSuprafata, setNouaParcelaSuprafata] = useState('');
   const [adaugaParcelaSaving, setAdaugaParcelaSaving] = useState(false);
   const [adaugaParcelaError, setAdaugaParcelaError] = useState<string | null>(null);
+
+  // Gestiune tipuri de gazon (listă editabilă, nu mai e hardcodată în cod).
+  const [tipuriGazonOpen, setTipuriGazonOpen] = useState(false);
+  const [nouTipGazonNume, setNouTipGazonNume] = useState('');
+  const [tipuriGazonSaving, setTipuriGazonSaving] = useState(false);
+  const [tipuriGazonError, setTipuriGazonError] = useState<string | null>(null);
 
   const mapRef = useRef<LeafletMap | null>(null);
 
@@ -363,6 +396,43 @@ export default function FarmMap({
     }
   }
 
+  async function adaugaTipGazon() {
+    if (!nouTipGazonNume.trim()) return;
+
+    setTipuriGazonSaving(true);
+    setTipuriGazonError(null);
+
+    const { error } = await supabase.from('tipuri_gazon').insert({ nume: nouTipGazonNume.trim() });
+
+    setTipuriGazonSaving(false);
+
+    if (error) {
+      setTipuriGazonError(
+        error.code === '23505' ? 'Există deja un tip de gazon cu acest nume.' : error.message,
+      );
+      return;
+    }
+
+    setNouTipGazonNume('');
+    onTipuriGazonSchimbate();
+  }
+
+  async function stergeTipGazon(id: string) {
+    setTipuriGazonSaving(true);
+    setTipuriGazonError(null);
+
+    const { error } = await supabase.from('tipuri_gazon').delete().eq('id', id);
+
+    setTipuriGazonSaving(false);
+
+    if (error) {
+      setTipuriGazonError(error.message);
+      return;
+    }
+
+    onTipuriGazonSchimbate();
+  }
+
   async function adaugaParcela() {
     if (!nouaParcelaNume.trim()) {
       setAdaugaParcelaError('Numele parcelei e obligatoriu.');
@@ -524,22 +594,25 @@ export default function FarmMap({
             if (latLngs.length < 3) return null;
             const color = PARCELA_COLORS[index % PARCELA_COLORS.length];
             const isSelected = parcela.id === selectedParcelaId;
+            const center = centroidLatLng(latLngs);
             return (
-              <Polygon
-                key={parcela.id}
-                positions={latLngs}
-                pathOptions={{
-                  color: color.stroke,
-                  fillColor: color.fill,
-                  fillOpacity: 0.35,
-                  weight: isSelected ? 4 : 2,
-                }}
-                eventHandlers={{
-                  click: () => {
-                    if (!drawingParcelaId && !calibrating) setSelectedParcelaId(parcela.id);
-                  },
-                }}
-              />
+              <Fragment key={parcela.id}>
+                <Polygon
+                  positions={latLngs}
+                  pathOptions={{
+                    color: color.stroke,
+                    fillColor: color.fill,
+                    fillOpacity: 0.35,
+                    weight: isSelected ? 4 : 2,
+                  }}
+                  eventHandlers={{
+                    click: () => {
+                      if (!drawingParcelaId && !calibrating) setSelectedParcelaId(parcela.id);
+                    },
+                  }}
+                />
+                {center && <Marker position={center} icon={parcelaLabelIcon(parcela.nume)} interactive={false} />}
+              </Fragment>
             );
           })}
 
@@ -728,9 +801,11 @@ export default function FarmMap({
                     style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc' }}
                   >
                     <option value="">—</option>
-                    <option value="rustic">rustic</option>
-                    <option value="sport">sport</option>
-                    <option value="în pregătire">în pregătire</option>
+                    {tipuriGazon.map((t) => (
+                      <option key={t.id} value={t.nume}>
+                        {t.nume}
+                      </option>
+                    ))}
                   </select>
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.85rem' }}>
@@ -758,6 +833,64 @@ export default function FarmMap({
                   Renunță
                 </button>
               </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {editable && !calibrating && !drawingParcelaId && (
+        <div style={{ marginTop: '0.75rem' }}>
+          {!tipuriGazonOpen ? (
+            <button onClick={() => setTipuriGazonOpen(true)} style={{ padding: '0.5rem 0.85rem' }}>
+              ⚙️ Gestionează tipurile de gazon
+            </button>
+          ) : (
+            <div style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
+              <p style={{ fontWeight: 'bold', marginTop: 0 }}>Tipuri de gazon</p>
+              <div style={{ display: 'flex', gap: '0.4rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
+                {tipuriGazon.map((t) => (
+                  <span
+                    key={t.id}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '0.35rem',
+                      padding: '0.3rem 0.6rem',
+                      borderRadius: '999px',
+                      background: '#f0f0f0',
+                      fontSize: '0.85rem',
+                    }}
+                  >
+                    {t.nume}
+                    <button
+                      onClick={() => void stergeTipGazon(t.id)}
+                      disabled={tipuriGazonSaving}
+                      title="Șterge tipul"
+                      style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, lineHeight: 1 }}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+                {tipuriGazon.length === 0 && <span style={{ color: '#666', fontSize: '0.85rem' }}>Niciun tip definit încă.</span>}
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+                <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.85rem' }}>
+                  Tip nou
+                  <input
+                    type="text"
+                    value={nouTipGazonNume}
+                    onChange={(e) => setNouTipGazonNume(e.target.value)}
+                    placeholder="ex. semi-umbră"
+                    style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '160px' }}
+                  />
+                </label>
+                <button onClick={() => void adaugaTipGazon()} disabled={tipuriGazonSaving || !nouTipGazonNume.trim()}>
+                  Adaugă
+                </button>
+                <button onClick={() => setTipuriGazonOpen(false)}>Închide</button>
+              </div>
+              {tipuriGazonError && <p style={{ color: '#b00020', marginTop: '0.5rem' }}>{tipuriGazonError}</p>}
             </div>
           )}
         </div>
@@ -866,6 +999,7 @@ export default function FarmMap({
         <div style={{ marginTop: '1.5rem' }}>
           <ParcelaPanel
             parcela={selectedParcela}
+            tipuriGazon={tipuriGazon}
             showRedrawButton={editable}
             onRedraw={() => startDrawing(selectedParcela.id)}
             editable={editable}

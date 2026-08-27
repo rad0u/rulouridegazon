@@ -14,6 +14,7 @@ import {
 
 interface ParcelaPanelProps {
   parcela: Parcela;
+  tipuriGazon: { id: string; nume: string }[];
   onRedraw?: () => void;
   showRedrawButton: boolean;
   editable: boolean;
@@ -29,6 +30,7 @@ function todayISO() {
 
 export default function ParcelaPanel({
   parcela,
+  tipuriGazon,
   onRedraw,
   showRedrawButton,
   editable,
@@ -294,9 +296,11 @@ export default function ParcelaPanel({
               style={{ display: 'block', width: '100%', marginTop: '0.25rem', padding: '0.4rem' }}
             >
               <option value="">—</option>
-              <option value="rustic">rustic</option>
-              <option value="sport">sport</option>
-              <option value="în pregătire">în pregătire</option>
+              {tipuriGazon.map((t) => (
+                <option key={t.id} value={t.nume}>
+                  {t.nume}
+                </option>
+              ))}
             </select>
           </label>
           <label style={{ display: 'block', marginBottom: '0.5rem' }}>

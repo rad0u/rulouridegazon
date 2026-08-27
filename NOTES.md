@@ -264,6 +264,34 @@ punct-cu-punct pe un poligon neregulat ar fi imprecisă pentru o formă perfect 
   cu `map.setMaxZoom()` — peste acel nivel, nici imaginea suprapusă, nici satelitul de bază
   nu mai arată detalii reale, doar pixeli măriți, deci zoom-ul e blocat acolo.
 
+### 5f. Tipuri de gazon editabile din interfață (2026-08-22)
+Lista de tipuri de gazon (înainte hardcodată în cod: rustic/sport/în pregătire) e acum un
+tabel gestionabil din aplicație, nu mai necesită modificare de cod pentru extindere.
+
+- Tabel nou `tipuri_gazon` (id, nume unic) — `supabase/schema-tipuri-gazon.sql`. Seedat cu
+  cele 3 valori vechi, ca să nu se schimbe nimic pentru parcelele existente.
+- RLS: oricine autentificat vede lista (necesar pentru dropdown-uri), doar admin_central
+  adaugă/actualizează/șterge.
+- **Notă importantă**: `parcele.tip_gazon` rămâne coloană de text liber, NU foreign key
+  către `tipuri_gazon` — lista alimentează doar dropdown-urile, nu impune o constrângere
+  strictă. Ștergerea unui tip din listă nu afectează parcelele care îl folosesc deja
+  (rămân cu eticheta text, doar nu mai apare ca opțiune la parcele noi).
+- UI: buton „⚙️ Gestionează tipurile de gazon" în `FarmMap.tsx` (admin central) — listă cu
+  ✕ de ștergere per tip + câmp „Tip nou" + Adaugă. Ambele select-uri care foloseau lista
+  hardcodată (form „Adaugă parcelă" din `FarmMap.tsx` și „Editează descrierea" din
+  `ParcelaPanel.tsx`) acum citesc din `tipuriGazon`, primit ca prop de la
+  `FermaTarlaScreen.tsx` (fetch din `tipuri_gazon`, cu funcție de reload dedicată apelată
+  după orice adăugare/ștergere).
+
+### 5g. Etichetă cu numele parcelei pe hartă (2026-08-22)
+`FarmMap.tsx`: fiecare poligon de parcelă are acum numele afișat în centrul lui pe hartă
+(text alb cu contur negru, lizibil peste orice fundal), ca admin-ul fermei să știe ce
+selectează înainte să dea click. Implementat cu `L.divIcon` + `Marker` non-interactiv
+(`interactive={false}`), poziționat la centroidul geometric al poligonului
+(`centroidLatLng()` din `lib/parcelaTypes.ts`, media aritmetică a punctelor — suficient de
+precisă pentru forme convexe/aproape convexe ca parcelele noastre, inclusiv cercurile).
+Click-ul trece prin etichetă direct la poligonul de dedesubt.
+
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament
 la providerul GPS existent.
