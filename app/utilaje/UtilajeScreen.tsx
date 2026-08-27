@@ -3,7 +3,8 @@
 import { Fragment, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
-import type { UtilajPozitie } from '../../components/UtilajeMapView';
+import type { UtilajPozitie, FermaHarta } from '../../components/UtilajeMapView';
+import type { Parcela } from '../../lib/parcelaTypes';
 
 type ZiIstoric = {
   data: string;
@@ -71,9 +72,51 @@ function isFuelSignalStale(u: UtilajPozitie): boolean {
 
 export default function UtilajeScreen() {
   const [utilaje, setUtilaje] = useState<UtilajPozitie[]>([]);
+  const [ferme, setFerme] = useState<FermaHarta[]>([]);
+  const [parcele, setParcele] = useState<Parcela[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
+
+  // Hărțile fermelor (imaginea suprapusă calibrată) + parcelele lor —
+  // aceleași date ca pe /ferme/[fermaId], afișate aici pe aceeași hartă
+  // satelit, ca să se vadă exact pe ce parcelă e fiecare utilaj.
+  async function incarcaHartaFerme() {
+    const [fermeRes, parceleRes] = await Promise.all([
+      supabase
+        .from('ferme')
+        .select(
+          'id, nume, harta_url, imagine_colt_ss_lat, imagine_colt_ss_lon, imagine_colt_ds_lat, imagine_colt_ds_lon, imagine_colt_sj_lat, imagine_colt_sj_lon',
+        ),
+      supabase.from('parcele').select('id, ferma_id, nume, tip_gazon, stadiu, suprafata_mp, poligon_harta'),
+    ]);
+
+    if (!fermeRes.error && fermeRes.data) {
+      setFerme(
+        fermeRes.data.map((f) => ({
+          id: f.id,
+          nume: f.nume,
+          harta_url: f.harta_url,
+          imagineColtSS:
+            f.imagine_colt_ss_lat !== null && f.imagine_colt_ss_lon !== null
+              ? [f.imagine_colt_ss_lat, f.imagine_colt_ss_lon]
+              : null,
+          imagineColtDS:
+            f.imagine_colt_ds_lat !== null && f.imagine_colt_ds_lon !== null
+              ? [f.imagine_colt_ds_lat, f.imagine_colt_ds_lon]
+              : null,
+          imagineColtSJ:
+            f.imagine_colt_sj_lat !== null && f.imagine_colt_sj_lon !== null
+              ? [f.imagine_colt_sj_lat, f.imagine_colt_sj_lon]
+              : null,
+        })),
+      );
+    }
+
+    if (!parceleRes.error && parceleRes.data) {
+      setParcele(parceleRes.data as Parcela[]);
+    }
+  }
 
   const [utilajExtins, setUtilajExtins] = useState<string | null>(null);
   const [istoricZile, setIstoricZile] = useState(14);
@@ -126,7 +169,10 @@ export default function UtilajeScreen() {
     setLoading(true);
     setError(null);
 
-    const { data, error: invokeError } = await supabase.functions.invoke('get-utilaje-positions');
+    const [{ data, error: invokeError }] = await Promise.all([
+      supabase.functions.invoke('get-utilaje-positions'),
+      incarcaHartaFerme(),
+    ]);
 
     setLoading(false);
     setLoadedOnce(true);
@@ -220,7 +266,7 @@ export default function UtilajeScreen() {
               border: '1px solid #ddd',
             }}
           >
-            <UtilajeMapView utilaje={utilaje} />
+            <UtilajeMapView utilaje={utilaje} ferme={ferme} parcele={parcele} />
           </div>
 
           <div style={{ overflowX: 'auto' }}>

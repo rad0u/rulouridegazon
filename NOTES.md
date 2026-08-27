@@ -319,6 +319,36 @@ pe zile. Cerere: „click pe utilaj → istoric pe zile, ore + parcele, tabel".
   funcționare. Dacă ferma nu are parcele desenate, se arată doar totalul de ore.
 - Suma orelor pe parcele poate fi < totalul de funcționare — diferența e timp cu motorul
   pornit în afara oricărei parcele (deplasare, drum).
+- **2026-08-27, aceeași zi**: interval de sincronizare Traccar redus de la 15 la 5 minute
+  (`supabase/schema-cron-sync-traccar.sql`) — cerere explicită pentru precizie mai bună.
+- **2026-08-27, îmbunătățire majoră de precizie**: verificat direct în Traccar (Reports ->
+  Positions) — cât timp utilajul se mișcă, FMC125 raportează o poziție nouă la fiecare
+  2-15 secunde; cât timp stă pe loc, doar o dată pe oră (heartbeat). `sync-traccar-fuel` a
+  fost rescris să ceară din Traccar **tot istoricul de poziții** de la ultima citire
+  salvată până acum (`GET /api/positions?deviceId=X&from=...&to=...`), nu doar "poziția
+  curentă" ca înainte — altfel rezoluția reală era limitată la intervalul de cron (5 min),
+  pierzând aproape toate pozițiile intermediare cât timp utilajul lucra. Acum se prinde
+  fiecare poziție reală raportată de device. Protecție: dacă ultima citire salvată e mai
+  veche de 3 ore (`MAX_LOOKBACK_ORE`), nu se recuperează tot golul dintr-o singură rulare
+  (ar cere de la Traccar prea multe puncte deodată) — rămâne un gol în istoric în acel caz.
+
+### 5i. Harta /utilaje: aceeași hartă cu parcelele + overlay (2026-08-27)
+`UtilajeMapView.tsx` afișa doar markere de utilaje pe o hartă simplă (stradă/satelit),
+fără parcele — cerere: să se vadă exact pe ce parcelă e fiecare utilaj.
+
+- Rescris să primească și `ferme` (cu `harta_url` + cele 3 colțuri calibrate) și `parcele`
+  (toate fermele, nu doar una) ca props, în plus față de pozițiile utilajelor.
+- Randează pe **aceeași** hartă satelit: `RotatedImageOverlay` pentru fiecare fermă care
+  are imagine calibrată (aceeași componentă ca pe `/ferme/[fermaId]`), plus poligoanele +
+  etichetele tuturor parcelelor (`polygonLatLngs`, `centroidLatLng`, `PARCELA_COLORS` din
+  `lib/parcelaTypes.ts`) — apoi markerele utilajelor deasupra.
+- Funcționează pe o singură hartă combinată (nu una per fermă) pentru că overlay-urile
+  sunt calibrate cu coordonate GPS reale — se poziționează automat corect indiferent câte
+  ferme sunt afișate simultan, fără conflicte.
+- `UtilajeScreen.tsx`: la reîncărcare, pe lângă `get-utilaje-positions`, se aduc direct din
+  Supabase (RLS admin_central) toate rândurile din `ferme` (coloanele hărții) și `parcele`.
+- Read-only — fără instrumentele de desenare/editare din `FarmMap.tsx` (acelea rămân doar
+  pe `/ferme/[fermaId]`).
 
 ### Flotă auto (mașini de pasageri) — caz de utilizare separat
 Scop: doar foi de parcurs (trip logs), fără monitorizare combustibil, fără abonament

@@ -1,22 +1,35 @@
 // supabase/functions/sync-traccar-fuel/index.ts
 //
-// Job programat (cron) care trage pozițiile curente din Traccar și salvează
+// Job programat (cron) care trage istoricul de poziții din Traccar și salvează
 // poziția (lat/lon), starea de contact (ignition) și — dacă e disponibil —
 // nivelul de combustibil (senzor DUT-E, citit prin FMC125) în
 // public.combustibil_citiri.
 //
 // STARE: ACTIVĂ (deployată 2026-08-18, extinsă 2026-08-27) — secretele
-// TRACCAR_URL/USER/PASSWORD sunt setate, cron-ul rulează la interval regulat
-// (vezi schema-fuel-tracking.sql).
+// TRACCAR_URL/USER/PASSWORD sunt setate, cron-ul rulează la 5 minute (vezi
+// schema-cron-sync-traccar.sql).
 //
 // CONFIRMAT (2026-08-18, pilot Săbăreni): atributul de combustibil în Traccar
 // e "io201" (Teltonika FMC125, RS232 -> LLS, DUT-E 232). Atributul de contact
 // e "ignition" (boolean) — confirmat 2026-08-27.
 //
-// 2026-08-27: se salvează o citire pentru ORICE utilaj cu poziție validă,
-// chiar dacă n-are (încă) valoare de combustibil — altfel utilajele fără
-// senzor de combustibil calibrat nu ar avea deloc istoric de poziție/traseu,
-// necesar pentru raportul „ore lucrate pe parcelă" (get-utilaj-istoric-parcele).
+// 2026-08-27 (v1): se salvează o citire pentru ORICE utilaj cu poziție
+// validă, chiar dacă n-are (încă) valoare de combustibil — altfel utilajele
+// fără senzor de combustibil calibrat n-ar avea deloc istoric de
+// poziție/traseu, necesar pentru raportul „ore lucrate pe parcelă"
+// (get-utilaj-istoric-parcele).
+//
+// 2026-08-27 (v2): în loc să cerem din Traccar doar "poziția curentă"
+// (GET /api/positions), cerem TOT istoricul de poziții de la ultima citire
+// salvată până acum (GET /api/positions?deviceId=X&from=...&to=...).
+// Motiv: verificat direct în Traccar (Reports -> Positions) — cât timp
+// utilajul se mișcă, FMC125 raportează o poziție nouă la fiecare 2-15
+// secunde; cât timp stă pe loc, doar o dată pe oră (heartbeat). Cu vechea
+// abordare (o singură citire per rulare de cron), rezoluția reală era
+// limitată la intervalul de cron (5 min), pierzând aproape toate pozițiile
+// intermediare cât timp utilajul lucra. Acum prindem fiecare poziție reală
+// raportată de device, ceea ce dă mult mai multă precizie la atribuirea
+// ore-lucrate-pe-parcelă din get-utilaj-istoric-parcele.
 //
 // TODO rămase:
 //   1. Calibrează senzorul DUT-E pe rezervorul real (Service DUT-E, tabel de
@@ -36,6 +49,15 @@ const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '
 
 // Confirmat din Traccar (Latest position -> More info) pe pilotul Săbăreni.
 const FUEL_ATTRIBUTE_CANDIDATES = ['io201', 'fuel1', 'fuel', 'fuelLevel'];
+
+// Dacă ultima citire salvată e mai veche decât atât (ex. cron-ul a fost oprit
+// temporar, sau utilajul a fost offline zile întregi), nu recuperăm tot golul
+// dintr-o singură rulare — am putea cere de la Traccar zeci de mii de puncte
+// dintr-o dată. Rămâne un gol în istoric, dar nu blocăm/încetinim sincronizarea.
+const MAX_LOOKBACK_ORE = 3;
+// Interval implicit de căutat înapoi când utilajul n-are încă nicio citire
+// salvată (prima rulare pentru el).
+const DEFAULT_LOOKBACK_MINUTE = 20;
 
 interface TraccarPosition {
   deviceId: number;
@@ -71,57 +93,79 @@ Deno.serve(async () => {
   }
 
   const auth = 'Basic ' + btoa(`${TRACCAR_USER}:${TRACCAR_PASSWORD}`);
-
-  const [devicesRes, positionsRes] = await Promise.all([
-    fetch(`${TRACCAR_URL}/api/devices`, { headers: { Authorization: auth } }),
-    fetch(`${TRACCAR_URL}/api/positions`, { headers: { Authorization: auth } }),
-  ]);
-
-  if (!devicesRes.ok || !positionsRes.ok) {
-    return new Response('Eroare la citirea din Traccar API.', { status: 502 });
-  }
-
-  const devices: TraccarDevice[] = await devicesRes.json();
-  const positions: TraccarPosition[] = await positionsRes.json();
-
-  const deviceById = new Map(devices.map((d) => [d.id, d]));
-
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+
+  const devicesRes = await fetch(`${TRACCAR_URL}/api/devices`, { headers: { Authorization: auth } });
+  if (!devicesRes.ok) {
+    return new Response('Eroare la citirea device-urilor din Traccar.', { status: 502 });
+  }
+  const devices: TraccarDevice[] = await devicesRes.json();
+  const deviceByImei = new Map(devices.map((d) => [d.uniqueId, d]));
 
   const { data: utilaje, error: utilajeError } = await supabase
     .from('utilaje')
     .select('id, traccar_device_id')
-    .eq('activ', true);
+    .eq('activ', true)
+    .not('traccar_device_id', 'is', null);
 
   if (utilajeError) {
     return new Response(`Eroare la citirea utilajelor: ${utilajeError.message}`, { status: 500 });
   }
 
-  const utilajByImei = new Map((utilaje ?? []).map((u) => [u.traccar_device_id, u.id]));
+  const now = new Date();
+  const minFrom = new Date(now.getTime() - MAX_LOOKBACK_ORE * 3_600_000);
+  const defaultFrom = new Date(now.getTime() - DEFAULT_LOOKBACK_MINUTE * 60_000);
 
-  const rows = [];
-  for (const position of positions) {
-    const device = deviceById.get(position.deviceId);
+  const rows: Record<string, unknown>[] = [];
+  const perUtilaj: Record<string, number> = {};
+  const erori: Record<string, string> = {};
+
+  for (const utilaj of utilaje ?? []) {
+    const device = deviceByImei.get(utilaj.traccar_device_id as string);
     if (!device) continue;
 
-    const utilajId = utilajByImei.get(device.uniqueId);
-    if (!utilajId) continue; // device Traccar fără utilaj mapat încă
+    // Pornim de unde am rămas ultima dată, ca să prindem TOT istoricul de
+    // poziții raportate de Traccar de atunci — nu doar "poziția curentă".
+    const { data: ultima } = await supabase
+      .from('combustibil_citiri')
+      .select('data_ora')
+      .eq('utilaj_id', utilaj.id)
+      .order('data_ora', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-    if (position.latitude === undefined || position.longitude === undefined) continue;
+    let from = ultima?.data_ora ? new Date(ultima.data_ora as string) : defaultFrom;
+    if (from < minFrom) from = minFrom;
+    if (from >= now) continue;
 
-    rows.push({
-      utilaj_id: utilajId,
-      data_ora: position.fixTime,
-      nivel_litri: extractFuelLiters(position.attributes),
-      contact: extractContact(position.attributes),
-      latitudine: position.latitude,
-      longitudine: position.longitude,
-      sursa: 'traccar',
-    });
+    const url = `${TRACCAR_URL}/api/positions?deviceId=${device.id}&from=${from.toISOString()}&to=${now.toISOString()}`;
+    const posRes = await fetch(url, { headers: { Authorization: auth } });
+
+    if (!posRes.ok) {
+      erori[utilaj.id] = `Traccar a răspuns cu ${posRes.status} pentru device ${device.id}.`;
+      continue;
+    }
+
+    const positions: TraccarPosition[] = await posRes.json();
+    perUtilaj[utilaj.id] = positions.length;
+
+    for (const position of positions) {
+      if (position.latitude === undefined || position.longitude === undefined) continue;
+
+      rows.push({
+        utilaj_id: utilaj.id,
+        data_ora: position.fixTime,
+        nivel_litri: extractFuelLiters(position.attributes),
+        contact: extractContact(position.attributes),
+        latitudine: position.latitude,
+        longitudine: position.longitude,
+        sursa: 'traccar',
+      });
+    }
   }
 
   if (rows.length === 0) {
-    return new Response(JSON.stringify({ inserted: 0 }), { status: 200 });
+    return new Response(JSON.stringify({ inserted: 0, per_utilaj: perUtilaj, erori }), { status: 200 });
   }
 
   const { error: insertError } = await supabase
@@ -132,5 +176,5 @@ Deno.serve(async () => {
     return new Response(`Eroare la salvare: ${insertError.message}`, { status: 500 });
   }
 
-  return new Response(JSON.stringify({ inserted: rows.length }), { status: 200 });
+  return new Response(JSON.stringify({ inserted: rows.length, per_utilaj: perUtilaj, erori }), { status: 200 });
 });

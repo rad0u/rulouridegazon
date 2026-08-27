@@ -28,7 +28,11 @@ CREATE TABLE IF NOT EXISTS public.combustibil_citiri (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   utilaj_id uuid NOT NULL REFERENCES public.utilaje(id),
   data_ora timestamptz NOT NULL,
-  nivel_litri numeric NOT NULL,
+  -- 2026-08-27: devenit nullable — se salvează acum o citire pentru orice
+  -- utilaj cu poziție GPS validă, nu doar cele cu senzor de combustibil
+  -- calibrat (necesar pentru istoricul ore/parcelă). Vezi și coloana
+  -- `contact` de mai jos (schema-istoric-parcele-utilaj.sql).
+  nivel_litri numeric,
   latitudine numeric,
   longitudine numeric,
   sursa text NOT NULL DEFAULT 'traccar',
