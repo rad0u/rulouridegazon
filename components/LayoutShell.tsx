@@ -42,7 +42,11 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
           borderBottom: '1px solid #ddd',
           flexShrink: 0,
           position: 'relative',
-          zIndex: 20,
+          // Trebuie să stea deasupra hărților Leaflet din pagini (butoanele
+          // Stradă/Satelit și controalele proprii Leaflet folosesc z-index
+          // 800-1000) — altfel meniul deschis apărea sub hartă pe paginile cu
+          // hartă (ex. /ferme/[fermaId], /utilaje).
+          zIndex: 2000,
           background: '#fff',
         }}
       >
