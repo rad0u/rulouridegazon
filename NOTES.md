@@ -370,7 +370,15 @@ Traccar-ul existent (http://135.181.45.175/).
   manual de șofer.
 - Fiecare mașină are un **șofer implicit** (`masini.sofer_implicit_id`), editabil din
   `/masini` — cursele noi se atribuie automat lui la detectare.
-- Flotă **centrală**, nu legată de o fermă anume (spre deosebire de utilaje).
+- Flotă alocabilă pe ferme (**2026-08-28**, revizuit — inițial gândită ca flotă
+  centrală, schimbat la cererea lui Radu): `masini.ferma_id`, opțional — o
+  mașină nealocată rămâne în „pool central" (vizibil doar admin_central).
+  Admin_central face alocarea din `/masini`. Rolul **admin_ferma existent**
+  (cel de pe parcele/utilaje/substanțe) e reutilizat — nu s-a creat un rol
+  nou — și vede DOAR mașinile fermei lui, fără hartă live, fără editare;
+  poate doar introduce **bonuri de combustibil** (tabelul nou
+  `bonuri_combustibil_masini`: dată, litri, preț/litru, sumă totală, stație,
+  km la bord, notă) pentru mașinile fermei lui, din același `/masini`.
 
 **Schema** (`supabase/schema-masini.sql`, aplicată direct prin Supabase MCP):
 tabele noi `masini`, `masini_pozitii`, `curse`, `geofences`, `alerte` + RLS
@@ -378,7 +386,12 @@ tabele noi `masini`, `masini_pozitii`, `curse`, `geofences`, `alerte` + RLS
 cursele proprii, cu politică UPDATE care blochează modificarea după ce admin
 setează `status = 'validata'`). Rolul `sofer` nu are constrângere CHECK în
 bază (coloana `utilizatori.rol` e text liber, ca și până acum) — validat doar
-în `admin-create-user` și în formularul din `/utilizatori`.
+în `admin-create-user` și în formularul din `/utilizatori`. **2026-08-28**:
+migrația `flota_masini_alocare_ferme_si_bonuri_combustibil` a adăugat
+`masini.ferma_id` (nullable, FK spre `ferme`) și tabelul
+`bonuri_combustibil_masini` (RLS: admin_central gestionează tot; admin_ferma
+vede/adaugă bonuri doar pentru mașinile fermei lui, editează/șterge doar
+bonurile introduse chiar de el).
 
 **Edge Function `sync-traccar-masini`** (cron, 5 min, `verify_jwt: false` —
 la fel ca `sync-traccar-fuel`): într-o singură rulare — (1) sincronizează tot
@@ -400,9 +413,17 @@ combustibil), `get-foaie-parcurs` (date pentru raportul lunar per mașină,
 aceeași formulă `net.http_post` + `app.settings.anon_key` ca la utilaje.
 
 **Pagini noi**:
-- `/masini` (admin_central) — listă + hartă live (`components/MasiniMapView.tsx`,
-  analog `UtilajeMapView.tsx`) + formular adăugare mașină (nume, nr. înmatriculare,
-  IMEI, șofer implicit, limită viteză) + editare inline per mașină.
+- `/masini` — pagină unică, două randări după rol (fără `AdminCentralGuard` în
+  layout — control de acces în `MasiniScreen.tsx` + RLS, la fel ca `/curse`):
+  - **admin_central**: listă + hartă live (`components/MasiniMapView.tsx`,
+    analog `UtilajeMapView.tsx`) + formular adăugare mașină (nume, nr.
+    înmatriculare, IMEI, șofer implicit, **fermă** — opțional, pool central
+    dacă necompletat —, limită viteză) + editare inline per mașină (inclusiv
+    realocare fermă).
+  - **admin_ferma**: listă simplă a mașinilor alocate fermei lui (fără hartă,
+    fără editare) + formular „Adaugă bon de combustibil" (mașină, dată,
+    litri, preț/litru, sumă totală, stație, km la bord, notă) + istoric
+    bonuri recente ale fermei.
 - `/curse` — pagină unică, două randări după rol (fără `AdminCentralGuard` în
   layout, control de acces în `CurseScreen.tsx` + RLS): șofer vede carduri
   mobil-first cu formular de scop; admin vede tabel per mașină cu buton

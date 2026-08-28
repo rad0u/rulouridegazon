@@ -93,7 +93,7 @@ Deno.serve(async (req) => {
   const { data: masini, error: masiniError } = await adminClient
     .from('masini')
     .select(
-      'id, nume, numar_inmatriculare, traccar_device_id, sofer_implicit_id, viteza_limita_kmh, utilizatori(nume)',
+      'id, nume, numar_inmatriculare, traccar_device_id, sofer_implicit_id, viteza_limita_kmh, ferma_id, utilizatori(nume), ferme(nume)',
     )
     .eq('activ', true);
 
@@ -144,6 +144,8 @@ Deno.serve(async (req) => {
       nume: m.nume,
       numar_inmatriculare: m.numar_inmatriculare,
       sofer_nume: m.utilizatori?.nume ?? null,
+      ferma_id: m.ferma_id,
+      ferma_nume: m.ferme?.nume ?? null,
       viteza_limita_kmh: m.viteza_limita_kmh,
       status: device?.status ?? 'necunoscut',
       contact: typeof contact === 'boolean' ? contact : null,

@@ -23,6 +23,7 @@ export type MasinaPozitie = {
   nume: string;
   numar_inmatriculare: string | null;
   sofer_nume: string | null;
+  ferma_nume: string | null;
   viteza_limita_kmh: number | null;
   status: string;
   contact: boolean | null;
@@ -141,6 +142,8 @@ export default function MasiniMapView({
                   <br />
                 </>
               )}
+              Fermă: {m.ferma_nume ?? 'pool central'}
+              <br />
               Status: {m.status === 'online' ? 'online' : 'offline'} · Contact:{' '}
               {m.contact === true ? 'pornit' : m.contact === false ? 'oprit' : 'necunoscut'}
               <br />

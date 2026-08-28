@@ -75,8 +75,12 @@ Sistemul scade automat din stocul de substanțe la înregistrarea unei operațiu
 ## Modul Flotă auto (mașini de pasageri) — foi de parcurs
 
 Adăugat 2026-08-27. Complet separat conceptual de modulul utilaje/combustibil
-(fermă, tractor, DUT-E) — flotă centrală de mașini de pasageri, fără senzor
-de combustibil, scop unic: foi de parcurs lunare + geofencing/alerte viteză.
+(fermă, tractor, DUT-E) — flotă de mașini de pasageri, fără senzor de
+combustibil, scop unic: foi de parcurs lunare + geofencing/alerte viteză.
+**2026-08-28**: mașinile pot fi alocate pe ferme (opțional — o mașină
+nealocată rămâne în „pool central", vizibilă doar admin_central), iar
+admin_ferma poate introduce bonuri de combustibil pentru mașinile fermei
+lui.
 
 ### Hardware
 - **Tracker GPS**: Teltonika FMC130 (25 bucăți achiziționate + 25 SIM-uri de
@@ -88,8 +92,12 @@ de combustibil, scop unic: foi de parcurs lunare + geofencing/alerte viteză.
 ### Roluri
 - **Șofer** (`utilizatori.rol = 'sofer'`) — vede/completează doar cursele
   proprii (`curse.sofer_id = auth.uid()`), din mobil. Nu are `ferma_id`.
-- **Admin general** — gestionează mașinile, validează cursele, generează
-  foile de parcurs, definește zonele de geofencing.
+- **Admin general** — gestionează mașinile (inclusiv alocarea pe ferme),
+  validează cursele, generează foile de parcurs, definește zonele de
+  geofencing, vede harta live.
+- **Admin fermă** (rolul existent `admin_ferma`, reutilizat — nu e rol nou)
+  — vede DOAR mașinile alocate fermei lui, din `/masini`, fără hartă live și
+  fără editare; poate doar introduce bonuri de combustibil pentru ele.
 
 ### Flux
 1. Șoferul urcă în mașină → contactul pornește → `sync-traccar-masini`
@@ -104,10 +112,14 @@ de combustibil, scop unic: foi de parcurs lunare + geofencing/alerte viteză.
    `window.print()`).
 5. Geofencing (`/geofences`) + alerte de viteză (`viteza_limita_kmh` per
    mașină) — detectate în același job cron, afișate în `/alerte`.
+6. Admin general alocă fiecare mașină unei ferme din `/masini` (opțional —
+   poate rămâne nealocată). Admin fermă introduce bonurile de combustibil
+   pentru mașinile fermei lui din același `/masini`.
 
 ### Model de date
 - `masini` (id, nume, numar_inmatriculare, marca_model, traccar_device_id,
-  sofer_implicit_id → utilizatori, viteza_limita_kmh, activ)
+  sofer_implicit_id → utilizatori, ferma_id → ferme (nullable, pool central
+  dacă NULL), viteza_limita_kmh, activ)
 - `masini_pozitii` (id, masina_id, data_ora, latitudine, longitudine,
   viteza_kmh, contact, sursa)
 - `curse` (id, masina_id, sofer_id, data_ora_start, data_ora_stop, km, scop,
@@ -116,6 +128,8 @@ de combustibil, scop unic: foi de parcurs lunare + geofencing/alerte viteză.
   `parcele.poligon_harta`, tip_alerta: intrare/iesire/ambele, activ)
 - `alerte` (id, masina_id, tip: viteza/intrare_zona/iesire_zona, geofence_id,
   viteza_masurata, viteza_limita, data_ora, latitudine, longitudine, vazuta)
+- `bonuri_combustibil_masini` (id, masina_id, data, litri, pret_litru,
+  suma_totala, statie, km_bord, note, introdus_de → utilizatori)
 
 Detalii complete de implementare, decizii și pași manuali rămași: vezi
 `NOTES.md`, secțiunea „Flotă auto".

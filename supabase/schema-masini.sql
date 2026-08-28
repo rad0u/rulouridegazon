@@ -13,8 +13,11 @@
 --   - Km oficiali pe foaia de parcurs = calculați din traseul GPS (sumă de
 --     distanțe haversine între poziții consecutive ale cursei), nu introduși
 --     manual.
---   - Flotă centrală (nu legată de o fermă anume) — mașinile au un șofer
---     implicit, dar aparțin de admin_central, nu de admin_ferma.
+--   - Mașinile pot fi alocate unei ferme (admin_central decide alocarea) sau
+--     rămân în "pool central" (ferma_id = NULL) dacă nu sunt alocate încă.
+--     Admin_ferma vede DOAR mașinile alocate fermei lui (fără hartă live, fără
+--     editare) și poate introduce bonuri de combustibil pentru ele — vezi
+--     migrația "flota_masini_alocare_ferme_si_bonuri_combustibil" mai jos.
 --
 -- APLICATĂ deja direct în Supabase (proiect oyxnjyvproazqhyfgyet) prin
 -- migrația "modul_flota_auto_masini" — acest fișier e doar copia sursă de
@@ -154,3 +157,89 @@ DROP POLICY IF EXISTS "admin_central poate marca alertele vazute" ON public.aler
 CREATE POLICY "admin_central poate marca alertele vazute" ON public.alerte
 FOR UPDATE USING (auth.role() = 'authenticated' AND public.is_admin_central())
 WITH CHECK (auth.role() = 'authenticated' AND public.is_admin_central());
+
+-- ─────────────────────────────────────────────────────────────────────────
+-- Alocare mașini pe ferme + bonuri de combustibil (migrația
+-- "flota_masini_alocare_ferme_si_bonuri_combustibil", aplicată live).
+--
+-- Decizie: rolul admin_ferma existent (cel care administrează deja
+-- parcele/utilaje/substanțe pe ferma lui) e reutilizat și pentru mașini —
+-- nu există un rol separat. admin_ferma poate DOAR vedea mașinile alocate
+-- fermei lui și introduce bonuri de combustibil — nu editează mașina, nu are
+-- hartă live (acelea rămân exclusiv admin_central, prin get-masini-positions).
+-- ─────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE public.masini ADD COLUMN IF NOT EXISTS ferma_id uuid REFERENCES public.ferme(id);
+
+CREATE TABLE IF NOT EXISTS public.bonuri_combustibil_masini (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  masina_id uuid NOT NULL REFERENCES public.masini(id),
+  data date NOT NULL,
+  litri numeric,
+  pret_litru numeric,
+  suma_totala numeric NOT NULL,
+  statie text,
+  km_bord numeric,
+  note text,
+  introdus_de uuid REFERENCES public.utilizatori(id),
+  created_at timestamptz DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS bonuri_combustibil_masini_masina_data_idx
+  ON public.bonuri_combustibil_masini (masina_id, data DESC);
+
+ALTER TABLE public.bonuri_combustibil_masini ENABLE ROW LEVEL SECURITY;
+
+-- masini: admin_ferma vede doar masinile alocate fermei sale (pool central,
+-- ferma_id = NULL, rămâne vizibil doar pentru admin_central)
+DROP POLICY IF EXISTS "admin_ferma vede masinile alocate fermei sale" ON public.masini;
+CREATE POLICY "admin_ferma vede masinile alocate fermei sale" ON public.masini
+FOR SELECT USING (
+  auth.role() = 'authenticated'
+  AND exists (
+    select 1 from public.utilizatori u
+    where u.id = auth.uid()
+      and u.rol = 'admin_ferma'
+      and u.ferma_id = public.masini.ferma_id
+  )
+);
+
+DROP POLICY IF EXISTS "admin_central gestioneaza bonurile de combustibil masini" ON public.bonuri_combustibil_masini;
+CREATE POLICY "admin_central gestioneaza bonurile de combustibil masini" ON public.bonuri_combustibil_masini
+FOR ALL USING (auth.role() = 'authenticated' AND public.is_admin_central())
+WITH CHECK (auth.role() = 'authenticated' AND public.is_admin_central());
+
+DROP POLICY IF EXISTS "admin_ferma vede bonurile masinilor fermei sale" ON public.bonuri_combustibil_masini;
+CREATE POLICY "admin_ferma vede bonurile masinilor fermei sale" ON public.bonuri_combustibil_masini
+FOR SELECT USING (
+  auth.role() = 'authenticated'
+  AND exists (
+    select 1 from public.utilizatori u
+    join public.masini m on m.id = public.bonuri_combustibil_masini.masina_id
+    where u.id = auth.uid()
+      and u.rol = 'admin_ferma'
+      and u.ferma_id = m.ferma_id
+  )
+);
+
+DROP POLICY IF EXISTS "admin_ferma adauga bonuri pentru masinile fermei sale" ON public.bonuri_combustibil_masini;
+CREATE POLICY "admin_ferma adauga bonuri pentru masinile fermei sale" ON public.bonuri_combustibil_masini
+FOR INSERT WITH CHECK (
+  auth.role() = 'authenticated'
+  AND introdus_de = auth.uid()
+  AND exists (
+    select 1 from public.utilizatori u
+    join public.masini m on m.id = public.bonuri_combustibil_masini.masina_id
+    where u.id = auth.uid()
+      and u.rol = 'admin_ferma'
+      and u.ferma_id = m.ferma_id
+  )
+);
+
+DROP POLICY IF EXISTS "admin_ferma editeaza bonurile proprii" ON public.bonuri_combustibil_masini;
+CREATE POLICY "admin_ferma editeaza bonurile proprii" ON public.bonuri_combustibil_masini
+FOR UPDATE USING (auth.role() = 'authenticated' AND introdus_de = auth.uid())
+WITH CHECK (auth.role() = 'authenticated' AND introdus_de = auth.uid());
+
+DROP POLICY IF EXISTS "admin_ferma sterge bonurile proprii" ON public.bonuri_combustibil_masini;
+CREATE POLICY "admin_ferma sterge bonurile proprii" ON public.bonuri_combustibil_masini
+FOR DELETE USING (auth.role() = 'authenticated' AND introdus_de = auth.uid());
