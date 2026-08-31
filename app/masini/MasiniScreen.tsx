@@ -462,8 +462,8 @@ function MasiniAdminCentral() {
         </form>
         {soferi.length === 0 && (
           <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem' }}>
-            Nu există încă niciun cont cu rol Șofer — creează unul din /utilizatori înainte de a
-            aloca un șofer implicit.
+            Nu există conturi cu rol Șofer — nu e nevoie de ele. Lasă câmpul gol: scopul curselor
+            (foaia de parcurs) se completează direct de administratorul fermei, din /curse.
           </p>
         )}
       </section>

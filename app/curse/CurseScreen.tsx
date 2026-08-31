@@ -169,7 +169,7 @@ export default function CurseScreen() {
   }
 
   useEffect(() => {
-    if (role === 'sofer') void incarcaCurseleSofer();
+    if (role === 'sofer' || role === 'admin_ferma') void incarcaCurseleSofer();
     if (role === 'admin_central') void incarcaMasini();
   }, [role]);
 
@@ -181,7 +181,7 @@ export default function CurseScreen() {
       setError(err.message);
       return;
     }
-    if (role === 'sofer') await incarcaCurseleSofer();
+    if (role === 'sofer' || role === 'admin_ferma') await incarcaCurseleSofer();
     else await incarcaCurseleMasina(masinaId);
     setEditRow(null);
   }
@@ -203,20 +203,22 @@ export default function CurseScreen() {
     );
   }
 
-  if (role !== 'sofer' && role !== 'admin_central') {
+  if (role !== 'sofer' && role !== 'admin_central' && role !== 'admin_ferma') {
     return (
       <main style={{ padding: '1.5rem' }}>
         <h1>Acces interzis</h1>
-        <p>Această secțiune este disponibilă doar pentru șoferi și admin general.</p>
+        <p>Această secțiune este disponibilă doar pentru șoferi, administratorii de fermă și admin general.</p>
       </main>
     );
   }
 
-  // --- Vedere șofer: carduri, mobil-first ---
-  if (role === 'sofer') {
+  // --- Vedere șofer / admin fermă: carduri, mobil-first ---
+  // (fără conturi de șofer create, admin_ferma completează el scopul curselor
+  // pentru mașinile fermei lui — RLS scopează automat lista de mai jos)
+  if (role === 'sofer' || role === 'admin_ferma') {
     return (
       <main style={{ padding: 'clamp(0.75rem, 4vw, 1.5rem)', maxWidth: '640px', margin: '0 auto' }}>
-        <h1 style={{ marginBottom: '0.25rem' }}>Cursele mele</h1>
+        <h1 style={{ marginBottom: '0.25rem' }}>{role === 'sofer' ? 'Cursele mele' : 'Curse fermă'}</h1>
         <p style={{ marginTop: 0, color: '#666' }}>
           Traseul se înregistrează automat din GPS. Completează doar scopul fiecărei curse.
         </p>

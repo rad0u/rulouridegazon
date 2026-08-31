@@ -454,7 +454,10 @@ aceeași formulă `net.http_post` + `app.settings.anon_key` ca la utilaje.
 3. Adaugă mașina în aplicație din `/masini` (nume, nr. înmatriculare, IMEI,
    șofer implicit, limită viteză) — apare automat pe hartă și începe
    detectarea curselor la următorul ciclu de cron (max 5 min).
-4. Creează un cont cu rol Șofer pentru fiecare șofer, din `/utilizatori`.
+4. ~~Creează un cont cu rol Șofer pentru fiecare șofer~~ — decis
+   **2026-08-31** să nu se creeze conturi de șofer (foaia de parcurs e doar
+   acoperire ANAF, nu justifică overhead-ul); admin_ferma completează el
+   scopul curselor din `/curse`, pentru mașinile fermei lui.
 5. (Opțional) Desenează zonele de geofencing relevante din `/geofences`
    (ex. sediu, limite zonă de operare) — fără nicio zonă definită, doar
    alertele de viteză funcționează.

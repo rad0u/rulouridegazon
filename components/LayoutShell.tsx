@@ -140,9 +140,14 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                     Substanțe
                   </Link>
                   {(role === 'admin_central' || role === 'admin_ferma') && (
-                    <Link href="/masini" style={navLinkStyle} onClick={closeMenu}>
-                      Mașini
-                    </Link>
+                    <>
+                      <Link href="/masini" style={navLinkStyle} onClick={closeMenu}>
+                        Mașini
+                      </Link>
+                      <Link href="/curse" style={navLinkStyle} onClick={closeMenu}>
+                        Curse
+                      </Link>
+                    </>
                   )}
                   {role === 'admin_central' && (
                     <>
@@ -157,9 +162,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                       </Link>
                       <Link href="/rezervor-central" style={navLinkStyle} onClick={closeMenu}>
                         Rezervor central
-                      </Link>
-                      <Link href="/curse" style={navLinkStyle} onClick={closeMenu}>
-                        Curse
                       </Link>
                       <Link href="/foi-parcurs" style={navLinkStyle} onClick={closeMenu}>
                         Foi de parcurs

@@ -80,7 +80,11 @@ combustibil, scop unic: foi de parcurs lunare + geofencing/alerte viteză.
 **2026-08-28**: mașinile pot fi alocate pe ferme (opțional — o mașină
 nealocată rămâne în „pool central", vizibilă doar admin_central), iar
 admin_ferma poate introduce bonuri de combustibil pentru mașinile fermei
-lui.
+lui. **2026-08-31**: nu se creează conturi cu rol Șofer (foaia de parcurs e
+doar acoperire ANAF pentru cheltuiala cu combustibilul, nu justifică
+overhead-ul de conturi separate per șofer) — admin_ferma completează el
+scopul curselor din `/curse`, pentru mașinile alocate fermei lui (RLS nouă,
+mirror pe cea de la `sofer`, scopată prin `masini.ferma_id`).
 
 ### Hardware
 - **Tracker GPS**: Teltonika FMC130 (25 bucăți achiziționate + 25 SIM-uri de
@@ -92,12 +96,17 @@ lui.
 ### Roluri
 - **Șofer** (`utilizatori.rol = 'sofer'`) — vede/completează doar cursele
   proprii (`curse.sofer_id = auth.uid()`), din mobil. Nu are `ferma_id`.
+  Rămâne suportat în cod, dar **neutilizat momentan** (decizie 2026-08-31,
+  vezi mai jos) — nu se creează astfel de conturi.
 - **Admin general** — gestionează mașinile (inclusiv alocarea pe ferme),
   validează cursele, generează foile de parcurs, definește zonele de
   geofencing, vede harta live.
 - **Admin fermă** (rolul existent `admin_ferma`, reutilizat — nu e rol nou)
   — vede DOAR mașinile alocate fermei lui, din `/masini`, fără hartă live și
-  fără editare; poate doar introduce bonuri de combustibil pentru ele.
+  fără editare; poate doar introduce bonuri de combustibil pentru ele. În
+  lipsa conturilor de șofer, completează el scopul curselor din `/curse`
+  (aceeași vedere mobil-first, RLS scopată pe mașinile fermei lui în loc de
+  `sofer_id`).
 
 ### Flux
 1. Șoferul urcă în mașină → contactul pornește → `sync-traccar-masini`
@@ -105,8 +114,10 @@ lui.
    la fel ca orele de funcționare de la utilaje).
 2. Km parcurși = calculați automat din traseul GPS (haversine cumulat), NU
    introduși manual.
-3. Șoferul completează doar **scopul cursei** din `/curse` (mobil) — nu
-   pornește/oprește nimic manual.
+3. Scopul cursei se completează din `/curse` (mobil-first) — implicit de
+   admin_ferma (nu se creează conturi de șofer, decizie 2026-08-31), sau de
+   șofer dacă totuși există un cont pentru el. Traseul nu se pornește/oprește
+   manual, oricine completează.
 4. Admin validează cursele completate din `/curse` (desktop) → generează
    foaia de parcurs lunară din `/foi-parcurs` (tabel printabil / PDF prin
    `window.print()`).

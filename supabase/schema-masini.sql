@@ -243,3 +243,42 @@ WITH CHECK (auth.role() = 'authenticated' AND introdus_de = auth.uid());
 DROP POLICY IF EXISTS "admin_ferma sterge bonurile proprii" ON public.bonuri_combustibil_masini;
 CREATE POLICY "admin_ferma sterge bonurile proprii" ON public.bonuri_combustibil_masini
 FOR DELETE USING (auth.role() = 'authenticated' AND introdus_de = auth.uid());
+
+-- 2026-08-31: decizie — nu se creează conturi cu rol Șofer (foaia de parcurs
+-- e doar acoperire ANAF pentru cheltuiala cu combustibilul, nu justifică
+-- overhead-ul de conturi separate per șofer). În loc de asta, admin_ferma
+-- completează el scopul curselor pentru mașinile alocate fermei lui, din
+-- aceeași pagină /curse (rol `sofer` rămâne suportat în cod, doar neutilizat
+-- practic momentan).
+
+DROP POLICY IF EXISTS "admin_ferma vede cursele masinilor fermei sale" ON public.curse;
+CREATE POLICY "admin_ferma vede cursele masinilor fermei sale" ON public.curse
+FOR SELECT USING (
+  auth.role() = 'authenticated'
+  AND exists (
+    select 1 from public.utilizatori u
+    join public.masini m on m.id = public.curse.masina_id
+    where u.id = auth.uid() and u.rol = 'admin_ferma' and u.ferma_id = m.ferma_id
+  )
+);
+
+DROP POLICY IF EXISTS "admin_ferma completeaza cursele masinilor fermei sale" ON public.curse;
+CREATE POLICY "admin_ferma completeaza cursele masinilor fermei sale" ON public.curse
+FOR UPDATE USING (
+  auth.role() = 'authenticated'
+  AND status <> 'validata'
+  AND exists (
+    select 1 from public.utilizatori u
+    join public.masini m on m.id = public.curse.masina_id
+    where u.id = auth.uid() and u.rol = 'admin_ferma' and u.ferma_id = m.ferma_id
+  )
+)
+WITH CHECK (
+  auth.role() = 'authenticated'
+  AND status = ANY (ARRAY['detectata'::text, 'completata'::text])
+  AND exists (
+    select 1 from public.utilizatori u
+    join public.masini m on m.id = public.curse.masina_id
+    where u.id = auth.uid() and u.rol = 'admin_ferma' and u.ferma_id = m.ferma_id
+  )
+);
