@@ -332,6 +332,28 @@ pe zile. Cerere: „click pe utilaj → istoric pe zile, ore + parcele, tabel".
   veche de 3 ore (`MAX_LOOKBACK_ORE`), nu se recuperează tot golul dintr-o singură rulare
   (ar cere de la Traccar prea multe puncte deodată) — rămâne un gol în istoric în acel caz.
 
+### 5h-bis. Bug: total ore/zi variabil după fereastra 7/14/30 zile (2026-09-02)
+Raportat: pentru aceleași zile (27-28 august), „Istoric ore pe parcele" arăta totaluri
+diferite după ce interval era ales din dropdown (30/14/7 zile) — 28 august: 5.2h / 5.3h /
+6h. Cauză: consecință directă a preciziei descrise mai sus (5h, poziție la fiecare 2-15s
+cât timp utilajul se mișcă) — `combustibil_citiri` are 2246 rânduri doar pe ultimele 30 de
+zile pentru un singur utilaj activ, peste limita implicită Supabase/PostgREST de 1000 de
+rânduri per `.select()`. Fără paginare explicită, query-ul din
+`get-utilaj-istoric-parcele` se trunchia silențios (fără eroare) la primele 1000 rânduri
+cronologice — cu o fereastră mai largă (30 zile), mai multe citiri vechi/irelevante
+consumau bugetul de 1000 înainte să ajungă la ziua recentă, lăsând mai puține date pentru
+28 august (total mai mic); cu fereastră îngustă (7 zile), aproape tot bugetul rămânea
+disponibil pentru zilele recente (total mai mare, mai aproape de realitate).
+- **Fix**: helper `fetchToateRandurile()` (paginare explicită prin `.range()` până se
+  golește rezultatul) adăugat și folosit în cele trei Edge Functions cu același risc —
+  toate agregă `combustibil_citiri` pe intervale lungi fără limit: `get-utilaj-istoric-
+  parcele`, `get-combustibil-report`, `get-rezervor-central`. Redeployate.
+- **Risc similar neadresat, semnalat**: `get-utilaje-positions` citește "ultima citire de
+  combustibil" per utilaj dintr-un `.select()` fără fereastră de dată, ordonat descrescător
+  — cum truncarea la 1000 păstrează cele mai recente rânduri, riscul e mult mai mic (ar
+  afecta doar un utilaj care n-a raportat de mult timp, într-un context cu multe alte
+  utilaje foarte active), dar merită același tratament dacă apare vreodată o discrepanță.
+
 ### 5i. Harta /utilaje: aceeași hartă cu parcelele + overlay (2026-08-27)
 `UtilajeMapView.tsx` afișa doar markere de utilaje pe o hartă simplă (stradă/satelit),
 fără parcele — cerere: să se vadă exact pe ce parcelă e fiecare utilaj.

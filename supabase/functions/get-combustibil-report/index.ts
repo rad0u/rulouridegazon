@@ -59,6 +59,26 @@ interface Eveniment {
   delta_litri: number;
 }
 
+// Vezi get-utilaj-istoric-parcele/index.ts pentru raționamentul complet:
+// Supabase trunchiază implicit un .select() la 1000 de rânduri, ceea ce
+// falsifică silențios agregările pe traseu lung fără paginare explicită.
+const PAGE_SIZE = 1000;
+async function fetchToateRandurile<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: string | null }> {
+  const toate: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await build(offset, offset + PAGE_SIZE - 1);
+    if (error) return { data: [], error: error.message };
+    const pagina = data ?? [];
+    toate.push(...pagina);
+    if (pagina.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return { data: toate, error: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -115,25 +135,28 @@ Deno.serve(async (req) => {
   const rezultate = [];
 
   for (const u of calibrate as any[]) {
-    const { data: citiri, error: citiriError } = await adminClient
-      .from('combustibil_citiri')
-      .select('data_ora, nivel_litri')
-      .eq('utilaj_id', u.id)
-      .not('nivel_litri', 'is', null)
-      .gte('data_ora', de_la)
-      .order('data_ora', { ascending: true });
+    const { data: citiri, error: citiriError } = await fetchToateRandurile<Citire>((from, to) =>
+      adminClient
+        .from('combustibil_citiri')
+        .select('data_ora, nivel_litri')
+        .eq('utilaj_id', u.id)
+        .not('nivel_litri', 'is', null)
+        .gte('data_ora', de_la)
+        .order('data_ora', { ascending: true })
+        .range(from, to),
+    );
 
     if (citiriError) {
       rezultate.push({
         utilaj_id: u.id,
         nume: u.nume,
         ferma_nume: u.ferme?.nume ?? null,
-        eroare: citiriError.message,
+        eroare: citiriError,
       });
       continue;
     }
 
-    const rows = (citiri ?? []) as Citire[];
+    const rows = citiri;
 
     let consumNormalLitri = 0;
     let realimentatLitri = 0;

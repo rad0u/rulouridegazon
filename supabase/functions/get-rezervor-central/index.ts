@@ -35,6 +35,26 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+// Vezi get-utilaj-istoric-parcele/index.ts pentru raționamentul complet:
+// Supabase trunchiază implicit un .select() la 1000 de rânduri, ceea ce
+// falsifică silențios agregările pe traseu lung fără paginare explicită.
+const PAGE_SIZE = 1000;
+async function fetchToateRandurile<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: string | null }> {
+  const toate: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await build(offset, offset + PAGE_SIZE - 1);
+    if (error) return { data: [], error: error.message };
+    const pagina = data ?? [];
+    toate.push(...pagina);
+    if (pagina.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return { data: toate, error: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -128,17 +148,21 @@ Deno.serve(async (req) => {
     let totalConsumat = 0;
 
     for (const u of utilajeCalibrate) {
-      const { data: citiri, error: citiriError } = await adminClient
-        .from('combustibil_citiri')
-        .select('data_ora, nivel_litri')
-        .eq('utilaj_id', u.id)
-        .not('nivel_litri', 'is', null)
-        .gte('data_ora', de_la)
-        .order('data_ora', { ascending: true });
+      const { data: citiri, error: citiriError } = await fetchToateRandurile<{ data_ora: string; nivel_litri: number }>(
+        (from, to) =>
+          adminClient
+            .from('combustibil_citiri')
+            .select('data_ora, nivel_litri')
+            .eq('utilaj_id', u.id)
+            .not('nivel_litri', 'is', null)
+            .gte('data_ora', de_la)
+            .order('data_ora', { ascending: true })
+            .range(from, to),
+      );
 
       if (citiriError) continue;
 
-      const rows = citiri ?? [];
+      const rows = citiri;
       for (let i = 1; i < rows.length; i++) {
         const delta = Number(rows[i].nivel_litri) - Number(rows[i - 1].nivel_litri);
         if (delta < 0) totalConsumat += Math.abs(delta);

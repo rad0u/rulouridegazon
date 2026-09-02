@@ -108,6 +108,31 @@ function ziuaLocala(dataIso: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
+// Supabase/PostgREST limitează implicit un .select() la 1000 de rânduri —
+// pentru un utilaj activ, combustibil_citiri poate depăși ușor asta pe 7-30
+// de zile (citiri la fiecare ~15-30s cât timp se mișcă). Fără paginare,
+// query-ul se trunchiază silențios (fără eroare), iar rezultatul variază
+// nedeterminist în funcție de câte citiri "din trecut" consumă bugetul de
+// 1000 înainte să ajungă la zilele recente — exact bug-ul raportat (totalul
+// pe 28 august diferă după fereastra 7/14/30 zile aleasă). Fix: paginăm
+// explicit prin .range() până golim tot rezultatul.
+const PAGE_SIZE = 1000;
+async function fetchToateRandurile<T>(
+  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
+): Promise<{ data: T[]; error: string | null }> {
+  const toate: T[] = [];
+  let offset = 0;
+  for (;;) {
+    const { data, error } = await build(offset, offset + PAGE_SIZE - 1);
+    if (error) return { data: [], error: error.message };
+    const pagina = data ?? [];
+    toate.push(...pagina);
+    if (pagina.length < PAGE_SIZE) break;
+    offset += PAGE_SIZE;
+  }
+  return { data: toate, error: null };
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -177,20 +202,23 @@ Deno.serve(async (req) => {
     })
     .filter((p): p is { id: string; nume: string; ring: number[][] } => p !== null);
 
-  const { data: citiriRaw, error: citiriError } = await adminClient
-    .from('combustibil_citiri')
-    .select('data_ora, latitudine, longitudine, contact')
-    .eq('utilaj_id', utilajId)
-    .not('latitudine', 'is', null)
-    .not('longitudine', 'is', null)
-    .gte('data_ora', de_la)
-    .order('data_ora', { ascending: true });
+  const { data: citiriRaw, error: citiriError } = await fetchToateRandurile<Citire>((from, to) =>
+    adminClient
+      .from('combustibil_citiri')
+      .select('data_ora, latitudine, longitudine, contact')
+      .eq('utilaj_id', utilajId)
+      .not('latitudine', 'is', null)
+      .not('longitudine', 'is', null)
+      .gte('data_ora', de_la)
+      .order('data_ora', { ascending: true })
+      .range(from, to),
+  );
 
   if (citiriError) {
-    return jsonResponse({ error: `Eroare la citirea traseului: ${citiriError.message}` }, 500);
+    return jsonResponse({ error: `Eroare la citirea traseului: ${citiriError}` }, 500);
   }
 
-  const citiri = (citiriRaw ?? []) as Citire[];
+  const citiri = citiriRaw;
 
   const totalOreByDay = new Map<string, number>();
   const oreByDayParcela = new Map<string, Map<string, { nume: string; ore: number }>>();
