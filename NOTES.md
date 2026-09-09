@@ -372,6 +372,39 @@ fără parcele — cerere: să se vadă exact pe ce parcelă e fiecare utilaj.
 - Read-only — fără instrumentele de desenare/editare din `FarmMap.tsx` (acelea rămân doar
   pe `/ferme/[fermaId]`).
 
+### 5j. Poză per utilaj + fix scalare io201 combustibil (2026-09-09)
+
+**Poză utilaj**: `utilaje.poza_url` (text) + bucket storage nou `poze-utilaje` (public,
+RLS: SELECT public, INSERT/UPDATE/DELETE doar admin_central) — aceeași rețetă ca bucket-ul
+`harti-ferme` existent. `/utilaje`: coloană nouă cu thumbnail clickabil → upload direct din
+tabel (`UtilajeScreen.tsx`, funcția `incarcaPoza`). Harta utilajelor (`UtilajeMapView.tsx`)
+arată poza în popup-ul markerului, dacă există. `get-utilaje-positions` întoarce și
+`poza_url`.
+
+**Fix scalare combustibil (bug real, nu doar UI)**: Radu a calibrat senzorul DUT-E să
+trimită direct „Volume of fuel (L)" (nu mai valoare brută/„kvants") — pe ecranul propriu al
+sondei apare 37.5 l, dar Traccar (`io201`) citea 375. Cauză: elementul I/O `io201` e
+configurat pe FMC125 cu o zecimală codificată ca număr întreg (multiplier 0.1) — scalarea
+x10 vine din configurarea FMC125, nu din DUT-E, deci se aplică indiferent dacă senzorul
+trimite kvants sau litri reali. Fix: `sync-traccar-fuel/index.ts` → `extractFuelLiters()`
+împarte la 10 specific pentru cheia `io201` (nu și pentru fallback-urile `fuel1`/`fuel`/
+`fuelLevel`, care n-au acest offset confirmat). Redeployat (v8).
+
+Notă: fix-ul se aplică doar citirilor NOI, de acum încolo — istoricul deja salvat în
+`combustibil_citiri` (peste 4300 rânduri pe pilotul Săbăreni) rămâne cu valorile vechi
+(x10, sau „kvants" brute dinainte de calibrarea DUT-E) — nu am făcut backfill, de
+reconsiderat dacă Radu are nevoie de rapoarte istorice corecte în litri.
+
+Observat în trecere, nerezolvat: `max(nivel_litri)` pe pilot = 65532 — arată a valoare
+santinelă/eroare Teltonika (tipic pentru un câmp pe 16 biți fără semn, „fără date"), nu o
+citire reală de combustibil. De filtrat explicit dacă apare des (ar strica deltele de
+consum din `get-combustibil-report`/`get-rezervor-central`).
+
+Pilotul (`Pilot Săbăreni`) tot n-are `utilaje.tanc_capacitate_litri` completat — cât timp
+rămâne necompletat, aplicația îl tratează în continuare ca „necalibrat" (exclus din
+rapoartele de consum) chiar dacă senzorul fizic e acum calibrat corect. De completat în
+`/utilaje` quando Radu confirmă valoarea reală a rezervorului.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

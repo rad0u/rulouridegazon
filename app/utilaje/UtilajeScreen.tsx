@@ -124,6 +124,76 @@ export default function UtilajeScreen() {
   const [istoricLoading, setIstoricLoading] = useState(false);
   const [istoricError, setIstoricError] = useState<string | null>(null);
 
+  const [pozaUploadingId, setPozaUploadingId] = useState<string | null>(null);
+  const [pozaError, setPozaError] = useState<string | null>(null);
+
+  const [capacitateEditId, setCapacitateEditId] = useState<string | null>(null);
+  const [capacitateInput, setCapacitateInput] = useState('');
+  const [capacitateSaving, setCapacitateSaving] = useState(false);
+  const [capacitateError, setCapacitateError] = useState<string | null>(null);
+
+  async function incarcaPoza(utilajId: string, file: File) {
+    setPozaError(null);
+    setPozaUploadingId(utilajId);
+
+    const extensie = file.name.split('.').pop()?.toLowerCase() || 'jpg';
+    const cale = `${utilajId}-${Date.now()}.${extensie}`;
+
+    const { error: uploadError } = await supabase.storage.from('poze-utilaje').upload(cale, file, {
+      upsert: true,
+      contentType: file.type || undefined,
+    });
+
+    if (uploadError) {
+      setPozaUploadingId(null);
+      setPozaError(uploadError.message);
+      return;
+    }
+
+    const { data: publicUrlData } = supabase.storage.from('poze-utilaje').getPublicUrl(cale);
+    const pozaUrl = publicUrlData.publicUrl;
+
+    const { error: updateError } = await supabase.from('utilaje').update({ poza_url: pozaUrl }).eq('id', utilajId);
+
+    setPozaUploadingId(null);
+
+    if (updateError) {
+      setPozaError(updateError.message);
+      return;
+    }
+
+    setUtilaje((prev) => prev.map((u) => (u.utilaj_id === utilajId ? { ...u, poza_url: pozaUrl } : u)));
+  }
+
+  async function salveazaCapacitate(utilajId: string) {
+    const litri = Number(capacitateInput.replace(',', '.'));
+
+    if (!capacitateInput.trim() || !Number.isFinite(litri) || litri <= 0) {
+      setCapacitateError('Introdu un număr valid de litri (mai mare ca 0).');
+      return;
+    }
+
+    setCapacitateSaving(true);
+    setCapacitateError(null);
+
+    const { error: updateError } = await supabase
+      .from('utilaje')
+      .update({ tanc_capacitate_litri: litri })
+      .eq('id', utilajId);
+
+    setCapacitateSaving(false);
+
+    if (updateError) {
+      setCapacitateError(updateError.message);
+      return;
+    }
+
+    setUtilaje((prev) =>
+      prev.map((u) => (u.utilaj_id === utilajId ? { ...u, combustibil_capacitate_litri: litri } : u)),
+    );
+    setCapacitateEditId(null);
+  }
+
   async function incarcaIstoric(utilajId: string, zileDeFolosit: number) {
     setIstoricLoading(true);
     setIstoricError(null);
@@ -273,6 +343,7 @@ export default function UtilajeScreen() {
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                  <th style={{ padding: '0.4rem' }}>Poză</th>
                   <th style={{ padding: '0.4rem' }}>Utilaj</th>
                   <th style={{ padding: '0.4rem' }}>Fermă</th>
                   <th style={{ padding: '0.4rem' }}>Status</th>
@@ -297,6 +368,71 @@ export default function UtilajeScreen() {
                           cursor: 'pointer',
                         }}
                       >
+                        <td style={{ padding: '0.4rem' }} onClick={(e) => e.stopPropagation()}>
+                          <label
+                            style={{
+                              display: 'block',
+                              width: '44px',
+                              height: '44px',
+                              borderRadius: '6px',
+                              overflow: 'hidden',
+                              border: '1px solid #ccc',
+                              cursor: 'pointer',
+                              position: 'relative',
+                              background: '#f5f5f5',
+                            }}
+                            title="Schimbă poza"
+                          >
+                            {u.poza_url ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={u.poza_url}
+                                alt={u.nume}
+                                style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                              />
+                            ) : (
+                              <span
+                                style={{
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  width: '100%',
+                                  height: '100%',
+                                  fontSize: '1.2rem',
+                                  color: '#999',
+                                }}
+                              >
+                                📷
+                              </span>
+                            )}
+                            {pozaUploadingId === u.utilaj_id && (
+                              <span
+                                style={{
+                                  position: 'absolute',
+                                  inset: 0,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  background: 'rgba(255,255,255,0.8)',
+                                  fontSize: '0.65rem',
+                                }}
+                              >
+                                ...
+                              </span>
+                            )}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              disabled={pozaUploadingId !== null}
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) void incarcaPoza(u.utilaj_id, file);
+                                e.target.value = '';
+                              }}
+                              style={{ display: 'none' }}
+                            />
+                          </label>
+                        </td>
                         <td style={{ padding: '0.4rem' }}>{u.nume}</td>
                         <td style={{ padding: '0.4rem' }}>{u.ferma_nume ?? '—'}</td>
                         <td style={{ padding: '0.4rem' }}>{u.status === 'online' ? 'online' : 'offline'}</td>
@@ -304,11 +440,68 @@ export default function UtilajeScreen() {
                           {u.ultima_actualizare ? new Date(u.ultima_actualizare).toLocaleString('ro-RO') : '—'}
                         </td>
                         <td style={{ padding: '0.4rem', color: stale ? '#8a1f13' : undefined, fontWeight: stale ? 600 : undefined }}>
-                          {formatCombustibil(u)}
-                          {stale && (
-                            <div style={{ fontSize: '0.8rem' }}>
-                              ⚠️ fără citire de {age !== null ? Math.round(age / 60) : '?'}h — verifică sonda
+                          {capacitateEditId === u.utilaj_id ? (
+                            <div
+                              style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <input
+                                type="number"
+                                min="1"
+                                step="0.1"
+                                autoFocus
+                                value={capacitateInput}
+                                onChange={(e) => setCapacitateInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') void salveazaCapacitate(u.utilaj_id);
+                                  if (e.key === 'Escape') {
+                                    setCapacitateEditId(null);
+                                    setCapacitateError(null);
+                                  }
+                                }}
+                                placeholder="litri tanc"
+                                style={{ width: '80px', padding: '0.2rem 0.3rem', borderRadius: '4px', border: '1px solid #ccc' }}
+                              />
+                              <button
+                                onClick={() => void salveazaCapacitate(u.utilaj_id)}
+                                disabled={capacitateSaving}
+                                style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #4a7', background: '#eaf7ee', cursor: capacitateSaving ? 'default' : 'pointer' }}
+                              >
+                                {capacitateSaving ? '...' : '✓'}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setCapacitateEditId(null);
+                                  setCapacitateError(null);
+                                }}
+                                style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #ccc', background: '#f5f5f5', cursor: 'pointer' }}
+                              >
+                                ✕
+                              </button>
                             </div>
+                          ) : (
+                            <>
+                              {formatCombustibil(u)}{' '}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCapacitateEditId(u.utilaj_id);
+                                  setCapacitateInput(
+                                    u.combustibil_capacitate_litri ? String(u.combustibil_capacitate_litri) : '',
+                                  );
+                                  setCapacitateError(null);
+                                }}
+                                title="Editează capacitatea tancului (L)"
+                                style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#888', fontSize: '0.8rem', padding: 0 }}
+                              >
+                                ✎
+                              </button>
+                              {stale && (
+                                <div style={{ fontSize: '0.8rem' }}>
+                                  ⚠️ fără citire de {age !== null ? Math.round(age / 60) : '?'}h — verifică sonda
+                                </div>
+                              )}
+                            </>
                           )}
                         </td>
                         <td style={{ padding: '0.4rem', color: '#666', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
@@ -317,7 +510,7 @@ export default function UtilajeScreen() {
                       </tr>
                       {extins && (
                         <tr key={`${u.utilaj_id}-istoric`}>
-                          <td colSpan={6} style={{ padding: '0.75rem', background: '#fafafa' }}>
+                          <td colSpan={7} style={{ padding: '0.75rem', background: '#fafafa' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
                               <strong>Istoric ore pe parcele — {u.nume}</strong>
                               <select
@@ -394,6 +587,18 @@ export default function UtilajeScreen() {
               </tbody>
             </table>
           </div>
+
+          {pozaError && (
+            <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px', margin: 0 }}>
+              Eroare la încărcarea pozei: {pozaError}
+            </p>
+          )}
+
+          {capacitateError && (
+            <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px', margin: 0 }}>
+              Eroare la salvarea capacității tancului: {capacitateError}
+            </p>
+          )}
 
           {utilaje.some((u) => u.combustibil_nivel !== null && !u.combustibil_capacitate_litri) && (
             <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>

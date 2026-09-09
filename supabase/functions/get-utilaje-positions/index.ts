@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
 
   const { data: utilaje, error: utilajeError } = await adminClient
     .from('utilaje')
-    .select('id, nume, tip, traccar_device_id, ferma_id, tanc_capacitate_litri, ferme(nume)')
+    .select('id, nume, tip, traccar_device_id, ferma_id, tanc_capacitate_litri, poza_url, ferme(nume)')
     .eq('activ', true);
 
   if (utilajeError) {
@@ -143,6 +143,7 @@ Deno.serve(async (req) => {
       tip: u.tip,
       ferma_id: u.ferma_id,
       ferma_nume: u.ferme?.nume ?? null,
+      poza_url: u.poza_url ?? null,
       status: device?.status ?? 'necunoscut',
       lat: position?.latitude ?? null,
       lon: position?.longitude ?? null,

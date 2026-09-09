@@ -25,6 +25,7 @@ export type UtilajPozitie = {
   nume: string;
   tip: string | null;
   ferma_nume: string | null;
+  poza_url: string | null;
   status: string;
   lat: number | null;
   lon: number | null;
@@ -184,6 +185,14 @@ export default function UtilajeMapView({
         {cuPozitie.map((u) => (
           <Marker key={u.utilaj_id} position={[u.lat as number, u.lon as number]} icon={markerIcon}>
             <Popup>
+              {u.poza_url && (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={u.poza_url}
+                  alt={u.nume}
+                  style={{ width: '100%', maxWidth: '200px', maxHeight: '140px', objectFit: 'cover', borderRadius: '6px', marginBottom: '0.4rem', display: 'block' }}
+                />
+              )}
               <strong>{u.nume}</strong>
               <br />
               {u.ferma_nume && (

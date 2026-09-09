@@ -75,7 +75,15 @@ interface TraccarDevice {
 function extractFuelLiters(attributes: Record<string, unknown>): number | null {
   for (const key of FUEL_ATTRIBUTE_CANDIDATES) {
     const value = attributes[key];
-    if (typeof value === 'number') return value;
+    if (typeof value === 'number') {
+      // io201 (Teltonika FMC125, RS232 -> DUT-E): elementul I/O e configurat pe
+      // FMC125 cu o zecimală codificată ca număr întreg (multiplier 0.1) --
+      // confirmat 2026-09-09: sonda arată 37.5 l pe propriul ecran, Traccar/io201
+      // citește 375. Corectăm împărțind la 10 -- valabil indiferent dacă DUT-E
+      // trimite încă valoare brută ("kvants") sau litri reali (după calibrare),
+      // fiindcă scalarea x10 vine din configurarea FMC125, nu din DUT-E.
+      return key === 'io201' ? value / 10 : value;
+    }
   }
   return null;
 }
