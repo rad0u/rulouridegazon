@@ -20,6 +20,13 @@ type IstoricParcele = {
   zile_istoric: ZiIstoric[];
 };
 
+type DeviceTraccarNelegat = {
+  traccar_device_id: string;
+  nume_traccar: string;
+  status: string;
+  ultima_actualizare: string | null;
+};
+
 function formatDataZi(data: string): string {
   // `data` e YYYY-MM-DD (fus orar România) — construim data locală direct din
   // componente, ca să nu depindem de fusul orar al browserului la parsare.
@@ -131,6 +138,108 @@ export default function UtilajeScreen() {
   const [capacitateInput, setCapacitateInput] = useState('');
   const [capacitateSaving, setCapacitateSaving] = useState(false);
   const [capacitateError, setCapacitateError] = useState<string | null>(null);
+
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [traccarDevices, setTraccarDevices] = useState<DeviceTraccarNelegat[]>([]);
+  const [traccarLoading, setTraccarLoading] = useState(false);
+  const [traccarError, setTraccarError] = useState<string | null>(null);
+
+  const [novDeviceId, setNovDeviceId] = useState('');
+  const [novNume, setNovNume] = useState('');
+  const [novTip, setNovTip] = useState('utilaj agricol');
+  const [novFermaId, setNovFermaId] = useState('');
+  const [novCapacitate, setNovCapacitate] = useState('');
+  const [novSaving, setNovSaving] = useState(false);
+  const [novError, setNovError] = useState<string | null>(null);
+
+  async function incarcaTraccarDevices() {
+    setTraccarLoading(true);
+    setTraccarError(null);
+
+    const { data, error: invokeError } = await supabase.functions.invoke('list-traccar-devices');
+
+    setTraccarLoading(false);
+
+    if (invokeError) {
+      const message =
+        (invokeError as { context?: { error?: string } })?.context?.error ?? invokeError.message;
+      setTraccarError(message);
+      return;
+    }
+    if (data?.error) {
+      setTraccarError(data.error);
+      return;
+    }
+
+    setTraccarDevices((data?.device_nelegate as DeviceTraccarNelegat[]) ?? []);
+  }
+
+  function toggleAddForm() {
+    const urmatoare = !showAddForm;
+    setShowAddForm(urmatoare);
+    if (urmatoare && traccarDevices.length === 0 && !traccarLoading) {
+      void incarcaTraccarDevices();
+    }
+    if (urmatoare && ferme.length === 0) {
+      void incarcaHartaFerme();
+    }
+  }
+
+  function alegeDeviceTraccar(deviceId: string) {
+    setNovDeviceId(deviceId);
+    if (!deviceId) return;
+    const device = traccarDevices.find((d) => d.traccar_device_id === deviceId);
+    // Pre-completăm numele doar dacă operatorul nu a scris deja ceva — nu
+    // suprascriem o valoare introdusă manual.
+    if (device && !novNume.trim()) {
+      setNovNume(device.nume_traccar);
+    }
+  }
+
+  async function salveazaUtilajNou() {
+    setNovError(null);
+
+    if (!novNume.trim()) {
+      setNovError('Introdu numele utilajului.');
+      return;
+    }
+    if (!novFermaId) {
+      setNovError('Alege ferma.');
+      return;
+    }
+    const capacitate = novCapacitate.trim() ? Number(novCapacitate.replace(',', '.')) : null;
+    if (novCapacitate.trim() && (!Number.isFinite(capacitate) || (capacitate ?? 0) <= 0)) {
+      setNovError('Capacitatea tancului trebuie să fie un număr valid (sau lasă gol).');
+      return;
+    }
+
+    setNovSaving(true);
+
+    const { error: insertError } = await supabase.from('utilaje').insert({
+      nume: novNume.trim(),
+      tip: novTip.trim() || null,
+      ferma_id: novFermaId,
+      traccar_device_id: novDeviceId || null,
+      tanc_capacitate_litri: capacitate,
+      activ: true,
+    });
+
+    setNovSaving(false);
+
+    if (insertError) {
+      setNovError(insertError.message);
+      return;
+    }
+
+    setNovDeviceId('');
+    setNovNume('');
+    setNovTip('utilaj agricol');
+    setNovFermaId('');
+    setNovCapacitate('');
+    setShowAddForm(false);
+    void incarcaTraccarDevices();
+    void reincarca();
+  }
 
   async function incarcaPoza(utilajId: string, file: File) {
     setPozaError(null);
@@ -275,20 +384,137 @@ export default function UtilajeScreen() {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h1 style={{ margin: 0 }}>Hartă utilaje</h1>
-        <button
-          onClick={() => void reincarca()}
-          disabled={loading}
-          style={{
-            padding: '0.6rem 1.2rem',
-            borderRadius: '6px',
-            border: '1px solid #ccc',
-            background: loading ? '#eee' : '#f5f5f5',
-            cursor: loading ? 'default' : 'pointer',
-          }}
-        >
-          {loading ? 'Se încarcă...' : 'Reîncarcă'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button
+            onClick={() => toggleAddForm()}
+            style={{
+              padding: '0.6rem 1.2rem',
+              borderRadius: '6px',
+              border: '1px solid #ccc',
+              background: showAddForm ? '#eef6ff' : '#f5f5f5',
+              cursor: 'pointer',
+            }}
+          >
+            {showAddForm ? 'Anulează' : '+ Adaugă utilaj'}
+          </button>
+          <button
+            onClick={() => void reincarca()}
+            disabled={loading}
+            style={{
+              padding: '0.6rem 1.2rem',
+              borderRadius: '6px',
+              border: '1px solid #ccc',
+              background: loading ? '#eee' : '#f5f5f5',
+              cursor: loading ? 'default' : 'pointer',
+            }}
+          >
+            {loading ? 'Se încarcă...' : 'Reîncarcă'}
+          </button>
+        </div>
       </div>
+
+      {showAddForm && (
+        <div style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
+          <h2 style={{ fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Adaugă utilaj</h2>
+
+          {traccarLoading && <p style={{ margin: '0 0 0.6rem', color: '#666' }}>Se încarcă device-urile din Traccar...</p>}
+          {traccarError && (
+            <p style={{ color: '#b00020', margin: '0 0 0.6rem' }}>
+              Nu am putut încărca device-urile din Traccar: {traccarError}. Poți completa manual mai jos.
+            </p>
+          )}
+          {!traccarLoading && !traccarError && traccarDevices.length === 0 && (
+            <p style={{ margin: '0 0 0.6rem', color: '#666' }}>
+              Niciun device Traccar nelegat găsit — toate device-urile din Traccar sunt deja asociate unui
+              utilaj, sau poți introduce unul manual mai jos.
+            </p>
+          )}
+
+          <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+              Device Traccar (opțional)
+              <select
+                value={novDeviceId}
+                onChange={(e) => alegeDeviceTraccar(e.target.value)}
+                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '260px' }}
+              >
+                <option value="">— fără (introdu manual) —</option>
+                {traccarDevices.map((d) => (
+                  <option key={d.traccar_device_id} value={d.traccar_device_id}>
+                    {d.nume_traccar} — IMEI {d.traccar_device_id}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+              Nume utilaj
+              <input
+                type="text"
+                value={novNume}
+                onChange={(e) => setNovNume(e.target.value)}
+                placeholder="ex. Tractor 3"
+                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '160px' }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+              Tip
+              <input
+                type="text"
+                value={novTip}
+                onChange={(e) => setNovTip(e.target.value)}
+                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '140px' }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+              Fermă
+              <select
+                value={novFermaId}
+                onChange={(e) => setNovFermaId(e.target.value)}
+                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '160px' }}
+              >
+                <option value="">Alege ferma</option>
+                {ferme.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.nume}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+              Capacitate tanc (L, opțional)
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={novCapacitate}
+                onChange={(e) => setNovCapacitate(e.target.value)}
+                placeholder="litri"
+                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '140px' }}
+              />
+            </label>
+
+            <button
+              onClick={() => void salveazaUtilajNou()}
+              disabled={novSaving}
+              style={{
+                padding: '0.6rem 1.2rem',
+                borderRadius: '6px',
+                border: '1px solid #ccc',
+                background: novSaving ? '#eee' : '#f5f5f5',
+                cursor: novSaving ? 'default' : 'pointer',
+              }}
+            >
+              {novSaving ? 'Se salvează...' : 'Salvează utilaj'}
+            </button>
+          </div>
+
+          {novError && <p style={{ color: '#b00020', margin: '0.6rem 0 0' }}>{novError}</p>}
+        </div>
+      )}
 
       {error && (
         <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px' }}>
