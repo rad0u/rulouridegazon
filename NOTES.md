@@ -435,8 +435,47 @@ loc de `<T>`. Redeployate toate trei (versiuni noi). Cauza exactă tot nedemonst
 răspunde „tabela nu există", pe orice nume de tabelă din Logs Explorer, inclusiv
 `edge_logs`/`function_edge_logs` — pare o problemă separată la nivel de proiect
 Supabase), dar corelația cu exact codul modificat + persistența de peste o săptămână
-face improbabilă teoria inițială de „blip tranzitoriu de platformă". De verificat cu
-Radu dacă fix-ul a rezolvat efectiv problema.
+face improbabilă teoria inițială de „blip tranzitoriu de platformă". **Confirmat de
+Radu pe 2026-09-10: „acum merge" — fix-ul a rezolvat problema.**
+
+### 5l. Fix real pe „scăderi suspecte" false-pozitive — citiri peste capacitate + comprimare extreme (2026-09-10)
+
+Radu a semnalat scăderi suspecte care nu au corespondent real (rezervor 90 l, umplut
+full la calibrare, consum zilnic normal, o singură realimentare reală) — "de ce sunt
+aceste scaderi suspecte? trebuie sa reglam asta".
+
+Investigare pe datele brute din `combustibil_citiri` pentru utilajul reclamat (Pilot
+Săbăreni) a arătat cauza exactă, nu doar o presupunere:
+- Înainte de calibrarea în teren a senzorului DUT-E (momentul exact: 2026-09-09
+  13:42:15, local 16:42), citirile erau valori brute necalibrate ("kvants"), în
+  intervalul ~106-190 — peste capacitatea reală a rezervorului (90 l). Aceste valori
+  au trecut nedetectate prin fix-ul anterior (împărțirea la 10 a lui `io201`, vezi 5j)
+  fiindcă acela corectează multiplicatorul FMC125, nu calibrarea internă a senzorului.
+- Fiecare "scădere suspectă" din raport corespundea fie unui asemenea artefact brut
+  (zgomot de senzor în intervalul necalibrat, ex. -15.3 l pe 04.09, -20.1/-26.7 l pe
+  07.09), fie exact saltului de discontinuitate de la recalibrare (-68.8 l pe 09.09
+  16:42:15 — trecerea instantanee de la ~106 [brut] la 37.5 [litri reali calibrați]).
+  Niciuna nu era consum sau furt real.
+- În plus, o realimentare turnată treptat (citiri RS232 succesive în timp ce se toarnă
+  motorina) era tăiată în pași sub pragul minim de 15 l și o parte din cantitate
+  "dispărea" din total — realimentarea reală de 55.29 l din 10.09 apărea în raport ca
+  doar 42.6 l.
+
+Fix aplicat în `get-combustibil-report` și `get-rezervor-central` (aceeași logică de
+calcul, deci aceeași vulnerabilitate în amândouă):
+1. `filtreazaCitiriPlauzibile()` — elimină orice citire peste capacitatea declarată a
+   rezervorului (`tanc_capacitate_litri` × 1.05 toleranță) sau negativă, înainte de
+   orice calcul de deltă. O citire fizic imposibilă nu mai poate fi folosită ca reper.
+2. (doar `get-combustibil-report`) `extrageExtreme()` — comprimă citirile valide în
+   punctele lor de întoarcere (extreme locale), ca o realimentare/scurgere surprinsă
+   în mai mulți pași RS232 succesivi să fie tratată ca UN eveniment, nu tăiată artificial.
+
+Verificat prin simulare pe datele reale (Pilot Săbăreni, 09-10.09): cu fix-ul, toate
+cele 5 scăderi suspecte false dispar (citirile care le generau sunt filtrate), iar
+realimentarea din 10.09 e recunoscută corect ca ~54.6 l (față de 42.6 l înainte) —
+foarte aproape de cei 55.29 l reali declarați de Radu. Deploy: `get-combustibil-report`
+v5, `get-rezervor-central` v5.
+
 
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără

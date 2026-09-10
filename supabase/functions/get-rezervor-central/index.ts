@@ -7,14 +7,20 @@
 //   nivel_curent = nivel_initial
 //                + SUMA alimentărilor rezervorului central după data_initial
 //                - SUMA consumului de motorină al utilajelor CALIBRATE ale fermei
-//                  (toate scăderile din combustibil_citiri, inclusiv cele "suspecte")
-//                  după data_initial
+//                  (toate scăderile din combustibil_citiri) după data_initial
 //
 // Se scade CONSUMUL utilajelor (arderea de motor), nu evenimentele de realimentare a
 // utilajelor individuale — presupunem că, pe termen mediu, motorina arsă de utilaje e o
 // aproximare rezonabilă a motorinei scoase din rezervorul central. Dacă în practică nu se
 // potrivește cu realitatea (ex. utilajele au rezervoare mari, tampon considerabil), de
 // reconsiderat modelul.
+//
+// La fel ca în get-combustibil-report/index.ts: înainte de a suma scăderile, se
+// elimină citirile fizic imposibile (peste capacitatea reală a rezervorului
+// utilajului) — de obicei artefacte ale unui senzor încă necalibrat în litri
+// ("kvants") sau ale unui moment de recalibrare în teren. Fără acest filtru, un
+// asemenea artefact (ex. un salt de zeci de litri la recalibrare) e numărat drept
+// consum real și umflă total_consumat_litri.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -34,6 +40,12 @@ function jsonResponse(body: unknown, status = 200) {
     headers: { ...corsHeaders, 'Content-Type': 'application/json' },
   });
 }
+
+// Toleranță peste capacitatea declarată a rezervorului până la care o citire e
+// considerată totuși plauzibilă (supra-umplere, dilatare termică a motorinei,
+// mic offset de senzor) — orice peste asta e aproape sigur o valoare brută
+// necalibrată, nu litri reali. Vezi get-combustibil-report/index.ts.
+const TOLERANTA_CAPACITATE = 1.05;
 
 interface Citire {
   data_ora: string;
@@ -58,6 +70,12 @@ async function fetchToateRandurile(
     offset += PAGE_SIZE;
   }
   return { data: toate, error: null };
+}
+
+// Elimină citirile fizic imposibile pentru un rezervor de `capacitate` litri.
+function filtreazaCitiriPlauzibile(rows: Citire[], capacitate: number): Citire[] {
+  const prag = capacitate * TOLERANTA_CAPACITATE;
+  return rows.filter((r) => r.nivel_litri >= 0 && r.nivel_litri <= prag);
 }
 
 Deno.serve(async (req) => {
@@ -167,7 +185,7 @@ Deno.serve(async (req) => {
 
       if (citiriError) continue;
 
-      const rows = citiri;
+      const rows = filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number);
       for (let i = 1; i < rows.length; i++) {
         const delta = Number(rows[i].nivel_litri) - Number(rows[i - 1].nivel_litri);
         if (delta < 0) totalConsumat += Math.abs(delta);

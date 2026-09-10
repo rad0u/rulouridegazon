@@ -5,14 +5,27 @@
 // sync-traccar-fuel). Doar admin_central poate apela funcția.
 //
 // Cum funcționează:
-//   - Se ia istoricul de citiri al fiecărui utilaj, în ordine cronologică.
-//   - Se calculează diferența (delta) între citiri consecutive.
-//   - Un salt POZITIV peste prag = realimentare.
-//   - Un salt NEGATIV peste prag = scădere suspectă (posibil furt/scurgere) —
-//     pragul e ales suficient de mare încât să nu poată fi explicat de consumul
-//     normal al motorului în intervalul dintre două citiri (vezi
-//     MAX_PLAUSIBLE_CONSUM_L_PE_ORA mai jos).
-//   - Restul scăderilor (sub prag) se adună ca și consum normal.
+//   0. Se elimină citirile fizic imposibile: orice nivel_litri peste capacitatea
+//      reală a rezervorului (+ o toleranță mică) sau negativ. Astfel de valori nu
+//      sunt "litri prea mulți din greșeală" — sunt semn că senzorul DUT-E raporta
+//      încă în unități brute ("kvants"), nu în litri calibrați (vezi 2026-09-10:
+//      înainte de calibrarea în teren a senzorului, citirile erau în intervalul
+//      ~100-190 pe un rezervor de 90 l). O citire imposibilă nu poate fi folosită
+//      ca reper pentru un eveniment — se ignoră complet, ca și cum n-ar fi fost
+//      raportată.
+//   1. Citirile valide rămase se comprimă în puncte de întoarcere (extreme locale):
+//      cât timp nivelul se mișcă în aceeași direcție (scade constant, sau crește
+//      constant — de ex. o realimentare turnată treptat, surprinsă în mai mulți pași
+//      RS232 succesivi), pașii intermediari se contopesc într-un singur eveniment.
+//      Altfel o realimentare de 55 l putea apărea în raport ca 40 l (restul de 15 l
+//      "dispărea" în pași individuali sub pragul minim).
+//   2. Se calculează diferența (delta) între punctele de întoarcere consecutive.
+//   3. Un salt POZITIV peste prag = realimentare.
+//   4. Un salt NEGATIV peste prag = scădere suspectă (posibil furt/scurgere) —
+//      pragul e ales suficient de mare încât să nu poată fi explicat de consumul
+//      normal al motorului în intervalul dintre cele două puncte (vezi
+//      MAX_PLAUSIBLE_CONSUM_L_PE_ORA mai jos).
+//   5. Restul scăderilor (sub prag) se adună ca și consum normal.
 //
 // IMPORTANT: raportul are sens doar pentru utilajele CALIBRATE (cu
 // `tanc_capacitate_litri` completat în tabela `utilaje`) — pe utilajele
@@ -48,6 +61,11 @@ const MAX_PLAUSIBLE_CONSUM_L_PE_ORA = 15;
 // suspectă), indiferent de cât timp a trecut — evită să marcăm zgomot mic
 // (sloshing) ca eveniment.
 const PRAG_MINIM_EVENIMENT_L = 15;
+// Toleranță peste capacitatea declarată a rezervorului până la care o citire e
+// considerată totuși plauzibilă (supra-umplere, dilatare termică a motorinei,
+// mic offset de senzor) — orice peste asta e aproape sigur o valoare brută
+// necalibrată, nu litri reali.
+const TOLERANTA_CAPACITATE = 1.05;
 
 interface Citire {
   data_ora: string;
@@ -77,6 +95,43 @@ async function fetchToateRandurile(
     offset += PAGE_SIZE;
   }
   return { data: toate, error: null };
+}
+
+// Elimină citirile fizic imposibile pentru un rezervor de `capacitate` litri.
+function filtreazaCitiriPlauzibile(rows: Citire[], capacitate: number): Citire[] {
+  const prag = capacitate * TOLERANTA_CAPACITATE;
+  return rows.filter((r) => r.nivel_litri >= 0 && r.nivel_litri <= prag);
+}
+
+// Comprimă o serie de citiri valide în punctele ei de întoarcere (extreme
+// locale): cât timp nivelul continuă în aceeași direcție, doar capătul cel mai
+// îndepărtat al mișcării contează — pașii intermediari se contopesc.
+function extrageExtreme(rows: Citire[]): Citire[] {
+  const extreme: Citire[] = [];
+  let directie = 0; // 0 = necunoscută, 1 = crește, -1 = scade
+
+  for (const r of rows) {
+    if (extreme.length === 0) {
+      extreme.push(r);
+      continue;
+    }
+    const ultimul = extreme[extreme.length - 1];
+    const delta = r.nivel_litri - ultimul.nivel_litri;
+    if (delta === 0) continue; // fără schimbare, ignorăm
+
+    const nouaDirectie = delta > 0 ? 1 : -1;
+    if (directie === 0 || nouaDirectie === directie) {
+      // continuăm în aceeași direcție (sau abia pornim) -- extindem punctul curent
+      extreme[extreme.length - 1] = r;
+      directie = nouaDirectie;
+    } else {
+      // direcția s-a inversat -- ultimul punct era o extremă reală, pornim una nouă
+      extreme.push(r);
+      directie = nouaDirectie;
+    }
+  }
+
+  return extreme;
 }
 
 Deno.serve(async (req) => {
@@ -156,16 +211,17 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const rows = citiri;
+    const rows = filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number);
+    const extreme = extrageExtreme(rows);
 
     let consumNormalLitri = 0;
     let realimentatLitri = 0;
     const realimentari: Eveniment[] = [];
     const scaderiSuspecte: Eveniment[] = [];
 
-    for (let i = 1; i < rows.length; i++) {
-      const prev = rows[i - 1];
-      const curr = rows[i];
+    for (let i = 1; i < extreme.length; i++) {
+      const prev = extreme[i - 1];
+      const curr = extreme[i];
       const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
       const oreIntreCitiri =
         (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;

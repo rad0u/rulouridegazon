@@ -139,6 +139,38 @@ export default function UtilajeScreen() {
   const [capacitateSaving, setCapacitateSaving] = useState(false);
   const [capacitateError, setCapacitateError] = useState<string | null>(null);
 
+  const [numeEditId, setNumeEditId] = useState<string | null>(null);
+  const [numeInput, setNumeInput] = useState('');
+  const [numeSaving, setNumeSaving] = useState(false);
+  const [numeError, setNumeError] = useState<string | null>(null);
+
+  async function salveazaNume(utilajId: string) {
+    if (!numeInput.trim()) {
+      setNumeError('Numele nu poate fi gol.');
+      return;
+    }
+
+    setNumeSaving(true);
+    setNumeError(null);
+
+    const { error: updateError } = await supabase
+      .from('utilaje')
+      .update({ nume: numeInput.trim() })
+      .eq('id', utilajId);
+
+    setNumeSaving(false);
+
+    if (updateError) {
+      setNumeError(updateError.message);
+      return;
+    }
+
+    setUtilaje((prev) =>
+      prev.map((u) => (u.utilaj_id === utilajId ? { ...u, nume: numeInput.trim() } : u)),
+    );
+    setNumeEditId(null);
+  }
+
   const [showAddForm, setShowAddForm] = useState(false);
   const [traccarDevices, setTraccarDevices] = useState<DeviceTraccarNelegat[]>([]);
   const [traccarLoading, setTraccarLoading] = useState(false);
@@ -659,7 +691,58 @@ export default function UtilajeScreen() {
                             />
                           </label>
                         </td>
-                        <td style={{ padding: '0.4rem' }}>{u.nume}</td>
+                        <td style={{ padding: '0.4rem' }} onClick={(e) => e.stopPropagation()}>
+                          {numeEditId === u.utilaj_id ? (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+                              <input
+                                type="text"
+                                autoFocus
+                                value={numeInput}
+                                onChange={(e) => setNumeInput(e.target.value)}
+                                onKeyDown={(e) => {
+                                  if (e.key === 'Enter') void salveazaNume(u.utilaj_id);
+                                  if (e.key === 'Escape') {
+                                    setNumeEditId(null);
+                                    setNumeError(null);
+                                  }
+                                }}
+                                style={{ padding: '0.2rem 0.4rem', borderRadius: '4px', border: '1px solid #ccc', minWidth: '140px' }}
+                              />
+                              <button
+                                onClick={() => void salveazaNume(u.utilaj_id)}
+                                disabled={numeSaving}
+                                style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #4a7', background: '#eaf7ee', cursor: numeSaving ? 'default' : 'pointer' }}
+                              >
+                                {numeSaving ? '...' : '✓'}
+                              </button>
+                              <button
+                                onClick={() => {
+                                  setNumeEditId(null);
+                                  setNumeError(null);
+                                }}
+                                style={{ padding: '0.2rem 0.5rem', borderRadius: '4px', border: '1px solid #ccc', background: '#f5f5f5', cursor: 'pointer' }}
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ) : (
+                            <>
+                              {u.nume}{' '}
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setNumeEditId(u.utilaj_id);
+                                  setNumeInput(u.nume);
+                                  setNumeError(null);
+                                }}
+                                title="Editează numele"
+                                style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#888', fontSize: '0.8rem', padding: 0 }}
+                              >
+                                ✎
+                              </button>
+                            </>
+                          )}
+                        </td>
                         <td style={{ padding: '0.4rem' }}>{u.ferma_nume ?? '—'}</td>
                         <td style={{ padding: '0.4rem' }}>{u.status === 'online' ? 'online' : 'offline'}</td>
                         <td style={{ padding: '0.4rem' }}>

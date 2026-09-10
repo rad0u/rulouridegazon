@@ -4,6 +4,15 @@
 // din public.utilaje (după IMEI / uniqueId) — folosit de formularul „Adaugă
 // utilaj” din /utilaje, ca să se poată prelua numele și IMEI-ul direct din
 // Traccar în loc să fie copiate manual. Doar admin_central poate apela.
+//
+// IMPORTANT: GET /api/devices din Traccar, FĂRĂ parametrul `all=true`,
+// întoarce implicit doar device-urile alocate explicit contului folosit la
+// autentificare (TRACCAR_USER) — nu toate device-urile din instanță, chiar
+// dacă contul respectiv e admin. Confirmat 2026-09-10: contul folosit de
+// aplicație vedea doar 2 din cele 5 device-uri vizibile în aplicația mobilă
+// Traccar (logată cu alt cont). `all=true` cere ca TRACCAR_USER să aibă
+// drept de admin/manager în Traccar — altfel Traccar îl ignoră silențios,
+// fără eroare.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -90,7 +99,9 @@ Deno.serve(async (req) => {
   const idLegate = new Set((utilajeExistente ?? []).map((u) => u.traccar_device_id as string));
 
   const auth = 'Basic ' + btoa(`${TRACCAR_USER}:${TRACCAR_PASSWORD}`);
-  const devicesRes = await fetch(`${TRACCAR_URL}/api/devices`, { headers: { Authorization: auth } });
+  const devicesRes = await fetch(`${TRACCAR_URL}/api/devices?all=true`, {
+    headers: { Authorization: auth },
+  });
 
   if (!devicesRes.ok) {
     return jsonResponse({ error: 'Eroare la citirea device-urilor din Traccar.' }, 502);
