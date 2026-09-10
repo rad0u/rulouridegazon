@@ -117,10 +117,10 @@ function ziuaLocala(dataIso: string): string {
 // pe 28 august diferă după fereastra 7/14/30 zile aleasă). Fix: paginăm
 // explicit prin .range() până golim tot rezultatul.
 const PAGE_SIZE = 1000;
-async function fetchToateRandurile<T>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-): Promise<{ data: T[]; error: string | null }> {
-  const toate: T[] = [];
+async function fetchToateRandurile(
+  build: (from: number, to: number) => PromiseLike<{ data: Citire[] | null; error: { message: string } | null }>,
+): Promise<{ data: Citire[]; error: string | null }> {
+  const toate: Citire[] = [];
   let offset = 0;
   for (;;) {
     const { data, error } = await build(offset, offset + PAGE_SIZE - 1);
@@ -202,7 +202,7 @@ Deno.serve(async (req) => {
     })
     .filter((p): p is { id: string; nume: string; ring: number[][] } => p !== null);
 
-  const { data: citiriRaw, error: citiriError } = await fetchToateRandurile<Citire>((from, to) =>
+  const { data: citiriRaw, error: citiriError } = await fetchToateRandurile((from, to) =>
     adminClient
       .from('combustibil_citiri')
       .select('data_ora, latitudine, longitudine, contact')

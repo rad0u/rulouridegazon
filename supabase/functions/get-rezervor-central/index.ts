@@ -35,14 +35,19 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+interface Citire {
+  data_ora: string;
+  nivel_litri: number;
+}
+
 // Vezi get-utilaj-istoric-parcele/index.ts pentru raționamentul complet:
 // Supabase trunchiază implicit un .select() la 1000 de rânduri, ceea ce
 // falsifică silențios agregările pe traseu lung fără paginare explicită.
 const PAGE_SIZE = 1000;
-async function fetchToateRandurile<T>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-): Promise<{ data: T[]; error: string | null }> {
-  const toate: T[] = [];
+async function fetchToateRandurile(
+  build: (from: number, to: number) => PromiseLike<{ data: Citire[] | null; error: { message: string } | null }>,
+): Promise<{ data: Citire[]; error: string | null }> {
+  const toate: Citire[] = [];
   let offset = 0;
   for (;;) {
     const { data, error } = await build(offset, offset + PAGE_SIZE - 1);
@@ -148,7 +153,7 @@ Deno.serve(async (req) => {
     let totalConsumat = 0;
 
     for (const u of utilajeCalibrate) {
-      const { data: citiri, error: citiriError } = await fetchToateRandurile<{ data_ora: string; nivel_litri: number }>(
+      const { data: citiri, error: citiriError } = await fetchToateRandurile(
         (from, to) =>
           adminClient
             .from('combustibil_citiri')

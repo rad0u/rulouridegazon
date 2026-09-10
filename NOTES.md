@@ -405,6 +405,39 @@ rămâne necompletat, aplicația îl tratează în continuare ca „necalibrat" 
 rapoartele de consum) chiar dacă senzorul fizic e acum calibrat corect. De completat în
 `/utilaje` quando Radu confirmă valoarea reală a rezervorului.
 
+**Update 2026-09-10**: adăugată editare inline a `tanc_capacitate_litri` direct din
+`/utilaje` (icon ✎ lângă valoarea de combustibil) — nu mai e nevoie de acces direct la
+baza de date pentru asta.
+
+**Update 2026-09-10 — backfill valori combustibil**: Radu a calibrat senzorul DUT-E să
+trimită direct litri („Volume of fuel (L)"), dar Traccar tot citea x10 (375 în loc de
+37.5) — cauza: elementul I/O `io201` e configurat pe FMC125 cu multiplier 0.1 (o
+zecimală codificată ca întreg), independent de ce trimite DUT-E intern. Fix aplicat în
+`sync-traccar-fuel` (împarte la 10 specific pentru `io201`) ȘI backfill retroactiv al
+celor 4367 rânduri deja existente în `combustibil_citiri`
+(`update combustibil_citiri set nivel_litri = nivel_litri / 10.0 where nivel_litri is
+not null`) — istoricul complet e acum corect scalat, nu doar citirile noi.
+
+### 5k. Bug real (nu doar flaky platformă): fetchToateRandurile generic → 503 persistent (2026-09-10)
+
+Bug-ul „eroare de rețea" raportat pe 5h-bis (503 + CORS chiar pe OPTIONS preflight) NU
+s-a rezolvat de la sine cum s-a presupus inițial — a persistat identic peste o
+săptămână, pe toate cele 3 funcții care foloseau helper-ul `fetchToateRandurile<T>()`
+introdus atunci (`get-utilaj-istoric-parcele`, `get-combustibil-report`,
+`get-rezervor-central`), în timp ce `get-utilaje-positions` (fără acest helper,
+redeployată separat în aceeași perioadă) a funcționat mereu corect.
+
+Factorul comun clar: funcția generică async `fetchToateRandurile<T>(...)`. Fix aplicat —
+**degenerizare**: fiecare din cele 3 funcții are acum propriul `fetchToateRandurile()`
+netipizat generic, cu tipul de rând concret (`Citire`) hardcodat direct în semnătură, în
+loc de `<T>`. Redeployate toate trei (versiuni noi). Cauza exactă tot nedemonstrată cert
+(instrumentele de logs pentru acest proiect tot nu funcționează — orice interogare
+răspunde „tabela nu există", pe orice nume de tabelă din Logs Explorer, inclusiv
+`edge_logs`/`function_edge_logs` — pare o problemă separată la nivel de proiect
+Supabase), dar corelația cu exact codul modificat + persistența de peste o săptămână
+face improbabilă teoria inițială de „blip tranzitoriu de platformă". De verificat cu
+Radu dacă fix-ul a rezolvat efectiv problema.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

@@ -63,10 +63,10 @@ interface Eveniment {
 // Supabase trunchiază implicit un .select() la 1000 de rânduri, ceea ce
 // falsifică silențios agregările pe traseu lung fără paginare explicită.
 const PAGE_SIZE = 1000;
-async function fetchToateRandurile<T>(
-  build: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>,
-): Promise<{ data: T[]; error: string | null }> {
-  const toate: T[] = [];
+async function fetchToateRandurile(
+  build: (from: number, to: number) => PromiseLike<{ data: Citire[] | null; error: { message: string } | null }>,
+): Promise<{ data: Citire[]; error: string | null }> {
+  const toate: Citire[] = [];
   let offset = 0;
   for (;;) {
     const { data, error } = await build(offset, offset + PAGE_SIZE - 1);
@@ -135,7 +135,7 @@ Deno.serve(async (req) => {
   const rezultate = [];
 
   for (const u of calibrate as any[]) {
-    const { data: citiri, error: citiriError } = await fetchToateRandurile<Citire>((from, to) =>
+    const { data: citiri, error: citiriError } = await fetchToateRandurile((from, to) =>
       adminClient
         .from('combustibil_citiri')
         .select('data_ora, nivel_litri')
