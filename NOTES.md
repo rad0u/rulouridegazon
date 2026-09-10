@@ -477,6 +477,33 @@ foarte aproape de cei 55.29 l reali declarați de Radu. Deploy: `get-combustibil
 v5, `get-rezervor-central` v5.
 
 
+### 5m. Reorganizare meniu — grupare pe secțiuni (2026-09-10)
+
+La cererea lui Radu, meniul din `components/LayoutShell.tsx` e reorganizat pe
+secțiuni vizuale (etichetă gri, mică, necliclabilă — navigarea rămâne tot un
+singur click, nu s-a introdus acordeon/pliere):
+
+- **(negrupat, sus)** — Acasă, Dashboard, Ferme, Substanțe — folosite zilnic de
+  ambele roluri admin.
+- **Flotă auto** — Mașini, Curse (admin_central + admin_ferma); Foi de parcurs,
+  Alerte (doar admin_central).
+- **Utilaje** — Utilaje, Combustibil, Rezervor central (doar admin_central);
+  Alimentări utilaje (admin_central + admin_ferma).
+- **Administrare** (doar admin_central) — Utilizatori, Zone (geofences),
+  Tracking (link extern către serverul Traccar brut — mutat aici din grupul
+  Flotă auto, fiindcă e un instrument tehnic comun ambelor flote de GPS-uri,
+  nu specific mașinilor).
+
+Vizibilitatea per rol e neschimbată față de înainte — doar gruparea vizuală
+e nouă (aceleași condiții de rol, doar rearanjate sub etichete).
+
+Observație în trecere: paginile `/livrari` și `/recoltari` există în cod dar
+sunt doar stub-uri necompletate ("Înregistrare livrări și sold paleți" /
+"Înregistrare recoltări și rapoarte", fără logică reală) și nu sunt legate
+din nicio pagină — nu au fost adăugate în meniu ca să nu creeze impresia unei
+funcționalități complete. `/tracking` (ruta internă, diferită de link-ul extern
+Tracking) e cod mort — face doar redirect instant către `/dashboard`.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

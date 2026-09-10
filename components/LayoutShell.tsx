@@ -14,6 +14,20 @@ const navLinkStyle: React.CSSProperties = {
   fontSize: '1.05rem',
 };
 
+// Etichetă de secțiune în meniu (Flotă auto / Utilaje / Administrare) — doar
+// grupare vizuală, nu e link și nu se pliază, ca navigarea să rămână un
+// singur click, la fel ca înainte de reorganizare (2026-09-10).
+const sectionHeaderStyle: React.CSSProperties = {
+  padding: '0.9rem 1rem 0.25rem',
+  fontSize: '0.75rem',
+  fontWeight: 700,
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  color: '#888',
+  borderTop: '1px solid #eee',
+  marginTop: '0.3rem',
+};
+
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { role } = useUserRole();
@@ -109,6 +123,8 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 top: '100%',
                 left: 0,
                 width: 'min(320px, 90vw)',
+                maxHeight: '80vh',
+                overflowY: 'auto',
                 background: '#fff',
                 borderRight: '1px solid #ddd',
                 borderBottom: '1px solid #ddd',
@@ -139,41 +155,61 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                   <Link href="/substante" style={navLinkStyle} onClick={closeMenu}>
                     Substanțe
                   </Link>
+
                   {(role === 'admin_central' || role === 'admin_ferma') && (
                     <>
+                      <div style={sectionHeaderStyle}>Flotă auto</div>
                       <Link href="/masini" style={navLinkStyle} onClick={closeMenu}>
                         Mașini
                       </Link>
                       <Link href="/curse" style={navLinkStyle} onClick={closeMenu}>
                         Curse
                       </Link>
+                      {role === 'admin_central' && (
+                        <>
+                          <Link href="/foi-parcurs" style={navLinkStyle} onClick={closeMenu}>
+                            Foi de parcurs
+                          </Link>
+                          <Link href="/alerte" style={navLinkStyle} onClick={closeMenu}>
+                            Alerte
+                          </Link>
+                        </>
+                      )}
+                    </>
+                  )}
+
+                  {(role === 'admin_central' || role === 'admin_ferma') && (
+                    <>
+                      <div style={sectionHeaderStyle}>Utilaje</div>
+                      {role === 'admin_central' && (
+                        <Link href="/utilaje" style={navLinkStyle} onClick={closeMenu}>
+                          Utilaje
+                        </Link>
+                      )}
                       <Link href="/alimentari-utilaje" style={navLinkStyle} onClick={closeMenu}>
                         Alimentări utilaje
                       </Link>
+                      {role === 'admin_central' && (
+                        <>
+                          <Link href="/combustibil" style={navLinkStyle} onClick={closeMenu}>
+                            Combustibil
+                          </Link>
+                          <Link href="/rezervor-central" style={navLinkStyle} onClick={closeMenu}>
+                            Rezervor central
+                          </Link>
+                        </>
+                      )}
                     </>
                   )}
+
                   {role === 'admin_central' && (
                     <>
+                      <div style={sectionHeaderStyle}>Administrare</div>
                       <Link href="/utilizatori" style={navLinkStyle} onClick={closeMenu}>
                         Utilizatori
                       </Link>
-                      <Link href="/utilaje" style={navLinkStyle} onClick={closeMenu}>
-                        Utilaje
-                      </Link>
-                      <Link href="/combustibil" style={navLinkStyle} onClick={closeMenu}>
-                        Combustibil
-                      </Link>
-                      <Link href="/rezervor-central" style={navLinkStyle} onClick={closeMenu}>
-                        Rezervor central
-                      </Link>
-                      <Link href="/foi-parcurs" style={navLinkStyle} onClick={closeMenu}>
-                        Foi de parcurs
-                      </Link>
                       <Link href="/geofences" style={navLinkStyle} onClick={closeMenu}>
                         Zone
-                      </Link>
-                      <Link href="/alerte" style={navLinkStyle} onClick={closeMenu}>
-                        Alerte
                       </Link>
                       <a
                         href="http://135.181.45.175/"
