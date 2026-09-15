@@ -504,6 +504,53 @@ din nicio pagină — nu au fost adăugate în meniu ca să nu creeze impresia u
 funcționalități complete. `/tracking` (ruta internă, diferită de link-ul extern
 Tracking) e cod mort — face doar redirect instant către `/dashboard`.
 
+### 5n. Bug: device-uri/utilaje noi din Traccar invizibile pe hartă și fără sincronizare (2026-09-11)
+
+Radu a legat 3 utilaje noi din Traccar, dar nu apăreau pe harta din
+`/utilaje`. Aceeași cauză descoperită la 5l/list-traccar-devices (Traccar
+`GET /api/devices` și `GET /api/positions` FĂRĂ `all=true` întorc implicit
+doar device-urile alocate explicit contului TRACCAR_USER) era prezentă și în
+alte 4 Edge Functions care nu fuseseră atinse când s-a reparat doar
+`list-traccar-devices`:
+
+- `get-utilaje-positions` — hartă live `/utilaje` (devices + positions).
+- `get-masini-positions` — hartă live `/masini` (devices + positions).
+- `sync-traccar-fuel` — cron sincronizare combustibil (doar devices; apelurile
+  per-device la `/api/positions?deviceId=...` sunt deja filtrate explicit,
+  nu au nevoie de `all=true`).
+- `sync-traccar-masini` — cron sincronizare poziții/curse mașini (idem, doar
+  devices).
+
+Impact real: nu doar hărțile nu arătau utilajele/mașinile noi — combustibilul
+(sync-traccar-fuel) și pozițiile/cursele (sync-traccar-masini) pentru orice
+device nou legat din Traccar nu se sincronizau deloc, fiindcă maparea inițială
+IMEI → id intern Traccar (din `/api/devices`) rata device-urile nealocate
+explicit contului aplicației.
+
+**Fix pasul 1**: adăugat `?all=true` la toate cele 4 apeluri de mai sus (după
+modelul din `list-traccar-devices`, vezi comentariul de acolo). Deployed:
+`get-utilaje-positions` v8, `get-masini-positions` v3, `sync-traccar-fuel` v9,
+`sync-traccar-masini` v2.
+
+**Fix pasul 2 (2026-09-11, root cause real pentru hărți)**: după fix-ul de mai
+sus, utilajele noi apăreau în listă dar tot nu apăreau pe hartă. Diagnostic cu
+log-uri temporare în `get-utilaje-positions`: apelul bulk
+`GET /api/positions?all=true` întorcea doar 2 poziții din 5 device-uri Traccar
+— deși toate 5 aveau poziție vizibilă în Traccar (web/app mobil). Cauză:
+`all=true` pe `/api/positions` întoarce „ultima poziție" per device conform
+unui pointer intern (`device.positionId`), care nu se actualizează la fel de
+fiabil ca istoricul real de poziții din Traccar (probabil doar la poziții
+„valide" după criteriile lui Traccar, nu la orice update de rețea).
+
+**Fix**: în `get-utilaje-positions` și `get-masini-positions`, pentru orice
+device găsit dar fără poziție în apelul bulk, se face un apel individual pe
+istoricul din ultimele 30 de zile (`/api/positions?deviceId=X&from=...&to=...`
+— aceeași metodă folosită deja cu succes de `sync-traccar-fuel`/
+`sync-traccar-masini`, care nu are nevoie de acest fallback fiindcă apelează
+deja per-device de la bun început) și se ia cea mai recentă poziție din listă.
+Confirmat de Radu 2026-09-11: „apar toate" — toate 4 utilaje apar acum pe
+hartă. Deployed: `get-utilaje-positions` v11, `get-masini-positions` v4.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

@@ -118,9 +118,13 @@ Deno.serve(async (req) => {
 
   const auth = 'Basic ' + btoa(`${TRACCAR_USER}:${TRACCAR_PASSWORD}`);
 
+  // Vezi list-traccar-devices/index.ts: fără `all=true`, Traccar întoarce
+  // doar device-urile alocate explicit contului TRACCAR_USER, nu toate
+  // (confirmat 2026-09-10/11 — mașini noi legate din Traccar nu apăreau
+  // pe hartă / nu li se sincroniza poziția până la acest fix).
   const [devicesRes, positionsRes] = await Promise.all([
-    fetch(`${TRACCAR_URL}/api/devices`, { headers: { Authorization: auth } }),
-    fetch(`${TRACCAR_URL}/api/positions`, { headers: { Authorization: auth } }),
+    fetch(`${TRACCAR_URL}/api/devices?all=true`, { headers: { Authorization: auth } }),
+    fetch(`${TRACCAR_URL}/api/positions?all=true`, { headers: { Authorization: auth } }),
   ]);
 
   if (!devicesRes.ok || !positionsRes.ok) {
@@ -132,6 +136,41 @@ Deno.serve(async (req) => {
 
   const deviceByImei = new Map(devices.map((d) => [d.uniqueId, d]));
   const positionByDeviceId = new Map(positions.map((p) => [p.deviceId, p]));
+
+  // Fallback: GET /api/positions?all=true întoarce doar „ultima poziție"
+  // conform pointer-ului intern al Traccar (device.positionId), care nu se
+  // actualizează mereu la fel de fiabil ca istoricul real de poziții —
+  // confirmat 2026-09-11 pe get-utilaje-positions (aceeași cauză aici, cod
+  // identic). Pentru orice mașină cu device găsit dar fără poziție în
+  // apelul bulk, mai facem un apel individual pe istoricul din ultimele
+  // 30 de zile și luăm cea mai recentă poziție de acolo.
+  const deviceIdsFaraPozitie = new Set<number>();
+  for (const m of masini ?? []) {
+    const d = m.traccar_device_id ? deviceByImei.get(m.traccar_device_id) : undefined;
+    if (d && !positionByDeviceId.has(d.id)) {
+      deviceIdsFaraPozitie.add(d.id);
+    }
+  }
+
+  if (deviceIdsFaraPozitie.size > 0) {
+    const to = new Date();
+    const from = new Date(to.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const fallbackResults = await Promise.all(
+      Array.from(deviceIdsFaraPozitie).map(async (deviceId) => {
+        const url = `${TRACCAR_URL}/api/positions?deviceId=${deviceId}&from=${from.toISOString()}&to=${to.toISOString()}`;
+        const res = await fetch(url, { headers: { Authorization: auth } });
+        if (!res.ok) return null;
+        const list: TraccarPosition[] = await res.json();
+        if (list.length === 0) return null;
+        return list.reduce((cea_mai_recenta, p) =>
+          new Date(p.fixTime) > new Date(cea_mai_recenta.fixTime) ? p : cea_mai_recenta,
+        );
+      }),
+    );
+    for (const p of fallbackResults) {
+      if (p) positionByDeviceId.set(p.deviceId, p);
+    }
+  }
 
   const rows = (masini ?? []).map((m: any) => {
     const device = m.traccar_device_id ? deviceByImei.get(m.traccar_device_id) : undefined;

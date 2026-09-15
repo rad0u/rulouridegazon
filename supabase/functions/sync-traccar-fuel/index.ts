@@ -103,7 +103,11 @@ Deno.serve(async () => {
   const auth = 'Basic ' + btoa(`${TRACCAR_USER}:${TRACCAR_PASSWORD}`);
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  const devicesRes = await fetch(`${TRACCAR_URL}/api/devices`, { headers: { Authorization: auth } });
+  // Vezi list-traccar-devices/index.ts: fără `all=true`, Traccar întoarce
+  // doar device-urile alocate explicit contului TRACCAR_USER, nu toate
+  // (confirmat 2026-09-10/11 — utilaje noi legate din Traccar nu apăreau
+  // pe hartă / nu li se sincroniza combustibilul până la acest fix).
+  const devicesRes = await fetch(`${TRACCAR_URL}/api/devices?all=true`, { headers: { Authorization: auth } });
   if (!devicesRes.ok) {
     return new Response('Eroare la citirea device-urilor din Traccar.', { status: 502 });
   }

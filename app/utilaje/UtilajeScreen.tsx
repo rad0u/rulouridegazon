@@ -630,9 +630,13 @@ export default function UtilajeScreen() {
                           <label
                             style={{
                               display: 'block',
-                              width: '44px',
-                              height: '44px',
-                              borderRadius: '6px',
+                              // Dublat față de 44px, la cererea lui Radu (2026-09-15) — pozele
+                              // erau prea mici ca să se distingă utilajele. clamp() ca să
+                              // rămână rezonabil și pe mobil (unde tabelul oricum scrolează
+                              // orizontal), fără să fie exagerat pe desktop.
+                              width: 'clamp(64px, 14vw, 88px)',
+                              height: 'clamp(64px, 14vw, 88px)',
+                              borderRadius: '8px',
                               overflow: 'hidden',
                               border: '1px solid #ccc',
                               cursor: 'pointer',
@@ -656,7 +660,7 @@ export default function UtilajeScreen() {
                                   justifyContent: 'center',
                                   width: '100%',
                                   height: '100%',
-                                  fontSize: '1.2rem',
+                                  fontSize: 'clamp(1.4rem, 3vw, 2rem)',
                                   color: '#999',
                                 }}
                               >
