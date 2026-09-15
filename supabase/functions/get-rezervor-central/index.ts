@@ -141,7 +141,7 @@ Deno.serve(async (req) => {
 
     const { data: alimentari, error: alimentariError } = await adminClient
       .from('rezervor_alimentari')
-      .select('id, data_ora, cantitate_litri, note')
+      .select('id, data_ora, cantitate_litri, pret_litru, note')
       .eq('ferma_id', f.id)
       .gte('data_ora', de_la)
       .order('data_ora', { ascending: false });
@@ -152,6 +152,16 @@ Deno.serve(async (req) => {
     }
 
     const totalAlimentat = (alimentari ?? []).reduce((s, a) => s + Number(a.cantitate_litri), 0);
+
+    // Preț mediu ponderat al motorinei cumpărate de fermă (Radu, 2026-09-15:
+    // prețul se introduce la fiecare alimentare fiindcă variază mereu — nu
+    // există un preț unic curent). Folosit ulterior la calculul costului de
+    // producție (consum din sondă × preț mediu al perioadei).
+    const valoareTotalaAlimentari = (alimentari ?? []).reduce(
+      (s, a) => s + Number(a.cantitate_litri) * Number(a.pret_litru),
+      0,
+    );
+    const pretLitruMediu = totalAlimentat > 0 ? valoareTotalaAlimentari / totalAlimentat : null;
 
     const { data: utilaje, error: utilajeError } = await adminClient
       .from('utilaje')
@@ -203,6 +213,7 @@ Deno.serve(async (req) => {
       nivel_initial_litri: f.rezervor_nivel_initial_litri,
       nivel_initial_data: f.rezervor_nivel_initial_data,
       total_alimentat_litri: Math.round(totalAlimentat * 10) / 10,
+      pret_litru_mediu: pretLitruMediu !== null ? Math.round(pretLitruMediu * 100) / 100 : null,
       total_consumat_litri: Math.round(totalConsumat * 10) / 10,
       nivel_curent_litri: Math.round(nivelCurent * 10) / 10,
       utilaje_calibrate_incluse: utilajeCalibrate.length,

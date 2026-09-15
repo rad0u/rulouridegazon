@@ -551,6 +551,151 @@ deja per-device de la bun început) și se ia cea mai recentă poziție din list
 Confirmat de Radu 2026-09-11: „apar toate" — toate 4 utilaje apar acum pe
 hartă. Deployed: `get-utilaje-positions` v11, `get-masini-positions` v4.
 
+### 5o. Pagina /substante — alimentare gestiuni ferme + nomenclator + preț de intrare (2026-09-15)
+Cerință Radu: admin general trebuie să poată alimenta gestiunea fiecărei
+ferme cu substanțe (denumire din nomenclator + cantitate), cu prețul de
+intrare, ca să se poată calcula ulterior exact costul de producție. Aceasta
+e exact modulul „achiziții/furnizori pentru substanțe" lăsat pentru faza 2 în
+spec-ul inițial (secțiunea 7 mai jos) — acum implementat parțial (fără
+furnizori ca entitate separată, doar câmp text opțional).
+
+**Schimbare de model important**: până acum `substante` avea și politici
+RLS care permiteau lui admin_ferma să insereze/actualizeze direct rândurile
+fermei sale (fără preț de intrare, fără istoric). Cerința lui Radu ("o
+persoană cu drepturi de admin general trebuie să poată alimenta...") a fost
+citită ca restrângere intenționată — alimentarea (creșterea stocului +
+prețul de intrare) se face acum DOAR de admin_central, printr-un flux
+auditat. admin_ferma păstrează acces de citire (stoc curent + istoric
+intrări pentru ferma proprie), dar nu mai poate insera/actualiza direct
+`substante`. Dacă asta nu e ce își dorea Radu (ex. dacă admin_ferma chiar
+trebuie să poată opera stocuri fără preț), trebuie revizitat.
+
+**Schema nouă (migrare `substante_nomenclator_si_intrari`, aplicată
+2026-09-15)**:
+- `substante_nomenclator` — catalog global (nume unic + unitate_masura),
+  vizibil tuturor utilizatorilor autentificați, editabil doar de
+  admin_central. Separat de `substante` (care rămâne „stocul per fermă")
+  ca să nu se reintroducă denumiri diferite pentru aceeași substanță la
+  ferme diferite.
+- `substante.nomenclator_id` — coloană nouă, FK către nomenclator, cu
+  constrângere unică `(ferma_id, nomenclator_id)` — o singură linie de stoc
+  per (fermă, substanță din nomenclator).
+- `substante_intrari` — jurnal/audit al fiecărei alimentări: cantitate,
+  preț de intrare unitar, dată, furnizor (text liber, opțional), notă,
+  cine a introdus (`introdus_de`). SELECT permis și lui admin_ferma pentru
+  intrările fermei sale; INSERT/UPDATE/DELETE doar admin_central (de fapt
+  scrise doar prin funcția RPC de mai jos, nu direct din UI).
+- Funcția `alimenteaza_substanta(p_ferma_id, p_nomenclator_id, p_cantitate,
+  p_pret_intrare_unitar, p_data, p_furnizor, p_nota)` — SECURITY DEFINER,
+  verifică `is_admin_central()` intern, face upsert atomic pe `substante`
+  (creează linia dacă nu există, altfel adună cantitatea la stoc) și
+  recalculează `pret_unitar` ca **medie ponderată** cu stocul deja existent:
+  `((stoc_vechi*pret_vechi) + (cantitate_nouă*preț_intrare)) /
+  (stoc_vechi+cantitate_nouă)` — același `pret_unitar` deja citit de
+  `app/dashboard/cost-productie/page.tsx` pentru calculul costului de
+  producție, deci raportul de cost beneficiază automat, fără alte
+  modificări. Apoi inserează rândul de audit în `substante_intrari`.
+
+**Frontend** (`app/substante/SubstanteScreen.tsx`, înlocuiește stub-ul
+inițial din `page.tsx`):
+- admin_central vede: managementul nomenclatorului (adaugă denumire +
+  U.M.), formularul „Alimentare gestiune fermă" (fermă + substanță din
+  nomenclator + cantitate + preț intrare + dată + furnizor/notă opționale,
+  apelează RPC-ul de mai sus, arată costul total calculat live), tabelul de
+  stoc curent pe toate fermele (cu valoare stoc = stoc × preț mediu) și
+  istoricul ultimelor 50 de alimentări (toate fermele).
+- admin_ferma vede: doar stocul curent și istoricul alimentărilor pentru
+  ferma proprie (RLS filtrează automat), fără formular de alimentare — text
+  explicit că alimentarea se face de admin general.
+- Nu ating `components/ParcelaPanel.tsx` (consumul de substanțe la
+  operațiuni pe parcelă) — verificat înainte că citește `substante` cu
+  `substanta_id`/`nume`/`unitate_masura`, formă neschimbată de migrare.
+
+### 5p. Cost de producție — stare completă + bug fix cheltuieli indirecte (2026-09-15)
+Radu a descris planul complet pentru calculul prețului de producție al
+rulourilor: costuri directe (motorină pe baza citirilor de sondă, substanțe
+pe baza rapoartelor zilnice ale șefilor de fermă) + costuri indirecte
+(facturi utilități, salarii, chirii, reparații etc., introduse de admin
+general). Verificare: `/cheltuieli-indirecte` (admin_central only) și
+`app/dashboard/cost-productie/page.tsx` EXISTAU DEJA, construite anterior
+(nu în această sesiune) — nu erau documentate în NOTES.md.
+
+Stare curentă a `dashboard/cost-productie`: combină per fermă+lună — cost
+manoperă (`operatiuni.ore_lucru × ferme.cost_ora_lucru`), cost materiale
+(`operatiuni_substante.cantitate × substante.pret_unitar` — beneficiază
+automat de prețul de intrare introdus prin noul flux din 5o) și cheltuieli
+indirecte (`cheltuieli_indirecte`, grupate pe lună calendaristică din
+`data`). **Lipsă confirmată**: costul combustibilului NU e inclus încă —
+`combustibil_citiri`/`alimentari_utilaje` înregistrează doar litri, nu preț
+per litru; nicio structură din bază nu are momentan preț motorină. De
+adăugat quando Radu decide sursa prețului (preț per alimentare manuală,
+sau un preț curent setat periodic) — vezi mesajul trimis lui Radu.
+
+**Bug fix**: `cheltuieli_indirecte` avea politici RLS pentru admin_central
+doar pe SELECT/INSERT/UPDATE, nu și DELETE — butonul „Șterge" din UI eșua
+silențios (Supabase nu aruncă eroare la DELETE fără rânduri afectate din
+cauza RLS, doar șterge 0 rânduri), iar UI arăta mesaj fals de succes.
+Adăugată politica DELETE lipsă (migrare `cheltuieli_indirecte_delete_policy`).
+
+### 5q. Preț motorină la fiecare alimentare a rezervorului central (2026-09-15)
+Continuare la 5p: Radu a confirmat că prețul motorinei se introduce la
+FIECARE alimentare a rezervorului central al unei ferme (`/rezervor-central`),
+nu ca preț curent unic — motorina variază constant de la o livrare la alta.
+
+- `rezervor_alimentari.pret_litru` — coloană nouă, `not null check (>= 0)`
+  (tabela nu avea rânduri existente, deci fără nevoie de backfill). Formularul
+  „Înregistrează o alimentare" cere acum și prețul, alături de cantitate.
+- `get-rezervor-central` (v6): selectează și `pret_litru`, calculează
+  `pret_litru_mediu` = medie ponderată cu cantitatea pe toate alimentările
+  din fereastra urmărită (de la `rezervor_nivel_initial_data`), afișat pe
+  ecran per fermă; istoricul de alimentări arată prețul fiecărei livrări.
+- **Rămâne de făcut**: integrarea în `dashboard/cost-productie` — costul
+  lunar de combustibil per fermă = consum lunar (din `combustibil_citiri`,
+  aceeași metodă ca `total_consumat_litri` de mai sus, dar pe luni, nu
+  cumulat) × prețul mediu al motorinei valabil în acea lună. Necesită
+  extinderea calculului de consum la bucket-uri lunare (momentan
+  `get-rezervor-central` dă doar un total cumulat de la data configurării,
+  nu o defalcare pe lună) — de făcut într-o sesiune viitoare.
+
+### 5r. Cost de producție complet, pe lună, cu combustibil inclus (2026-09-15)
+Continuare la 5p/5q — Radu a confirmat să integrăm și combustibilul. Pagina
+`/dashboard/cost-productie` a fost RECONSTRUITĂ, nu doar completată:
+
+**Bug grav găsit și reparat**: pagina veche era un Server Component Next.js
+care interoga Supabase direct cu clientul anonim (`lib/supabaseClient.ts`,
+fără sesiunea utilizatorului). RLS pe `ferme`/`parcele`/`operatiuni`/
+`operatiuni_substante`/`cheltuieli_indirecte` cere `auth.role() =
+'authenticated'` — deci acele query-uri întorceau mereu 0 rânduri. Raportul
+era gol încă de la construire, indiferent de datele din bază. Al doilea bug
+găsit în același loc: costul de manoperă+materiale era calculat ca TOTAL
+all-time (ignorând `operatiuni.data`), apoi adunat la fiecare lună găsită în
+cheltuielile indirecte — dacă existau cheltuieli indirecte în 3 luni diferite,
+manopera+materialele erau numărate de 3 ori în totalul general.
+
+**Fix**: rescris ca pagină client (`CostProductieScreen.tsx`, 'use client',
+gate admin_central prin `useUserRole` ca restul aplicației) care apelează o
+edge function nouă, `get-cost-productie` (service role, urmează exact
+tiparul `get-rezervor-central`/`get-combustibil-report`: paginare explicită
+pe `combustibil_citiri`, filtrare citiri implauzibile peste capacitate).
+Funcția grupează TOATE cele patru costuri pe aceeași cheie (fermă, lună
+calendaristică din `operatiuni.data` / `cheltuieli_indirecte.data` /
+`combustibil_citiri.data_ora`), deci nu se mai poate dubla nimic:
+- manoperă: `operatiuni.ore_lucru × ferme.cost_ora_lucru`
+- substanțe: `operatiuni_substante.cantitate × substante.pret_unitar`
+- indirecte: `cheltuieli_indirecte.valoare`
+- **combustibil (nou)**: consum lunar deducut din scăderile de nivel din
+  `combustibil_citiri` ale utilajelor calibrate ale fermei (aceeași metodă
+  ca `get-rezervor-central`, dar pe bucket-uri lunare, nu cumulat) ×
+  prețul mediu ponderat al motorinei cumpărate de acea fermă PÂNĂ la
+  sfârșitul lunii respective (din `rezervor_alimentari.pret_litru`, cumulativ
+  cronologic — vezi 5q). Lunile dinaintea primei alimentări cu preț
+  înregistrat arată litrii consumați, dar cu cost „necunoscut" (nu 0 —
+  ca să nu subestimeze silențios costul real).
+
+Deployed: `get-cost-productie` v1 (funcție nouă). `dashboard/cost-productie`
+rămâne accesibilă din `/dashboard` (nu e în meniul principal, la fel ca
+`/cheltuieli-indirecte` — ambele doar prin pagina Dashboard).
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
@@ -689,13 +834,17 @@ aceeași formulă `net.http_post` + `app.settings.anon_key` ca la utilaje.
 - `supabase/schema-*.sql` — copii sursă-de-adevăr ale migrărilor SQL aplicate în Supabase.
 - `supabase/functions/sync-traccar-masini/`, `get-masini-positions/`, `get-foaie-parcurs/` — modulul flotă auto (vezi secțiunea 5, „Flotă auto").
 - `components/MasiniMapView.tsx`, `components/GeofenceMapEditor.tsx`, `app/masini/`, `app/curse/`, `app/foi-parcurs/`, `app/geofences/`, `app/alerte/` — paginile modulului flotă auto.
+- `app/substante/SubstanteScreen.tsx` — pagina de gestiune substanțe (nomenclator + alimentare + stoc + istoric, vezi secțiunea 5o).
 
 ## 7. Ce rămâne pentru faza 2 (neschimbat față de spec-ul inițial din CLAUDE.md)
 
 - Tracking paleți per client (istoric, nu doar sold global).
-- Modul achiziții/furnizori pentru substanțe.
+- Modul achiziții/furnizori pentru substanțe — IMPLEMENTAT PARȚIAL 2026-09-15,
+  vezi secțiunea 5o (alimentare + preț de intrare + istoric; furnizorii rămân
+  câmp text liber, nu entitate separată).
 - Alerte stoc minim.
-- Rapoarte financiare/costuri.
+- Rapoarte financiare/costuri — parțial acoperit de `dashboard/cost-productie`,
+  care acum are și preț de intrare corect per substanță (secțiunea 5o).
 - Fișe complete de clienți / comenzi.
 - Integrare completă combustibil (Traccar + DUT-E → aplicație), condiționată de
   finalizarea testelor pe pilot.

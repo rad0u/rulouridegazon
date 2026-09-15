@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 
-type Alimentare = { id: string; data_ora: string; cantitate_litri: number; note: string | null };
+type Alimentare = { id: string; data_ora: string; cantitate_litri: number; pret_litru: number; note: string | null };
 
 type FermaRezervor = {
   ferma_id: string;
@@ -13,6 +13,7 @@ type FermaRezervor = {
   nivel_initial_litri?: number;
   nivel_initial_data?: string;
   total_alimentat_litri?: number;
+  pret_litru_mediu?: number | null;
   total_consumat_litri?: number;
   nivel_curent_litri?: number;
   utilaje_calibrate_incluse?: number;
@@ -36,6 +37,7 @@ export default function RezervorCentralScreen() {
   // Formular alimentare nouă
   const [fermaSelectata, setFermaSelectata] = useState<string>('');
   const [cantitate, setCantitate] = useState('');
+  const [pretLitru, setPretLitru] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -112,8 +114,15 @@ export default function RezervorCentralScreen() {
     setSaveError(null);
 
     const cant = Number(cantitate);
+    const pret = Number(pretLitru);
     if (!fermaSelectata || !cant || cant <= 0) {
       setSaveError('Alege ferma și o cantitate validă.');
+      return;
+    }
+    // Radu (2026-09-15): prețul motorinei variază mereu, deci se introduce
+    // obligatoriu la fiecare alimentare (nu există un preț curent implicit).
+    if (!pretLitru || pret < 0) {
+      setSaveError('Completează prețul motorinei la această alimentare (poate fi 0, dar nu negativ).');
       return;
     }
 
@@ -126,6 +135,7 @@ export default function RezervorCentralScreen() {
     const { error: insertError } = await supabase.from('rezervor_alimentari').insert({
       ferma_id: fermaSelectata,
       cantitate_litri: cant,
+      pret_litru: pret,
       user_id: user?.id ?? null,
     });
 
@@ -137,6 +147,7 @@ export default function RezervorCentralScreen() {
     }
 
     setCantitate('');
+    setPretLitru('');
     void incarca();
   }
 
@@ -191,6 +202,7 @@ export default function RezervorCentralScreen() {
                 <th style={{ padding: '0.4rem' }}>Fermă</th>
                 <th style={{ padding: '0.4rem' }}>Capacitate</th>
                 <th style={{ padding: '0.4rem' }}>Nivel curent</th>
+                <th style={{ padding: '0.4rem' }}>Preț mediu motorină</th>
                 <th style={{ padding: '0.4rem' }}>Ultima alimentare</th>
                 <th style={{ padding: '0.4rem' }}></th>
               </tr>
@@ -215,8 +227,13 @@ export default function RezervorCentralScreen() {
                           : `${f.nivel_curent_litri} L${procent !== null ? ` (${procent}%)` : ''}${scazut ? ' ⚠️ nivel scăzut' : ''}`}
                       </td>
                       <td style={{ padding: '0.4rem' }}>
+                        {f.pret_litru_mediu !== null && f.pret_litru_mediu !== undefined
+                          ? `${f.pret_litru_mediu.toFixed(2)} lei/L`
+                          : '—'}
+                      </td>
+                      <td style={{ padding: '0.4rem' }}>
                         {f.ultima_alimentare
-                          ? `${f.ultima_alimentare.cantitate_litri} L — ${formatData(f.ultima_alimentare.data_ora)}`
+                          ? `${f.ultima_alimentare.cantitate_litri} L @ ${Number(f.ultima_alimentare.pret_litru).toFixed(2)} lei/L — ${formatData(f.ultima_alimentare.data_ora)}`
                           : '—'}
                       </td>
                       <td style={{ padding: '0.4rem' }}>
@@ -242,7 +259,7 @@ export default function RezervorCentralScreen() {
 
                     {configFerma === f.ferma_id && (
                       <tr>
-                        <td colSpan={5} style={{ padding: '0.6rem', background: '#fafafa' }}>
+                        <td colSpan={6} style={{ padding: '0.6rem', background: '#fafafa' }}>
                           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                             <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
                               Capacitate rezervor (L)
@@ -277,12 +294,12 @@ export default function RezervorCentralScreen() {
 
                     {deschis && f.alimentari && (
                       <tr>
-                        <td colSpan={5} style={{ padding: '0.6rem', background: '#fafafa' }}>
+                        <td colSpan={6} style={{ padding: '0.6rem', background: '#fafafa' }}>
                           <strong>Istoric alimentări:</strong>
                           <ul style={{ margin: '0.25rem 0 0 1rem' }}>
                             {f.alimentari.map((a) => (
                               <li key={a.id}>
-                                {formatData(a.data_ora)} — {a.cantitate_litri} L
+                                {formatData(a.data_ora)} — {a.cantitate_litri} L @ {Number(a.pret_litru).toFixed(2)} lei/L
                               </li>
                             ))}
                           </ul>
@@ -322,6 +339,17 @@ export default function RezervorCentralScreen() {
                 type="number"
                 value={cantitate}
                 onChange={(e) => setCantitate(e.target.value)}
+                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '140px' }}
+              />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+              Preț motorină (lei/L)
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={pretLitru}
+                onChange={(e) => setPretLitru(e.target.value)}
                 style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '140px' }}
               />
             </label>
