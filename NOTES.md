@@ -696,6 +696,36 @@ Deployed: `get-cost-productie` v1 (funcție nouă). `dashboard/cost-productie`
 rămâne accesibilă din `/dashboard` (nu e în meniul principal, la fel ca
 `/cheltuieli-indirecte` — ambele doar prin pagina Dashboard).
 
+### 5s. Jurnal de activitate (audit log) — secțiunea Administrare (2026-09-15)
+Cerere Radu: să știe exact ce utilizator a modificat ce date, admin de fermă
+sau admin general deopotrivă. Implementat la nivel de bază de date, nu de
+frontend, ca să prindă orice modificare indiferent pe unde intră (formular,
+RPC, chiar și o editare directă din SQL) și să nu rămână în urmă pe măsură
+ce aplicația evoluează.
+
+- `jurnal_activitate` — tabelă de log append-only (id bigint identity,
+  tabel, operatie INSERT/UPDATE/DELETE, rand_id, utilizator_id +
+  utilizator_nume/rol denormalizate la momentul faptei — rămân corecte
+  chiar dacă userul e redenumit/șters ulterior, date_vechi/date_noi ca
+  jsonb, creat_la). SELECT doar pentru admin_central.
+- `inregistreaza_activitate()` — funcție generică de trigger (SECURITY
+  DEFINER, `set row_security = off` ca la `is_admin_central()`), folosește
+  `TG_TABLE_NAME`/`TG_OP`/`auth.uid()` — un singur cod pentru toate
+  tabelele, fără duplicare.
+- Atașată pe 13 tabele „umane": `ferme`, `parcele`, `operatiuni`,
+  `operatiuni_substante`, `substante`, `substante_nomenclator`, `utilaje`,
+  `masini`, `alimentari_utilaje`, `rezervor_alimentari`,
+  `cheltuieli_indirecte`, `curse`, `geofences`, `utilizatori`. EXCLUSE
+  intenționat: tabelele populate automat de sincronizări/senzori (ex.
+  `combustibil_citiri`, poziții Traccar) — volum mare, fără utilizator uman
+  în spate, nu ce își dorea Radu aici. `substante_intrari` de asemenea
+  exclusă — e deja propriul ei jurnal (are `introdus_de`).
+- Frontend: `/jurnal-activitate` (admin_central only, link în meniu la
+  Administrare) — filtrare pe tabel/utilizator/interval de date, paginare
+  (50/pagină, „Încarcă mai multe"), fiecare rând expandabil arată diferența
+  câmp cu câmp (valoare veche → nouă la UPDATE, sau valorile la
+  INSERT/DELETE), nu doar JSON brut.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

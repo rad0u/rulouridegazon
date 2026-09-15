@@ -211,6 +211,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                       <Link href="/geofences" style={navLinkStyle} onClick={closeMenu}>
                         Zone
                       </Link>
+                      <Link href="/jurnal-activitate" style={navLinkStyle} onClick={closeMenu}>
+                        Jurnal de activitate
+                      </Link>
                       <a
                         href="http://135.181.45.175/"
                         target="_blank"
