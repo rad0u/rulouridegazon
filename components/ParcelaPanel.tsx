@@ -148,10 +148,15 @@ export default function ParcelaPanel({
   }
 
   async function loadSubstante() {
+    // Doar substanțele din gestiunea ACESTEI ferme și doar cele cu stoc > 0 —
+    // Radu, 2026-09-15: adminii de fermă nu trebuie să poată selecta din tot
+    // nomenclatorul (36 de substanțe posibile), ci doar din ce chiar există
+    // fizic pe gestiunea fermei lor în acel moment.
     const { data: rows } = await supabase
       .from('substante')
       .select('id,nume,unitate_masura,stoc_curent')
-      .or(`ferma_id.eq.${parcela.ferma_id},ferma_id.is.null`)
+      .eq('ferma_id', parcela.ferma_id)
+      .gt('stoc_curent', 0)
       .order('nume');
 
     setSubstanteFerma((rows as Substanta[]) ?? []);

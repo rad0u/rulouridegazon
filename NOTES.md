@@ -726,6 +726,49 @@ ce aplicația evoluează.
   câmp cu câmp (valoare veche → nouă la UPDATE, sau valorile la
   INSERT/DELETE), nu doar JSON brut.
 
+### 5t. Nomenclator substanțe într-un modal + corectare alimentări din istoric (2026-09-15)
+Cerere Radu: lista de nomenclator (~35 substanțe) ocupa tot ecranul afișată
+mereu; și-a dorit ascunsă după un buton, formatată frumos. Și la „Istoric
+alimentări" a vrut posibilitatea să corecteze o alimentare introdusă greșit
+(exemplul lui: Furnizor necompletat), nu doar furnizorul, ci orice câmp.
+
+- **Nomenclator, în modal**: butonul „Vezi nomenclator (N)" deschide un
+  panou peste pagină, cu câmp de căutare (filtrare live pe denumire) și
+  tabel scrollabil Denumire / U.M. Lista mare nu mai aglomerează pagina
+  principală.
+- **Corectare alimentări** — buton „Corectează" pe fiecare rând din
+  „Istoric alimentări" (doar admin general), deschide un formular inline cu
+  Cantitate / Preț intrare / Dată / Furnizor / Notă. Fermă și substanța nu
+  se pot schimba dintr-o corecție (ar însemna practic altă operațiune).
+  - RPC nouă `editeaza_alimentare_substanta(...)` (admin_central only):
+    actualizează rândul din `substante_intrari`, apoi cheamă
+    `recalculeaza_stoc_substanta(substanta_id)`.
+  - `recalculeaza_stoc_substanta` **reface stocul și prețul mediu de la
+    zero**, reluând cronologic TOATE intrările + consumurile acelei
+    substanțe (nu doar patch-uiește rândul corectat). Motiv: prețul mediu
+    ponderat e dependent de ordinea exactă intrare/consum din timp (constatat
+    din `scade_stoc_substanta_trigger`, care scade cantitatea la fiecare
+    consum dar nu ajustează separat prețul) — o corecție a unei alimentări
+    vechi trebuie să recalculeze tot ce a urmat, nu doar rândul respectiv,
+    altfel prețul mediu curent ar rămâne greșit.
+  - După orice corecție, stocul curent și prețul mediu afișate în pagină
+    sunt exact ca și cum alimentarea ar fi fost introdusă corect de la
+    început.
+
+### 5u. Dropdown substanțe la operațiuni — doar stoc real al fermei, nu tot nomenclatorul (2026-09-15)
+Cerere Radu: la înregistrarea unei operațiuni pe parcelă (ce a lucrat + ce
+substanțe a folosit), adminul de fermă nu trebuie să poată alege din tot
+nomenclatorul (36 de substanțe posibile), ci doar din ce există efectiv, cu
+stoc > 0, pe gestiunea fermei lui.
+
+- `components/ParcelaPanel.tsx`, `loadSubstante()`: interogarea pe tabela
+  `substante` a fost restrânsă de la `ferma_id.eq.X SAU ferma_id.is.null`
+  (clauza „is null" nu se mai potrivea oricum cu nimic în practică — fiecare
+  rând din `substante` are ferma_id completat) la `ferma_id.eq.X ȘI
+  stoc_curent > 0`. Rezultat: dropdown-ul din formularul de operațiuni arată
+  strict substanțele din gestiunea fermei curente care mai au stoc fizic —
+  nu tot nomenclatorul, și nici substanțele epuizate ale fermei.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

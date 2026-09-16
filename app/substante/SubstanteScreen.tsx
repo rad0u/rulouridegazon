@@ -115,6 +115,20 @@ function SubstanteAdminCentral() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveOk, setSaveOk] = useState(false);
 
+  const [nomenclatorModalDeschis, setNomenclatorModalDeschis] = useState(false);
+  const [cautareNomenclator, setCautareNomenclator] = useState('');
+
+  const [intrareExtinsa, setIntrareExtinsa] = useState<string | null>(null);
+  const [editIntrareForm, setEditIntrareForm] = useState<{
+    cantitate: string;
+    pret_intrare_unitar: string;
+    data: string;
+    furnizor: string;
+    nota: string;
+  } | null>(null);
+  const [editIntrareSaving, setEditIntrareSaving] = useState(false);
+  const [editIntrareError, setEditIntrareError] = useState<string | null>(null);
+
   async function incarca() {
     setLoading(true);
     setLoadError(null);
@@ -255,6 +269,64 @@ function SubstanteAdminCentral() {
     await incarca();
   }
 
+  function deschideEditareIntrare(i: Intrare) {
+    if (intrareExtinsa === i.id) {
+      setIntrareExtinsa(null);
+      setEditIntrareForm(null);
+      return;
+    }
+    setIntrareExtinsa(i.id);
+    setEditIntrareError(null);
+    setEditIntrareForm({
+      cantitate: String(i.cantitate),
+      pret_intrare_unitar: String(i.pret_intrare_unitar),
+      data: i.data,
+      furnizor: i.furnizor ?? '',
+      nota: i.nota ?? '',
+    });
+  }
+
+  async function salveazaEditareIntrare(intrareId: string) {
+    if (!editIntrareForm) return;
+    setEditIntrareError(null);
+
+    const cant = Number(editIntrareForm.cantitate);
+    const pret = Number(editIntrareForm.pret_intrare_unitar);
+
+    if (!editIntrareForm.cantitate || Number.isNaN(cant) || cant <= 0) {
+      setEditIntrareError('Cantitatea trebuie să fie un număr pozitiv.');
+      return;
+    }
+    if (!editIntrareForm.pret_intrare_unitar || Number.isNaN(pret) || pret < 0) {
+      setEditIntrareError('Prețul de intrare trebuie să fie un număr valid (poate fi 0).');
+      return;
+    }
+    if (!editIntrareForm.data) {
+      setEditIntrareError('Alege data.');
+      return;
+    }
+
+    setEditIntrareSaving(true);
+    const { error: rpcError } = await supabase.rpc('editeaza_alimentare_substanta', {
+      p_intrare_id: intrareId,
+      p_cantitate: cant,
+      p_pret_intrare_unitar: pret,
+      p_data: editIntrareForm.data,
+      p_furnizor: editIntrareForm.furnizor.trim() || null,
+      p_nota: editIntrareForm.nota.trim() || null,
+    });
+    setEditIntrareSaving(false);
+
+    if (rpcError) {
+      setEditIntrareError(rpcError.message);
+      return;
+    }
+
+    setIntrareExtinsa(null);
+    setEditIntrareForm(null);
+    await incarca();
+  }
+
   return (
     <main
       style={{
@@ -313,18 +385,13 @@ function SubstanteAdminCentral() {
         </form>
         {nomenclatorError && <p style={{ color: '#b00020', marginBottom: 0 }}>{nomenclatorError}</p>}
 
-        {nomenclator.length > 0 && (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem', marginTop: '0.75rem' }}>
-            {nomenclator.map((n) => (
-              <span
-                key={n.id}
-                style={{ background: '#f0f4f8', borderRadius: '999px', padding: '0.3rem 0.75rem', fontSize: '0.85rem' }}
-              >
-                {n.nume} <span style={{ color: '#888' }}>({n.unitate_masura})</span>
-              </span>
-            ))}
-          </div>
-        )}
+        <button
+          type="button"
+          onClick={() => setNomenclatorModalDeschis(true)}
+          style={{ ...butonStyle, marginTop: '0.75rem' }}
+        >
+          Vezi nomenclator ({nomenclator.length})
+        </button>
       </section>
 
       {/* Alimentare gestiune */}
@@ -454,43 +521,196 @@ function SubstanteAdminCentral() {
               <th style={{ padding: '0.4rem' }}>Preț intrare</th>
               <th style={{ padding: '0.4rem' }}>Furnizor</th>
               <th style={{ padding: '0.4rem' }}>Introdus de</th>
+              <th style={{ padding: '0.4rem' }}></th>
             </tr>
           </thead>
           <tbody>
             {loadedOnce && intrari.length === 0 && (
               <tr>
-                <td colSpan={7} style={{ padding: '0.75rem', color: '#666' }}>
+                <td colSpan={8} style={{ padding: '0.75rem', color: '#666' }}>
                   Niciun istoric încă.
                 </td>
               </tr>
             )}
-            {intrari.map((i) => (
-              <Fragment key={i.id}>
-                <tr style={{ borderBottom: i.nota ? 'none' : '1px solid #f0f0f0' }}>
-                  <td style={{ padding: '0.4rem' }}>{formatData(i.data)}</td>
-                  <td style={{ padding: '0.4rem' }}>{i.substante?.ferme?.nume ?? '—'}</td>
-                  <td style={{ padding: '0.4rem' }}>{i.substante?.nume ?? '—'}</td>
-                  <td style={{ padding: '0.4rem' }}>
-                    {i.cantitate} {i.substante?.unitate_masura ?? ''}
-                  </td>
-                  <td style={{ padding: '0.4rem' }}>
-                    {formatLei(i.pret_intrare_unitar)}/{i.substante?.unitate_masura ?? ''}
-                  </td>
-                  <td style={{ padding: '0.4rem' }}>{i.furnizor ?? '—'}</td>
-                  <td style={{ padding: '0.4rem' }}>{i.utilizatori?.nume ?? '—'}</td>
-                </tr>
-                {i.nota && (
-                  <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
-                    <td colSpan={7} style={{ padding: '0 0.4rem 0.5rem', color: '#666', fontSize: '0.85rem' }}>
-                      {i.nota}
+            {intrari.map((i) => {
+              const extinsa = intrareExtinsa === i.id;
+              return (
+                <Fragment key={i.id}>
+                  <tr
+                    onClick={() => deschideEditareIntrare(i)}
+                    style={{
+                      borderBottom: i.nota && !extinsa ? 'none' : '1px solid #f0f0f0',
+                      background: extinsa ? '#eef6ff' : undefined,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <td style={{ padding: '0.4rem' }}>{formatData(i.data)}</td>
+                    <td style={{ padding: '0.4rem' }}>{i.substante?.ferme?.nume ?? '—'}</td>
+                    <td style={{ padding: '0.4rem' }}>{i.substante?.nume ?? '—'}</td>
+                    <td style={{ padding: '0.4rem' }}>
+                      {i.cantitate} {i.substante?.unitate_masura ?? ''}
+                    </td>
+                    <td style={{ padding: '0.4rem' }}>
+                      {formatLei(i.pret_intrare_unitar)}/{i.substante?.unitate_masura ?? ''}
+                    </td>
+                    <td style={{ padding: '0.4rem' }}>{i.furnizor ?? '—'}</td>
+                    <td style={{ padding: '0.4rem' }}>{i.utilizatori?.nume ?? '—'}</td>
+                    <td style={{ padding: '0.4rem', color: '#666', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
+                      {extinsa ? 'Ascunde ▲' : 'Corectează ▼'}
                     </td>
                   </tr>
-                )}
-              </Fragment>
-            ))}
+                  {i.nota && !extinsa && (
+                    <tr style={{ borderBottom: '1px solid #f0f0f0' }}>
+                      <td colSpan={8} style={{ padding: '0 0.4rem 0.5rem', color: '#666', fontSize: '0.85rem' }}>
+                        {i.nota}
+                      </td>
+                    </tr>
+                  )}
+                  {extinsa && editIntrareForm && (
+                    <tr>
+                      <td colSpan={8} style={{ padding: '0.75rem', background: '#fafafa' }}>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
+                          <label>
+                            Cantitate
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editIntrareForm.cantitate}
+                              onChange={(e) => setEditIntrareForm({ ...editIntrareForm, cantitate: e.target.value })}
+                              style={inputStyle}
+                            />
+                          </label>
+                          <label>
+                            Preț intrare
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={editIntrareForm.pret_intrare_unitar}
+                              onChange={(e) => setEditIntrareForm({ ...editIntrareForm, pret_intrare_unitar: e.target.value })}
+                              style={inputStyle}
+                            />
+                          </label>
+                          <label>
+                            Dată
+                            <input
+                              type="date"
+                              value={editIntrareForm.data}
+                              onChange={(e) => setEditIntrareForm({ ...editIntrareForm, data: e.target.value })}
+                              style={inputStyle}
+                            />
+                          </label>
+                          <label>
+                            Furnizor
+                            <input
+                              type="text"
+                              value={editIntrareForm.furnizor}
+                              onChange={(e) => setEditIntrareForm({ ...editIntrareForm, furnizor: e.target.value })}
+                              style={inputStyle}
+                            />
+                          </label>
+                          <label>
+                            Notă
+                            <input
+                              type="text"
+                              value={editIntrareForm.nota}
+                              onChange={(e) => setEditIntrareForm({ ...editIntrareForm, nota: e.target.value })}
+                              style={inputStyle}
+                            />
+                          </label>
+                          <button
+                            onClick={() => void salveazaEditareIntrare(i.id)}
+                            disabled={editIntrareSaving}
+                            style={{ ...butonStyle, background: editIntrareSaving ? '#eee' : '#e8f5e9' }}
+                          >
+                            {editIntrareSaving ? 'Se salvează...' : 'Salvează corecția'}
+                          </button>
+                        </div>
+                        <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.5rem', marginBottom: 0 }}>
+                          Fermă și substanță nu se pot schimba aici. Corectarea recalculează automat stocul și
+                          prețul mediu al substanței, ca și cum alimentarea ar fi fost introdusă corect de la
+                          început.
+                        </p>
+                        {editIntrareError && <p style={{ color: '#b00020', marginTop: '0.5rem', marginBottom: 0 }}>{editIntrareError}</p>}
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </section>
+
+      {nomenclatorModalDeschis && (
+        <div
+          onClick={() => setNomenclatorModalDeschis(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            background: 'rgba(0,0,0,0.25)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '1rem',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: '#fff',
+              borderRadius: '10px',
+              width: 'min(560px, 100%)',
+              maxHeight: '80vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 8px 30px rgba(0,0,0,0.2)',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '1rem 1.25rem', borderBottom: '1px solid #eee' }}>
+              <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Nomenclator substanțe ({nomenclator.length})</h2>
+              <button
+                onClick={() => setNomenclatorModalDeschis(false)}
+                style={{ border: 'none', background: 'transparent', fontSize: '1.3rem', cursor: 'pointer', lineHeight: 1, color: '#666' }}
+                aria-label="Închide"
+              >
+                ×
+              </button>
+            </div>
+            <div style={{ padding: '0.75rem 1.25rem' }}>
+              <input
+                type="text"
+                value={cautareNomenclator}
+                onChange={(e) => setCautareNomenclator(e.target.value)}
+                placeholder="Caută după denumire..."
+                style={{ ...inputStyle, width: '100%', minWidth: 0 }}
+              />
+            </div>
+            <div style={{ overflowY: 'auto', padding: '0 1.25rem 1.25rem' }}>
+              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
+                <thead>
+                  <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    <th style={{ padding: '0.4rem', position: 'sticky', top: 0, background: '#fff' }}>Denumire</th>
+                    <th style={{ padding: '0.4rem', position: 'sticky', top: 0, background: '#fff' }}>U.M.</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {nomenclator
+                    .filter((n) => n.nume.toLowerCase().includes(cautareNomenclator.trim().toLowerCase()))
+                    .map((n) => (
+                      <tr key={n.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                        <td style={{ padding: '0.4rem' }}>{n.nume}</td>
+                        <td style={{ padding: '0.4rem', color: '#888' }}>{n.unitate_masura}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
