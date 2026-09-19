@@ -769,6 +769,43 @@ stoc > 0, pe gestiunea fermei lui.
   strict substanțele din gestiunea fermei curente care mai au stoc fizic —
   nu tot nomenclatorul, și nici substanțele epuizate ale fermei.
 
+### 5v. Comparație alimentări manuale (operator) vs realimentări detectate de sondă (2026-09-16)
+Cerere Radu: pornind de la întrebarea „e nevoie ca operatoarea să înregistreze
+manual alimentarea utilajelor, sau ne bazăm doar pe sonde?" — răspuns: mai
+bine amândouă, comparate. Verificare făcută înainte de implementare:
+`alimentari_utilaje` (înregistrarea manuală) exista deja ca tabelă + ecran
+(`/alimentari-utilaje`), dar nu era folosită nicăieri în calculul rezervorului
+central sau al costului de producție — practic aplicația funcționa deja doar
+pe sonde, iar tabela manuală era aproape neutilizată (2 rânduri în total).
+Separat, `get-combustibil-report` deja detecta realimentări din sondă (salturi
+pozitive de nivel peste un prag, cu compresie în puncte de întoarcere ca să nu
+"disperseze" o realimentare turnată treptat în mai mulți pași RS232) — deci
+partea „automată" era deja construită, lipsea doar comparația cu manualul.
+
+- `supabase/functions/get-combustibil-report/index.ts` (v6): pentru fiecare
+  utilaj calibrat, se adaugă acum `manual_litri`/`manual_nr` (suma și numărul
+  alimentărilor din `alimentari_utilaje` pentru acel utilaj, în aceeași
+  perioadă selectată — 7/14/30 zile) și `diferenta_litri` = realimentat
+  (sondă) − manual, plus `diferenta_semnificativa` (peste 15 l, același prag
+  folosit și la detectarea evenimentelor). Utilajele necalibrate (fără sondă
+  în litri) primesc și ele `manual_litri`/`manual_nr`, ca operatoarea să poată
+  înregistra oricum, chiar dacă nu există sondă de comparat.
+- `app/combustibil/CombustibilScreen.tsx`: două coloane noi în raport —
+  „Manual (operator)" și „Diferență" (roșu + ⚠️ dacă diferența e
+  semnificativă), cu o notă explicativă: diferență pozitivă = sonda a
+  detectat mai multă motorină alimentată decât s-a raportat manual (posibil
+  o alimentare uitată), negativă = manual > sondă (posibil cantitate greșită,
+  sau — foarte rar, ~2% din cazuri pe fermele lui Radu — o alimentare dintr-o
+  altă sursă decât rezervorul central).
+- Nu s-a schimbat nimic la ecranul de înregistrare manuală (`/alimentari-utilaje`)
+  — operatoarea continuă să introducă acolo ca până acum; comparația se vede
+  doar în `/combustibil`, unde privește admin general.
+
+*(Modificarea de mai sus la `get-combustibil-report` nu a putut fi încă
+verificată cu `tsc` local — legătura cu Mac-ul lui Radu a fost indisponibilă
+în timpul sesiunii. Fișierul a fost totuși scris corect pe disc, prin
+device_commit_files. De verificat compilarea la următoarea ocazie.)*
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

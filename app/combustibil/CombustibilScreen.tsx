@@ -17,10 +17,20 @@ type RezultatUtilaj = {
   realimentat_litri: number;
   realimentari: Eveniment[];
   scaderi_suspecte: Eveniment[];
+  manual_litri: number;
+  manual_nr: number;
+  diferenta_litri: number;
+  diferenta_semnificativa: boolean;
   eroare?: string;
 };
 
-type UtilajNecalibrat = { utilaj_id: string; nume: string; ferma_nume: string | null };
+type UtilajNecalibrat = {
+  utilaj_id: string;
+  nume: string;
+  ferma_nume: string | null;
+  manual_litri: number;
+  manual_nr: number;
+};
 
 type Raport = {
   zile: number;
@@ -114,6 +124,14 @@ export default function CombustibilScreen() {
         </div>
       </div>
 
+      <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
+        Coloana „Manual" e ce a înregistrat operatoarea în /alimentari-utilaje pentru acest utilaj, în
+        aceeași perioadă. Coloana „Diferență" compară cele două surse — pozitiv înseamnă că sonda a
+        detectat mai multă motorină alimentată decât s-a raportat manual (posibil o alimentare
+        neînregistrată), negativ înseamnă invers (posibil o cantitate introdusă greșit, sau o alimentare
+        dintr-o altă sursă decât rezervorul central).
+      </p>
+
       {error && (
         <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px' }}>
           {error}
@@ -136,7 +154,9 @@ export default function CombustibilScreen() {
                 <th style={{ padding: '0.4rem' }}>Utilaj</th>
                 <th style={{ padding: '0.4rem' }}>Fermă</th>
                 <th style={{ padding: '0.4rem' }}>Consum normal</th>
-                <th style={{ padding: '0.4rem' }}>Realimentat</th>
+                <th style={{ padding: '0.4rem' }}>Realimentat (sondă)</th>
+                <th style={{ padding: '0.4rem' }}>Manual (operator)</th>
+                <th style={{ padding: '0.4rem' }}>Diferență</th>
                 <th style={{ padding: '0.4rem' }}>Scăderi suspecte</th>
                 <th style={{ padding: '0.4rem' }}></th>
               </tr>
@@ -156,6 +176,20 @@ export default function CombustibilScreen() {
                       <td style={{ padding: '0.4rem' }}>{r.consum_normal_litri} L</td>
                       <td style={{ padding: '0.4rem' }}>
                         {r.realimentat_litri} L{r.realimentari.length > 0 ? ` (${r.realimentari.length}x)` : ''}
+                      </td>
+                      <td style={{ padding: '0.4rem' }}>
+                        {r.manual_litri} L{r.manual_nr > 0 ? ` (${r.manual_nr}x)` : ''}
+                      </td>
+                      <td
+                        style={{
+                          padding: '0.4rem',
+                          color: r.diferenta_semnificativa ? '#8a1f13' : '#666',
+                          fontWeight: r.diferenta_semnificativa ? 600 : undefined,
+                        }}
+                      >
+                        {r.diferenta_litri > 0 ? '+' : ''}
+                        {r.diferenta_litri} L
+                        {r.diferenta_semnificativa ? ' ⚠️' : ''}
                       </td>
                       <td style={{ padding: '0.4rem', color: areSuspecte ? '#8a1f13' : undefined, fontWeight: areSuspecte ? 600 : undefined }}>
                         {areSuspecte
@@ -184,7 +218,7 @@ export default function CombustibilScreen() {
                     </tr>
                     {deschis && (
                       <tr key={`${r.utilaj_id}-detalii`}>
-                        <td colSpan={6} style={{ padding: '0.6rem', background: '#fafafa' }}>
+                        <td colSpan={8} style={{ padding: '0.6rem', background: '#fafafa' }}>
                           {r.scaderi_suspecte.length > 0 && (
                             <div style={{ marginBottom: '0.5rem' }}>
                               <strong style={{ color: '#8a1f13' }}>Scăderi suspecte:</strong>
@@ -199,7 +233,7 @@ export default function CombustibilScreen() {
                           )}
                           {r.realimentari.length > 0 && (
                             <div>
-                              <strong>Realimentări:</strong>
+                              <strong>Realimentări (sondă):</strong>
                               <ul style={{ margin: '0.25rem 0 0 1rem' }}>
                                 {r.realimentari.map((e, i) => (
                                   <li key={i}>
@@ -221,11 +255,24 @@ export default function CombustibilScreen() {
       )}
 
       {raport && raport.necalibrate.length > 0 && (
-        <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
-          {raport.necalibrate.length} utilaj(e) fără capacitate de tanc completată (necalibrate) nu apar
-          în raport: {raport.necalibrate.map((u) => u.nume).join(', ')}. Apar automat, fără nicio
-          modificare de cod, imediat ce senzorul e calibrat și capacitatea tancului e completată.
-        </p>
+        <div style={{ fontSize: '0.85rem', color: '#666' }}>
+          <p style={{ margin: 0 }}>
+            {raport.necalibrate.length} utilaj(e) fără capacitate de tanc completată (necalibrate) nu apar
+            în comparația cu sonda: {raport.necalibrate.map((u) => u.nume).join(', ')}. Apar automat, fără
+            nicio modificare de cod, imediat ce senzorul e calibrat și capacitatea tancului e completată.
+          </p>
+          {raport.necalibrate.some((u) => u.manual_nr > 0) && (
+            <ul style={{ margin: '0.4rem 0 0 1rem' }}>
+              {raport.necalibrate
+                .filter((u) => u.manual_nr > 0)
+                .map((u) => (
+                  <li key={u.utilaj_id}>
+                    {u.nume}: {u.manual_litri} L înregistrați manual ({u.manual_nr}x) — fără sondă de comparat.
+                  </li>
+                ))}
+            </ul>
+          )}
+        </div>
       )}
     </main>
   );
