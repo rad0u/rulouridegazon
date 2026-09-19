@@ -835,6 +835,70 @@ pragul trebuie calculat pe orele în care a funcționat efectiv.
   calibrată pe consumul real al utilajelor lui Radu (care variază cu operația
   efectuată — încă necunoscut). De ajustat empiric pe măsură ce apar date.
 
+### 5x. Activități pe parcele detectate automat din GPS — înlocuiește selecția manuală de parcelă (2026-09-19)
+Cerere Radu: după discuția cu admin-ul fermei F1 Medgidia, adminii de fermă nu
+mai trebuie să specifice manual în ce parcele au lucrat într-o zi — aplicația
+știe deja asta din traseul GPS al utilajelor. Decizie explicită a lui Radu:
+"munca fără utilaj nu există", deci coada de sesiuni detectate ÎNLOCUIEȘTE
+complet pasul de selecție a parcelei (ParcelaPanel rămâne neschimbat, dar
+folosit acum doar pentru istoric pe parcelă și corectări punctuale, nu ca flux
+zilnic principal).
+
+**Migrare** (`operatiuni_sesiune_detectata`): coloane noi, nullable, pe
+`operatiuni` — `utilaj_id`, `sesiune_inceput`, `sesiune_sfarsit` — leagă o
+operațiune de sesiunea GPS care a generat-o, pentru deduplicare la interogări
+viitoare. Operațiunile vechi/manuale rămân cu aceste coloane null.
+
+**`supabase/functions/get-sesiuni-detectate/`** (nou, deployed v1): pentru
+fiecare utilaj activ al fermei, parcurge traseul brut din `combustibil_citiri`
+(aceeași sursă ca `get-utilaj-istoric-parcele`/`get-combustibil-report`) și
+formează segmente CONTINUE cu:
+- motorul pornit (`contact = true`) pe toată durata — STRICT: dacă motorul se
+  oprește în mijlocul unei prezențe pe parcelă, sesiunea se încheie exact
+  acolo; o reluare ulterioară pe aceeași parcelă e o sesiune nouă, separată
+  (decizia lui Radu — un utilaj parcat cu motorul oprit în câmp nu trebuie
+  raportat ca "operațiune");
+- poziția (point-in-polygon, aceeași logică de ray-casting ca
+  `get-utilaj-istoric-parcele`) în interiorul UNEI SINGURE parcele;
+- durată peste 10 minute (pragul cerut de Radu, ca să excludem simpla
+  deplasare a utilajului traversând o parcelă).
+
+O sesiune încă „în desfășurare" (nu s-a încheiat printr-o schimbare reală de
+parcelă/contact până la ultima citire disponibilă) NU e raportată — evită
+confirmarea unei sesiuni incomplete și o suprapunere parțială incorectă la
+deduplicare. Sesiunile deja confirmate (transformate în `operatiuni` cu
+`utilaj_id`+`sesiune_inceput`/`sesiune_sfarsit`) sunt excluse din rezultat.
+Acces: admin_ferma vede automat doar sesiunile fermei lui (ferma_id dedus din
+profil); admin_central trebuie să aleagă ferma explicit.
+
+**`app/activitati-parcele/`** (nou): coadă de sesiuni neconfirmate, câte un
+card per sesiune (utilaj, parcelă, interval orar, durată). Adminul alege doar
+tipul de operațiune (dropdown, `TIPURI_OPERATIUNE`) și, dacă tipul e din
+`TIPURI_CU_SUBSTANTE` (Suprainsamantare / Fertilizare-Tratamente), substanțele
+folosite — dropdown filtrat pe stocul real al fermei (`stoc_curent > 0`),
+exact același tipar ca `ParcelaPanel.loadSubstante` (secțiunea 5u). Orele de
+lucru se precompletează din durata sesiunii (rotunjită la oră întreagă,
+0-8h — constrângerea existentă pe `operatiuni.ore_lucru`), editabile de admin.
+La „Confirmă": insert în `operatiuni` (cu `utilaj_id`/`sesiune_inceput`/
+`sesiune_sfarsit` completate) + `operatiuni_substante`, exact ca la
+înregistrarea manuală din ParcelaPanel — nicio funcție privilegiată nouă
+pentru scriere, se bazează pe aceleași politici RLS care oricum permiteau deja
+admin_ferma/admin_central să insereze operațiuni.
+`components/LayoutShell.tsx`: link nou „Activități parcele" în meniu, vizibil
+pentru admin_central + admin_ferma.
+
+**Limitare cunoscută**: pragul de `ore_lucru` rămâne întreg (0-8), ca la
+înregistrarea manuală — o sesiune de, de exemplu, 22 de minute rotunjește la
+0h lucrate (dar tot apare în coadă, pentru vizibilitate; Radu poate ajusta
+manual din formular înainte de confirmare). Dacă apare nevoia unei precizii
+mai fine, `sesiune_inceput`/`sesiune_sfarsit` păstrează intervalul exact și
+pot fi refolosite pentru un calcul mai precis mai târziu, fără migrare nouă.
+
+**Notă pentru F1 Medgidia**: funcționează doar pentru ferme cu parcele care au
+deja conturul desenat pe hartă (`poligon_harta`) — Radu a menționat că mai are
+de configurat parcelele acolo; până atunci, `/activitati-parcele` arată un
+mesaj explicit ("fermă fără parcele desenate"), nu o listă goală ambiguă.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

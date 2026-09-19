@@ -157,6 +157,12 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                   </Link>
 
                   {(role === 'admin_central' || role === 'admin_ferma') && (
+                    <Link href="/activitati-parcele" style={navLinkStyle} onClick={closeMenu}>
+                      Activități parcele
+                    </Link>
+                  )}
+
+                  {(role === 'admin_central' || role === 'admin_ferma') && (
                     <>
                       <div style={sectionHeaderStyle}>Flotă auto</div>
                       <Link href="/masini" style={navLinkStyle} onClick={closeMenu}>
