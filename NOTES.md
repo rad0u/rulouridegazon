@@ -801,10 +801,39 @@ partea „automată" era deja construită, lipsea doar comparația cu manualul.
   — operatoarea continuă să introducă acolo ca până acum; comparația se vede
   doar în `/combustibil`, unde privește admin general.
 
-*(Modificarea de mai sus la `get-combustibil-report` nu a putut fi încă
-verificată cu `tsc` local — legătura cu Mac-ul lui Radu a fost indisponibilă
-în timpul sesiunii. Fișierul a fost totuși scris corect pe disc, prin
-device_commit_files. De verificat compilarea la următoarea ocazie.)*
+*(Verificat ulterior, 2026-09-19: `tsc` compilează curat.)*
+
+### 5w. Scăderi suspecte — prag calculat pe ore de FUNCȚIONARE, nu ore calendaristice (2026-09-19)
+Cerere Radu: pragul vechi de „scădere suspectă" folosea orele calendaristice
+dintre două citiri, ceea ce era greșit — un utilaj parcat 10 ore calendaristice
+n-a ars nimic în tot intervalul ăla, dar modelul vechi îi „permitea" totuși să
+piardă până la 150 l (10h × 15 l/h) fără să fie marcat suspect. Regulă corectă,
+dată de Radu: dacă utilajul a stat staționat și nivelul a scăzut cât a stat
+staționat, e clar suspect, indiferent de cât timp calendaristic a trecut —
+pragul trebuie calculat pe orele în care a funcționat efectiv.
+
+- `supabase/functions/get-combustibil-report/index.ts` (v7): pentru fiecare
+  interval dintre două puncte de întoarcere (extreme), se calculează acum
+  orele de funcționare din citirile BRUTE ale intervalului, cu aceeași
+  convenție ca `get-utilaj-istoric-parcele` — pentru fiecare pas între două
+  citiri consecutive, dacă citirea de la începutul pasului avea contact
+  (ignition) pornit, pasul contează ca funcționare (plafonat la 1h per pas,
+  ca un gol în date/device offline să nu fie citit greșit).
+  - Pragul de scădere plauzibilă devine `max(15 l, 15 l/h × ore_funcționare)`
+    — dacă orele de funcționare din interval sunt 0 (a stat parcat tot
+    timpul), pragul se reduce la simplul prag minim de zgomot (15 l): orice
+    scădere peste asta, cât timp a stat parcat, e suspectă.
+  - Fallback: dacă utilajul n-are deloc semnal de contact înregistrat în
+    interval (device mai vechi, fără ignition raportat din Traccar), se
+    revine la orele calendaristice (comportamentul vechi), ca să nu marcăm
+    totul suspect din lipsă de date.
+- `app/combustibil/CombustibilScreen.tsx`: fiecare scădere suspectă din lista
+  expandabilă arată acum și motivul — „utilaj staționat tot intervalul",
+  „a funcționat Xh în interval", sau „fără date de contact — calculat pe timp
+  calendaristic" — ca Radu să vadă direct de ce a fost marcată, nu doar cifra.
+- Pragul de 15 l/h de consum „plauzibil" rămâne o valoare de pornire, nu
+  calibrată pe consumul real al utilajelor lui Radu (care variază cu operația
+  efectuată — încă necunoscut). De ajustat empiric pe măsură ce apar date.
 
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără

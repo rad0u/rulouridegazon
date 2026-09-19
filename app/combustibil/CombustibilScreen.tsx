@@ -5,6 +5,11 @@ import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 
 type Eveniment = { data_ora: string; delta_litri: number };
 
+// Ore de funcționare (contact/ignition pornit) în intervalul în care s-a produs
+// scăderea — null înseamnă că nu existau deloc date de contact în interval, iar
+// pragul a fost calculat pe ore calendaristice (fallback pe modelul vechi).
+type EvenimentSuspect = Eveniment & { ore_functionare: number | null };
+
 type RezultatUtilaj = {
   utilaj_id: string;
   nume: string;
@@ -16,7 +21,7 @@ type RezultatUtilaj = {
   consum_normal_litri: number;
   realimentat_litri: number;
   realimentari: Eveniment[];
-  scaderi_suspecte: Eveniment[];
+  scaderi_suspecte: EvenimentSuspect[];
   manual_litri: number;
   manual_nr: number;
   diferenta_litri: number;
@@ -41,6 +46,16 @@ type Raport = {
 function formatData(data: string | null) {
   if (!data) return '—';
   return new Date(data).toLocaleString('ro-RO');
+}
+
+function motivSuspiciune(e: EvenimentSuspect): string {
+  if (e.ore_functionare === null) {
+    return 'fără date de contact — calculat pe timp calendaristic';
+  }
+  if (e.ore_functionare === 0) {
+    return 'utilaj staționat tot intervalul';
+  }
+  return `a funcționat ${e.ore_functionare}h în interval`;
 }
 
 export default function CombustibilScreen() {
@@ -226,6 +241,7 @@ export default function CombustibilScreen() {
                                 {r.scaderi_suspecte.map((e, i) => (
                                   <li key={i}>
                                     {formatData(e.data_ora)} — {e.delta_litri} L
+                                    <span style={{ color: '#666', fontWeight: 400 }}> ({motivSuspiciune(e)})</span>
                                   </li>
                                 ))}
                               </ul>
