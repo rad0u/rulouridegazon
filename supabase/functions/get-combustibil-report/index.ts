@@ -18,33 +18,34 @@
 //      o schimbare de direcție reală). Vezi comentariul de la `extrageExtreme`.
 //   2. Se calculează diferența (delta) între punctele de întoarcere consecutive.
 //   3. Un salt POZITIV peste prag = realimentare.
-//   4. Un salt NEGATIV peste prag = scădere suspectă (posibil furt/scurgere).
+//   4. Un salt NEGATIV peste prag = scădere mare (informativ — vezi v12 mai jos).
 //   5. Restul scăderilor (sub prag) se adună ca și consum normal.
 //
-// ORELE DE FUNCȚIONARE — CONTACT + MIȘCARE GPS (Radu, 2026-09-22, v11 —
-// corectare importantă): inițial (v7-v10) o oră conta ca "funcționare" doar
-// dacă citirea de la începutul pasului avea contact=true (semnal de
-// ignition). Pe raportul live pentru Steyr 4105 (Săbăreni), asta a produs
-// rate de consum "peste plauzibil" (81-203 L/h) pe zile în care Radu a
-// confirmat că utilajul chiar lucra ore întregi. Verificare pe date brute
-// (18.09.2026): între 05:00-13:00 UTC, utilajul a avut 200+ poziții GPS
-// DISTINCTE pe oră (mișcare reală, continuă) dar `contact=true` apărea în
-// doar câteva citiri pe oră, uneori deloc într-o oră întreagă cu 47 de
-// poziții diferite. Semnalul de contact/ignition e deci el însuși nesigur pe
-// acest lanț de telemetrie — la fel ca `nivel_litri`, doar că aici lipsa de
-// încredere subraportează orele de funcționare în loc să umfle consumul.
-// Rezultat: orele calculate DOAR din contact (0.7h) erau de ~7.5x mai mici
-// decât orele reale de funcționare (5.47h, calculate incluzând mișcarea
-// GPS) — ceea ce umfla artificial rata L/h și declanșa steaguri roșii
-// false pentru consum normal sub sarcină.
+// ORELE DE FUNCȚIONARE — CONTACT + MIȘCARE GPS (Radu, 2026-09-22, v11): vezi
+// `intervalInFunctionare` mai jos — un pas contează ca funcționare dacă
+// contact=true SAU utilajul s-a deplasat efectiv ≥PRAG_MISCARE_METRI, pentru
+// că semnalul de contact singur s-a dovedit nesigur pe acest lanț de
+// telemetrie (raportează des "oprit" chiar în timp ce utilajul se mișcă
+// vizibil pe GPS) — vezi comentariul detaliat păstrat mai jos, la funcție.
 //
-// Fix: un pas între două citiri brute consecutive contează acum ca
-// funcționare dacă ORICARE dintre semnale o confirmă — contact=true SAU
-// utilajul s-a deplasat cel puțin PRAG_MISCARE_METRI între cele două citiri
-// (semn de mișcare reală, nu doar deriva normală a unui GPS staționar). Vezi
-// `intervalInFunctionare` mai jos. Aplicat atât la clasificarea evenimentelor
-// (scădere suspectă vs normală) cât și la calculul orelor din consumul
-// zilnic.
+// v12, 2026-09-22 (Radu) — ELIMINARE STEAGURI ROȘII, CONSUM MEDIU PONDERAT:
+// după v11, mai rămâneau zile flagged "peste consumul plauzibil" (20-26 L/h)
+// pe un prag fix (MAX_PLAUSIBLE_CONSUM_L_PE_ORA = 15 L/h) ales fără date
+// reale. Verificare cu traseul GPS (aceleași citiri sincronizate din
+// Traccar): utilajul chiar lucra extensiv în zilele flagged (40-55 km/zi,
+// sute de poziții distincte) — nu era un artefact, doar un prag prea
+// conservator pentru un utilaj de talia asta sub sarcină grea. Radu: "nu
+// stiu cum trebuie facut" — deci, până avem date reale suficiente, NU mai
+// aplicăm niciun prag de plauzibilitate: raportul arată consumul calculat
+// (fără steag roșu), plus un nou consum MEDIU PONDERAT pe oră per utilaj
+// (`consum_mediu_ponderat_l_pe_ora` = suma consumului pe zilele cu ore de
+// funcționare > 0, împărțită la suma orelor acelorași zile — o zi cu 0 ore de
+// funcționare nu participă deloc la calcul, ca să nu împartă la zero sau să
+// distorsioneze media). Perioadă de TESTE până pe 30 septembrie 2026 — se
+// adună date reale de consum per utilaj, apoi se decide (posibil per-utilaj)
+// un prag de plauzibilitate calibrat pe media reală, nu pe o presupunere.
+// `MAX_PLAUSIBLE_CONSUM_L_PE_ORA` rămâne definit doar ca referință istorică
+// în cod, dar nu mai e folosit nicăieri în calcul.
 //
 // IMPORTANT: raportul are sens doar pentru utilajele CALIBRATE (cu
 // `tanc_capacitate_litri` completat în tabela `utilaje`) — pe utilajele
@@ -56,14 +57,9 @@
 // înregistrează manual fiecare alimentare a unui utilaj în `alimentari_utilaje`;
 // raportul de aici adaugă, pentru fiecare utilaj, totalul alimentărilor MANUALE
 // din aceeași perioadă și diferența față de ce a detectat sonda — ca o
-// verificare încrucișată, nu ca sursă de adevăr unică.
-//
-// CONSUM ZILNIC + RED FLAG (Radu, 2026-09-22): pe lângă evenimentele izolate de
-// mai sus, se calculează acum și, per utilaj, un total de consum PE ZI (ziua
-// locală România) + orele de funcționare din aceeași zi, cu un steag roșu când
-// consumul nu e justificat de orele lucrate. Fiecare interval se atribuie zilei
-// locale a ÎNCEPUTULUI intervalului — aceeași simplificare ca în
-// get-utilaj-istoric-parcele.
+// verificare încrucișată, nu ca sursă de adevăr unică. NU e afectată de v12 —
+// rămâne singurul steag activ în raport, pentru că nu depinde de pragul de
+// plauzibilitate în discuție.
 //
 // FILTRU ZGOMOT SENZOR pe nivel_litri (Radu, 2026-09-22, v9+v10): vezi
 // comentariile de la `eliminaFluctuatiiTranzitorii` și `extrageExtreme` mai
@@ -89,22 +85,18 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-// Un motor de utilaj agricol arde, tipic, câțiva litri/oră DE FUNCȚIONARE — nu
-// zeci. O scădere mai mare decât ce s-ar putea consuma plauzibil în orele
-// EFECTIVE de funcționare dintre două citiri e considerată anomalie. De
-// ajustat empiric pe măsură ce apar date reale de consum de la utilajele
-// calibrate (deocamdată nu știm consumul lor real, doar că variază cu
-// operația efectuată — valoarea de mai jos e o limită voit generoasă).
+// v12: NU mai e folosit în niciun calcul — păstrat doar ca referință istorică
+// (a fost pragul de "consum plauzibil" care genera steagurile roșii eliminate
+// la v12). Vezi comentariul v12 de sus.
 const MAX_PLAUSIBLE_CONSUM_L_PE_ORA = 15;
 // Prag minim absolut (litri) pentru un eveniment (realimentare sau scădere
-// suspectă), indiferent de câte ore de funcționare — evită să marcăm zgomot
-// mic (sloshing, precizia senzorului) ca eveniment. E și pragul folosit când
-// utilajul a stat parcat tot intervalul (0 ore de funcționare). Reutilizat și
-// ca prag de "salt suspect" + toleranță de "revenire" în
-// `eliminaFluctuatiiTranzitorii` (vezi comentariul de acolo).
+// mare), indiferent de câte ore de funcționare — evită să marcăm zgomot mic
+// (sloshing, precizia senzorului) ca eveniment. Reutilizat și ca prag de
+// "salt suspect" + toleranță de "revenire" în `eliminaFluctuatiiTranzitorii`
+// (vezi comentariul de acolo).
 const PRAG_MINIM_EVENIMENT_L = 15;
 // Același prag, reutilizat pentru a marca o diferență manual-vs-sondă drept
-// "semnificativă" în UI.
+// "semnificativă" în UI — singurul steag rămas activ, vezi nota v12 de sus.
 const PRAG_DIFERENTA_SEMNIFICATIVA_L = 15;
 // Toleranță peste capacitatea declarată a rezervorului până la care o citire e
 // considerată totuși plauzibilă (supra-umplere, dilatare termică, mic offset
@@ -146,19 +138,22 @@ interface Eveniment {
   delta_litri: number;
 }
 
-interface EvenimentSuspect extends Eveniment {
-  // Ore de funcționare în intervalul în care s-a produs scăderea. null =
-  // n-au existat deloc date de contact SAU de poziție în interval, s-a
-  // folosit fallback pe ore calendaristice.
+interface EvenimentScadereMare extends Eveniment {
+  // Ore de funcționare în intervalul în care s-a produs scăderea — informativ,
+  // nu mai alimentează niciun steag (vezi v12 de sus). null = n-au existat
+  // deloc date de contact SAU de poziție în interval, s-a folosit fallback pe
+  // ore calendaristice.
   ore_functionare: number | null;
 }
 
+// v12: fără `nejustificat` — vezi nota v12 de sus. Zilele cu 0 ore de
+// funcționare rămân cu `consum_pe_ora: null` (nu împărțim la zero) și nu
+// participă la consumul mediu ponderat.
 interface ZiConsum {
   data: string;
   consum_litri: number;
   ore_functionare: number;
   consum_pe_ora: number | null;
-  nejustificat: boolean;
 }
 
 interface AlimentareManuala {
@@ -374,8 +369,8 @@ function ziuaLocala(dataIso: string): string {
 }
 
 // Consum total (litri) + ore de funcționare, per zi locală, pentru un utilaj —
-// vezi comentariul de sus ("CONSUM ZILNIC + RED FLAG").
-function consumZilnicSiRedFlag(rows: Citire[], extreme: CitireIndexata[]): ZiConsum[] {
+// v12: fără steag roșu, vezi nota v12 de sus.
+function consumZilnic(rows: Citire[], extreme: CitireIndexata[]): ZiConsum[] {
   const consumPeZi = new Map<string, number>();
   for (let i = 1; i < extreme.length; i++) {
     const prev = extreme[i - 1].citire;
@@ -404,12 +399,30 @@ function consumZilnicSiRedFlag(rows: Citire[], extreme: CitireIndexata[]): ZiCon
     .map((zi) => {
       const consum = Math.round((consumPeZi.get(zi) ?? 0) * 10) / 10;
       const ore = Math.round((orePeZi.get(zi) ?? 0) * 10) / 10;
+      // v12: zi cu 0 ore de funcționare -> nu calculăm nimic (rămâne null),
+      // nici steag -- vezi cererea lui Radu ("la cele cu zero inca nu
+      // calcula nimic").
       const consumPeOra = ore > 0 ? Math.round((consum / ore) * 10) / 10 : null;
-      const nejustificat =
-        (ore === 0 && consum > PRAG_MINIM_EVENIMENT_L) ||
-        (ore > 0 && consumPeOra !== null && consumPeOra > MAX_PLAUSIBLE_CONSUM_L_PE_ORA);
-      return { data: zi, consum_litri: consum, ore_functionare: ore, consum_pe_ora: consumPeOra, nejustificat };
+      return { data: zi, consum_litri: consum, ore_functionare: ore, consum_pe_ora: consumPeOra };
     });
+}
+
+// v12: consum mediu PONDERAT pe oră, per utilaj, pe toată perioada cerută —
+// suma consumului pe zilele cu ore de funcționare > 0, împărțită la suma
+// acelorași ore. O zi cu 0 ore nu participă deloc (nici la numărător, nici la
+// numitor) -- altfel am împărți la zero sau am distorsiona media cu zile fără
+// funcționare. null dacă utilajul n-a funcționat deloc în toată perioada.
+function consumMediuPonderat(zile: ZiConsum[]): number | null {
+  let sumaConsum = 0;
+  let sumaOre = 0;
+  for (const z of zile) {
+    if (z.ore_functionare > 0) {
+      sumaConsum += z.consum_litri;
+      sumaOre += z.ore_functionare;
+    }
+  }
+  if (sumaOre === 0) return null;
+  return Math.round((sumaConsum / sumaOre) * 10) / 10;
 }
 
 Deno.serve(async (req) => {
@@ -512,38 +525,29 @@ Deno.serve(async (req) => {
     let consumNormalLitri = 0;
     let realimentatLitri = 0;
     const realimentari: Eveniment[] = [];
-    const scaderiSuspecte: EvenimentSuspect[] = [];
+    const scaderiMari: EvenimentScadereMare[] = [];
 
     for (let i = 1; i < extreme.length; i++) {
       const prev = extreme[i - 1].citire;
       const curr = extreme[i].citire;
       const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
 
-      const oreIntreCitiriCalendar =
-        (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;
-
+      // v12: ore_functionare rămâne calculat DOAR ca informație afișată lângă
+      // eveniment -- nu mai alimentează niciun prag (vezi nota v12 de sus).
       const { ore: oreFunctionare, areDateOperare } = oreDeFunctionareIntreIndici(
         rows,
         extreme[i - 1].index,
         extreme[i].index,
       );
 
-      // Cu date de contact/poziție disponibile, folosim orele REALE de
-      // funcționare -- fără ele, cădem înapoi pe orele calendaristice
-      // (comportamentul vechi), ca să nu marcăm totul suspect din lipsă de
-      // semnal.
-      const oreDeFolosit = areDateOperare ? oreFunctionare : oreIntreCitiriCalendar;
-
-      const pragScaderePlauzibila = Math.max(
-        PRAG_MINIM_EVENIMENT_L,
-        MAX_PLAUSIBLE_CONSUM_L_PE_ORA * Math.max(oreDeFolosit, 0),
-      );
-
       if (delta >= PRAG_MINIM_EVENIMENT_L) {
         realimentatLitri += delta;
         realimentari.push({ data_ora: curr.data_ora, delta_litri: Math.round(delta * 10) / 10 });
-      } else if (delta < 0 && Math.abs(delta) > pragScaderePlauzibila) {
-        scaderiSuspecte.push({
+      } else if (delta < 0 && Math.abs(delta) > PRAG_MINIM_EVENIMENT_L) {
+        // v12: prag FIX (nu mai depinde de MAX_PLAUSIBLE_CONSUM_L_PE_ORA) --
+        // orice scădere de peste 15L e listată aici, informativ, indiferent
+        // de câte ore a funcționat utilajul în interval.
+        scaderiMari.push({
           data_ora: curr.data_ora,
           delta_litri: Math.round(delta * 10) / 10,
           ore_functionare: areDateOperare ? Math.round(oreFunctionare * 10) / 10 : null,
@@ -553,8 +557,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    const consumZilnic = consumZilnicSiRedFlag(rows, extreme);
-    const zileNejustificate = consumZilnic.filter((z) => z.nejustificat).length;
+    const zileConsum = consumZilnic(rows, extreme);
 
     const manual = manualPorUtilaj.get(u.id) ?? { suma: 0, nr: 0 };
     const diferentaLitri = Math.round((realimentatLitri - manual.suma) * 10) / 10;
@@ -570,9 +573,9 @@ Deno.serve(async (req) => {
       consum_normal_litri: Math.round(consumNormalLitri * 10) / 10,
       realimentat_litri: Math.round(realimentatLitri * 10) / 10,
       realimentari,
-      scaderi_suspecte: scaderiSuspecte,
-      consum_zilnic: consumZilnic,
-      zile_nejustificate: zileNejustificate,
+      scaderi_mari: scaderiMari,
+      consum_zilnic: zileConsum,
+      consum_mediu_ponderat_l_pe_ora: consumMediuPonderat(zileConsum),
       manual_litri: Math.round(manual.suma * 10) / 10,
       manual_nr: manual.nr,
       diferenta_litri: diferentaLitri,

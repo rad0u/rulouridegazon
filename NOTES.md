@@ -1118,6 +1118,51 @@ etc.) înainte de decizia finală: rămâne așa sau se mai ajustează.
 din repo (fusese livrat direct pe Supabase, fără commit, la 5x) — codul
 curent (v2) a fost adus acum în git odată cu acest fix.
 
+### 5ad. get-combustibil-report v12 — eliminare steaguri roșii, consum mediu ponderat, teste până la 30 septembrie (2026-09-22)
+Continuare directă a 5aa/5ab: chiar și după v11, rămâneau zile flagged „peste
+consumul plauzibil" (20-26 L/h) pe un prag fix (`MAX_PLAUSIBLE_CONSUM_L_PE_ORA
+= 15 L/h`) ales fără date reale. Am verificat traseul GPS (aceleași citiri
+sincronizate din Traccar) pentru Steyr 4105 pe zilele flagged (17, 18, 21, 22
+sept.) — utilajul chiar lucra extensiv (40-55 km/zi, 800-900 poziții GPS
+distincte), consumul nu era artefact, doar pragul era prea conservator pentru
+un utilaj de talia asta sub sarcină grea.
+
+**Decizie Radu**: „nu stiu cum trebuie facut" — deci, până avem date reale
+suficiente, s-a eliminat complet logica de steag roșu bazată pe
+`MAX_PLAUSIBLE_CONSUM_L_PE_ORA` (constanta rămâne în cod doar ca referință
+istorică, nefolosită). Perioadă de TESTE până pe 30 septembrie 2026: se strâng
+date reale de consum per utilaj, apoi se decide un prag calibrat (posibil
+per-utilaj), nu o presupunere.
+
+**Fix (`get-combustibil-report` v12)**:
+- `consum_zilnic` (per zi) nu mai are `nejustificat` — doar cifrele brute
+  (ore funcționare, consum, consum/oră). O zi cu 0 ore de funcționare rămâne
+  cu `consum_pe_ora: null` (nu se calculează nimic, cerința explicită a lui
+  Radu).
+- `scaderi_suspecte` → redenumit `scaderi_mari`, clasificare pe prag FIX
+  (>15L), nu mai depinde de rata L/h — listă informativă, fără stilizare
+  roșie în UI.
+- Nou câmp per utilaj: `consum_mediu_ponderat_l_pe_ora` = suma consumului pe
+  zilele cu ore de funcționare > 0, împărțită la suma acelorași ore (zilele
+  cu 0 ore nu participă la calcul — evită împărțirea la zero și distorsiunea
+  mediei). null dacă utilajul n-a funcționat deloc în perioadă. Asta e
+  cifra pe care mergem mai departe, per Radu.
+- Singurul steag rămas activ în raport: diferența manual vs sondă
+  (`diferenta_semnificativa`) — nu depinde de pragul de plauzibilitate în
+  discuție, rămâne o verificare încrucișată validă.
+
+`CombustibilScreen.tsx`: coloana „Consum zilnic nejustificat" → „Consum
+mediu (L/h)" (afișează `consum_mediu_ponderat_l_pe_ora`); coloana „Scăderi
+suspecte" → „Scăderi mari", fără roșu/⚠️; rândul din tabelul principal nu
+mai e evidențiat roșu; tabelul zi-cu-zi din „Detalii" arată doar cifrele,
+plus o linie cu media ponderată a perioadei. Textul explicativ de sus a fost
+actualizat să menționeze perioada de teste.
+
+**Următorul pas** (nefăcut încă): pe la 30 septembrie 2026, cu date reale
+adunate, se decide un prag de plauzibilitate calibrat pe consumul mediu
+ponderat real al fiecărui utilaj — posibil diferit per utilaj, nu un singur
+prag fix pentru toată flota.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
