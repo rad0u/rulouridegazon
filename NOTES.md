@@ -899,6 +899,44 @@ deja conturul desenat pe hartă (`poligon_harta`) — Radu a menționat că mai 
 de configurat parcelele acolo; până atunci, `/activitati-parcele` arată un
 mesaj explicit ("fermă fără parcele desenate"), nu o listă goală ambiguă.
 
+### 5y. Consum zilnic per utilaj + red flag pe consum nejustificat de orele lucrate (2026-09-22)
+Cerere Radu: vrea să vadă, per utilaj, cât a consumat în fiecare zi, și un
+steag roșu automat când consumul nu e justificat de orele de funcționare din
+ziua respectivă.
+
+`supabase/functions/get-combustibil-report/index.ts` (v8): pe lângă
+evenimentele izolate deja calculate (realimentări / scăderi suspecte), acum
+se calculează și, per utilaj, un total de consum PE ZI (ziua locală România)
++ orele de funcționare din aceeași zi:
+- `consumZilnicSiRedFlag()` reface, din aceleași citiri deja încărcate pentru
+  utilajul respectiv (fără query suplimentar), două sume pe zi: litrii
+  consumați (din intervalele dintre extreme, doar scăderile) și orele de
+  funcționare (din citirile brute consecutive cu `contact=true`, aceeași
+  convenție ca `get-utilaj-istoric-parcele` / secțiunea 5w).
+- Fiecare interval se atribuie zilei locale a ÎNCEPUTULUI lui — o
+  simplificare asumată: un interval care traversează miezul nopții se
+  atribuie integral zilei de start, nu împărțit proporțional (aceeași
+  simplificare ca la orele/zi din `get-utilaj-istoric-parcele`).
+- Steag „nejustificat" pe zi, reutilizând EXACT pragurile deja stabilite cu
+  Radu (secțiunea 5w), acum la nivel de zi întreagă, nu doar per eveniment:
+  - ore funcționare = 0 ȘI consum > 15 L (prag de zgomot) → utilajul n-a
+    funcționat deloc în ziua aia, dar nivelul a scăzut;
+  - ore funcționare > 0 ȘI consum/oră > 15 L/h (prag plauzibil) → consumul nu
+    se justifică prin cât a lucrat.
+- E complementar cu „scăderi suspecte", nu duplicat: acolo se prinde un salt
+  BRUSC izolat; aici se prinde și cazul unor scăderi mici, distribuite pe
+  parcursul zilei, care per eveniment nu trec pragul, dar însumate pe zi
+  depășesc consumul plauzibil pentru orele lucrate.
+- Răspunsul per utilaj capătă `consum_zilnic: [{data, consum_litri,
+  ore_functionare, consum_pe_ora, nejustificat}]` (sortat descrescător) și
+  `zile_nejustificate` (număr, pentru sumar rapid).
+
+`app/combustibil/CombustibilScreen.tsx`: coloană nouă „Consum zilnic
+nejustificat" (numărul de zile flagged, roșu dacă > 0) în tabelul principal;
+„Detalii" per utilaj arată acum și un tabel zi-cu-zi (zi, ore funcționare,
+consum, consum/oră), cu rândurile nejustificate evidențiate roșu și motivul
+afișat inline.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

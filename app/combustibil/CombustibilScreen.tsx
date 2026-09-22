@@ -10,6 +10,17 @@ type Eveniment = { data_ora: string; delta_litri: number };
 // pragul a fost calculat pe ore calendaristice (fallback pe modelul vechi).
 type EvenimentSuspect = Eveniment & { ore_functionare: number | null };
 
+// Consum total + ore de funcționare, pe zi locală (România) — Radu, 2026-09-22:
+// vrea să vadă, per utilaj, cât a consumat în fiecare zi, cu un steag roșu
+// dacă consumul nu e justificat de orele lucrate în ziua respectivă.
+type ZiConsum = {
+  data: string;
+  consum_litri: number;
+  ore_functionare: number;
+  consum_pe_ora: number | null;
+  nejustificat: boolean;
+};
+
 type RezultatUtilaj = {
   utilaj_id: string;
   nume: string;
@@ -22,6 +33,8 @@ type RezultatUtilaj = {
   realimentat_litri: number;
   realimentari: Eveniment[];
   scaderi_suspecte: EvenimentSuspect[];
+  consum_zilnic: ZiConsum[];
+  zile_nejustificate: number;
   manual_litri: number;
   manual_nr: number;
   diferenta_litri: number;
@@ -56,6 +69,21 @@ function motivSuspiciune(e: EvenimentSuspect): string {
     return 'utilaj staționat tot intervalul';
   }
   return `a funcționat ${e.ore_functionare}h în interval`;
+}
+
+function formatDataZi(data: string) {
+  return new Date(`${data}T12:00:00`).toLocaleDateString('ro-RO', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+  });
+}
+
+function motivNejustificat(z: ZiConsum): string {
+  if (z.ore_functionare === 0) {
+    return 'n-a funcționat deloc în această zi, dar nivelul a scăzut';
+  }
+  return `${z.consum_pe_ora} L/h — peste consumul plauzibil`;
 }
 
 export default function CombustibilScreen() {
@@ -144,7 +172,10 @@ export default function CombustibilScreen() {
         aceeași perioadă. Coloana „Diferență" compară cele două surse — pozitiv înseamnă că sonda a
         detectat mai multă motorină alimentată decât s-a raportat manual (posibil o alimentare
         neînregistrată), negativ înseamnă invers (posibil o cantitate introdusă greșit, sau o alimentare
-        dintr-o altă sursă decât rezervorul central).
+        dintr-o altă sursă decât rezervorul central). Coloana „Consum zilnic nejustificat" numără zilele
+        în care consumul nu se explică prin orele de funcționare din ziua respectivă — fie utilajul n-a
+        funcționat deloc dar nivelul a scăzut, fie consumul pe oră a depășit pragul plauzibil; apasă
+        „Detalii" pentru defalcarea zi cu zi a fiecărui utilaj.
       </p>
 
       {error && (
@@ -173,18 +204,23 @@ export default function CombustibilScreen() {
                 <th style={{ padding: '0.4rem' }}>Manual (operator)</th>
                 <th style={{ padding: '0.4rem' }}>Diferență</th>
                 <th style={{ padding: '0.4rem' }}>Scăderi suspecte</th>
+                <th style={{ padding: '0.4rem' }}>Consum zilnic nejustificat</th>
                 <th style={{ padding: '0.4rem' }}></th>
               </tr>
             </thead>
             <tbody>
               {raport.rezultate.map((r) => {
                 const areSuspecte = r.scaderi_suspecte.length > 0;
+                const areZileNejustificate = r.zile_nejustificate > 0;
                 const deschis = expandat === r.utilaj_id;
 
                 return (
                   <Fragment key={r.utilaj_id}>
                     <tr
-                      style={{ borderBottom: '1px solid #f0f0f0', background: areSuspecte ? '#fdecea' : undefined }}
+                      style={{
+                        borderBottom: '1px solid #f0f0f0',
+                        background: areSuspecte || areZileNejustificate ? '#fdecea' : undefined,
+                      }}
                     >
                       <td style={{ padding: '0.4rem' }}>{r.nume}</td>
                       <td style={{ padding: '0.4rem' }}>{r.ferma_nume ?? '—'}</td>
@@ -213,8 +249,17 @@ export default function CombustibilScreen() {
                             ) / 10} L`
                           : '—'}
                       </td>
+                      <td
+                        style={{
+                          padding: '0.4rem',
+                          color: areZileNejustificate ? '#8a1f13' : undefined,
+                          fontWeight: areZileNejustificate ? 600 : undefined,
+                        }}
+                      >
+                        {areZileNejustificate ? `⚠️ ${r.zile_nejustificate} zi(le)` : '—'}
+                      </td>
                       <td style={{ padding: '0.4rem' }}>
-                        {(areSuspecte || r.realimentari.length > 0) && (
+                        {(areSuspecte || r.realimentari.length > 0 || r.consum_zilnic.length > 0) && (
                           <button
                             onClick={() => setExpandat(deschis ? null : r.utilaj_id)}
                             style={{
@@ -233,7 +278,44 @@ export default function CombustibilScreen() {
                     </tr>
                     {deschis && (
                       <tr key={`${r.utilaj_id}-detalii`}>
-                        <td colSpan={8} style={{ padding: '0.6rem', background: '#fafafa' }}>
+                        <td colSpan={9} style={{ padding: '0.6rem', background: '#fafafa' }}>
+                          {r.consum_zilnic.length > 0 && (
+                            <div style={{ marginBottom: '0.75rem' }}>
+                              <strong>Consum zilnic:</strong>
+                              <table style={{ borderCollapse: 'collapse', marginTop: '0.35rem', fontSize: '0.85rem' }}>
+                                <thead>
+                                  <tr style={{ textAlign: 'left' }}>
+                                    <th style={{ padding: '0.2rem 0.6rem 0.2rem 0' }}>Zi</th>
+                                    <th style={{ padding: '0.2rem 0.6rem' }}>Ore funcționare</th>
+                                    <th style={{ padding: '0.2rem 0.6rem' }}>Consum</th>
+                                    <th style={{ padding: '0.2rem 0.6rem' }}>Consum/oră</th>
+                                    <th style={{ padding: '0.2rem 0.6rem' }}></th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {r.consum_zilnic.map((z) => (
+                                    <tr
+                                      key={z.data}
+                                      style={{
+                                        color: z.nejustificat ? '#8a1f13' : undefined,
+                                        fontWeight: z.nejustificat ? 600 : undefined,
+                                      }}
+                                    >
+                                      <td style={{ padding: '0.2rem 0.6rem 0.2rem 0' }}>{formatDataZi(z.data)}</td>
+                                      <td style={{ padding: '0.2rem 0.6rem' }}>{z.ore_functionare}h</td>
+                                      <td style={{ padding: '0.2rem 0.6rem' }}>{z.consum_litri} L</td>
+                                      <td style={{ padding: '0.2rem 0.6rem' }}>
+                                        {z.consum_pe_ora !== null ? `${z.consum_pe_ora} L/h` : '—'}
+                                      </td>
+                                      <td style={{ padding: '0.2rem 0.6rem', fontWeight: 400, color: '#8a1f13' }}>
+                                        {z.nejustificat ? `⚠️ ${motivNejustificat(z)}` : ''}
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                           {r.scaderi_suspecte.length > 0 && (
                             <div style={{ marginBottom: '0.5rem' }}>
                               <strong style={{ color: '#8a1f13' }}>Scăderi suspecte:</strong>
