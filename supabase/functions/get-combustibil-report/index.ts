@@ -21,21 +21,30 @@
 //   4. Un salt NEGATIV peste prag = scădere suspectă (posibil furt/scurgere).
 //   5. Restul scăderilor (sub prag) se adună ca și consum normal.
 //
-// PRAGUL DE "SCĂDERE PLAUZIBILĂ" (Radu, 2026-09-19 — corectare a modelului
-// inițial): NU se mai calculează pe orele CALENDARISTICE dintre două citiri, ci
-// pe orele în care utilajul a functionat efectiv (contact/ignition pornit —
-// același semnal și aceeași convenție ca la get-utilaj-istoric-parcele: pentru
-// fiecare interval între două citiri brute consecutive, dacă starea de contact
-// la începutul intervalului era pornită, intervalul contează ca funcționare).
-// Motiv: un utilaj parcat 10 ore calendaristice n-a ars nimic în tot intervalul
-// ăla — modelul vechi îi "permitea" totuși să piardă până la 150 l (10h × 15
-// l/h) fără să fie marcat suspect. Acum: dacă orele de funcționare din interval
-// sunt 0 (a stat parcat tot timpul), pragul se reduce la simplul prag minim de
-// zgomot (PRAG_MINIM_EVENIMENT_L) — orice scădere peste asta, cât timp a stat
-// parcat, e suspectă, indiferent cât timp calendaristic a trecut. Dacă utilajul
-// n-are deloc semnal de contact înregistrat în intervalul respectiv (device mai
-// vechi, fără ignition raportat), cădem înapoi pe orele calendaristice, ca să
-// nu marcăm totul suspect din lipsă de date.
+// ORELE DE FUNCȚIONARE — CONTACT + MIȘCARE GPS (Radu, 2026-09-22, v11 —
+// corectare importantă): inițial (v7-v10) o oră conta ca "funcționare" doar
+// dacă citirea de la începutul pasului avea contact=true (semnal de
+// ignition). Pe raportul live pentru Steyr 4105 (Săbăreni), asta a produs
+// rate de consum "peste plauzibil" (81-203 L/h) pe zile în care Radu a
+// confirmat că utilajul chiar lucra ore întregi. Verificare pe date brute
+// (18.09.2026): între 05:00-13:00 UTC, utilajul a avut 200+ poziții GPS
+// DISTINCTE pe oră (mișcare reală, continuă) dar `contact=true` apărea în
+// doar câteva citiri pe oră, uneori deloc într-o oră întreagă cu 47 de
+// poziții diferite. Semnalul de contact/ignition e deci el însuși nesigur pe
+// acest lanț de telemetrie — la fel ca `nivel_litri`, doar că aici lipsa de
+// încredere subraportează orele de funcționare în loc să umfle consumul.
+// Rezultat: orele calculate DOAR din contact (0.7h) erau de ~7.5x mai mici
+// decât orele reale de funcționare (5.47h, calculate incluzând mișcarea
+// GPS) — ceea ce umfla artificial rata L/h și declanșa steaguri roșii
+// false pentru consum normal sub sarcină.
+//
+// Fix: un pas între două citiri brute consecutive contează acum ca
+// funcționare dacă ORICARE dintre semnale o confirmă — contact=true SAU
+// utilajul s-a deplasat cel puțin PRAG_MISCARE_METRI între cele două citiri
+// (semn de mișcare reală, nu doar deriva normală a unui GPS staționar). Vezi
+// `intervalInFunctionare` mai jos. Aplicat atât la clasificarea evenimentelor
+// (scădere suspectă vs normală) cât și la calculul orelor din consumul
+// zilnic.
 //
 // IMPORTANT: raportul are sens doar pentru utilajele CALIBRATE (cu
 // `tanc_capacitate_litri` completat în tabela `utilaje`) — pe utilajele
@@ -56,45 +65,11 @@
 // locale a ÎNCEPUTULUI intervalului — aceeași simplificare ca în
 // get-utilaj-istoric-parcele.
 //
-// FILTRU ZGOMOT SENZOR, v2 — GENERALIZAT (Radu, 2026-09-22, după verificare pe
-// Steyr 4105/Săbăreni): prima variantă a filtrului (v9) elimina doar rafale de
-// citiri APROAPE-ZERO care revin la loc — bazat pe un caz real (dropout la 0L
-// timp de 15 secunde, apoi revenire). Radu a arătat însă, cu Traccar Replay,
-// că utilajul chiar lucra masiv în perioadele marcate suspecte — deci volumul
-// mare de citiri NU e semnul problemei. Investigând mai departe (21.09.2026),
-// am găsit DOUĂ tipare diferite de zgomot, nu unul:
-//
-//   (a) Excursii de amplitudine mare, nu doar spre 0 — pe 15-16.09.2026,
-//       senzorul a produs citiri haotice pe o plajă largă (0, 53.7, 107.4,
-//       121.3, 137.8L, dar și valori peste capacitate care erau deja
-//       eliminate de filtrul de la pasul 0) timp de peste 2 ore, fiecare
-//       revenind rapid (secunde-minute) la nivelul dinainte. Filtrul v9,
-//       limitat la <=5L, nu prindea aceste excursii mai mari (ex. 121.3L),
-//       care contaminau ancora folosită pentru verificarea rafalelor de 0
-//       învecinate. Fix: `eliminaFluctuatiiTranzitorii` (v10) generalizează
-//       verificarea "revine la loc" la ORICE salt peste pragul minim de
-//       eveniment, nu doar la valorile aproape-zero.
-//
-//   (b) Zgomot fin, continuu (1-8L), care NU revine niciodată complet — o
-//       oscilație lentă în jurul unei valori, chiar și cu utilajul staționat
-//       (contact=false), vizibilă pe 17.09.2026 ora 07:25-07:45. Fiecare pas
-//       individual e sub pragul de eveniment (15L), deci `extrageExtreme()`
-//       (v9) îl trata ca o schimbare reală de direcție de fiecare dată când
-//       oscila — iar `consumZilnicSiRedFlag` aduna FIECARE scădere, oricât de
-//       mică, fără să scadă urcările simetrice. Pe o zi întreagă cu mii de
-//       citiri, zecile-sutele de asemenea oscilații mici se adună fals la sute
-//       de litri "consumați" (exact tiparul din raport: 292.6L in 1.3h ore
-//       reale de funcționare). Fix: `extrageExtreme` (v10) folosește acum
-//       histerezis — un punct de întoarcere nou se confirmă doar când seria
-//       inversează cu cel puțin PRAG_ZGOMOT_L față de candidatul curent, nu la
-//       orice schimbare nenulă (algoritm clasic "zigzag", folosit pentru
-//       detecția de extreme pe semnale zgomotoase).
-//
-// Cele două fixuri sunt complementare: (a) elimină salturile mari care revin
-// (rafale/excursii izolate), (b) elimină zgomotul mic continuu care nu revine
-// niciodată dar nici nu reprezintă o tendință reală. Verificat după deploy pe
-// exact cazurile raportate de Radu (evenimentele din 15.09.2026 17:23-17:46 și
-// ziua de 17.09.2026).
+// FILTRU ZGOMOT SENZOR pe nivel_litri (Radu, 2026-09-22, v9+v10): vezi
+// comentariile de la `eliminaFluctuatiiTranzitorii` și `extrageExtreme` mai
+// jos — două tipare de zgomot pe citirile de combustibil (excursii mari care
+// revin la loc, și zgomot fin continuu care nu revine), ambele corectate
+// separat de problema orelor de funcționare de mai sus.
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -141,20 +116,24 @@ const TOLERANTA_CAPACITATE = 1.05;
 const MAX_GAP_ORE = 1;
 // Prag de zgomot (litri) pentru histerezis în `extrageExtreme` — o oscilație
 // mai mică decât asta NU e considerată o schimbare reală de direcție. Vezi
-// comentariul "FILTRU ZGOMOT SENZOR, v2" de sus, cazul (b).
+// comentariul de la `extrageExtreme`.
 const PRAG_ZGOMOT_L = 5;
 // Fereastra de timp (minute) în care o excursie (salt peste
 // PRAG_MINIM_EVENIMENT_L) trebuie să revină aproape de nivelul dinainte ca să
 // fie considerată zgomot tranzitoriu, nu un eveniment real. Vezi comentariul
-// "FILTRU ZGOMOT SENZOR, v2" de sus, cazul (a). Lărgit față de v9 (5 minute)
-// la 15, pe baza unui caz real cu un gol de aproape 9 minute între citiri
-// plauzibile în timpul unei rafale de zgomot.
+// de la `eliminaFluctuatiiTranzitorii`.
 const FEREASTRA_REVENIRE_MINUTE = 15;
+// Distanța minimă (metri) între două citiri GPS consecutive ca să conteze
+// drept mișcare reală (nu deriva normală a unui GPS staționar, care poate fi
+// de câțiva metri). Vezi comentariul "ORELE DE FUNCȚIONARE" de sus.
+const PRAG_MISCARE_METRI = 20;
 
 interface Citire {
   data_ora: string;
   nivel_litri: number;
   contact: boolean | null;
+  latitudine: number | null;
+  longitudine: number | null;
 }
 
 interface CitireIndexata {
@@ -169,8 +148,8 @@ interface Eveniment {
 
 interface EvenimentSuspect extends Eveniment {
   // Ore de funcționare în intervalul în care s-a produs scăderea. null =
-  // n-au existat deloc date de contact în interval, s-a folosit fallback pe
-  // ore calendaristice.
+  // n-au existat deloc date de contact SAU de poziție în interval, s-a
+  // folosit fallback pe ore calendaristice.
   ore_functionare: number | null;
 }
 
@@ -216,9 +195,7 @@ function filtreazaCitiriPlauzibile(rows: Citire[], capacitate: number): Citire[]
 // Elimină excursii tranzitorii: un salt (de ORICE mărime, nu doar spre 0) care
 // revine aproape de nivelul dinainte în câteva minute e aproape sigur zgomot
 // de senzor, nu un eveniment real — un rezervor nu se golește/umple și revine
-// singur la loc în câteva minute. Vezi comentariul "FILTRU ZGOMOT SENZOR, v2",
-// cazul (a), pentru exemplul real care a impus generalizarea față de v9
-// (limitat la citiri <=5L).
+// singur la loc în câteva minute.
 //
 // Regulă: pornind de la ultima citire păstrată ("ancora"), dacă o citire nouă
 // diferă cu cel puțin PRAG_MINIM_EVENIMENT_L, căutăm în următoarele
@@ -275,12 +252,11 @@ function eliminaFluctuatiiTranzitorii(rows: Citire[]): Citire[] {
 // locale), folosind HISTEREZIS: un nou punct de întoarcere se confirmă doar
 // când seria inversează cu cel puțin PRAG_ZGOMOT_L față de candidatul curent
 // (algoritmul clasic "zigzag" pentru detecția extremelor pe semnale
-// zgomotoase). Vezi comentariul "FILTRU ZGOMOT SENZOR, v2", cazul (b): fără
-// histerezis, o oscilație continuă de 1-8L (des întâlnită chiar cu utilajul
-// staționat) genera câte o extremă nouă la fiecare inversare, iar suma
-// scăderilor individuale (fiecare sub pragul de eveniment, deci nemarcată
-// "suspectă", dar tot adunată ca și consum) umfla artificial consumul zilnic
-// raportat.
+// zgomotoase). Fără histerezis, o oscilație continuă de 1-8L (des întâlnită
+// chiar cu utilajul staționat) genera câte o extremă nouă la fiecare
+// inversare, iar suma scăderilor individuale (fiecare sub pragul de
+// eveniment, deci nemarcată "suspectă", dar tot adunată ca și consum) umfla
+// artificial consumul zilnic raportat.
 //
 // Păstrează și indexul în `rows` al fiecărei extreme -- necesar ca să putem
 // re-străbate citirile BRUTE dintre două extreme consecutive, la calculul
@@ -334,24 +310,46 @@ function extrageExtreme(rows: Citire[]): CitireIndexata[] {
   return extreme;
 }
 
-// Ore de funcționare (contact pornit) între două citiri BRUTE, identificate
-// prin indexul lor în `rows` — aceeași convenție ca get-utilaj-istoric-parcele:
-// pentru fiecare pas, dacă citirea de la începutul pasului avea contact=true,
-// pasul contează ca funcționare (plafonat la MAX_GAP_ORE, ca un gol în date să
-// nu fie citit greșit drept ore de funcționare sau de staționare).
+// Distanța aproximativă (metri) între două puncte GPS apropiate -- proiecție
+// plană simplă (echirectangulară), suficient de precisă pe distanțe mici (sub
+// câțiva km, cazul de aici) și mult mai ieftină decât haversine complet.
+function distantaMetri(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const latRad = (lat1 * Math.PI) / 180;
+  const dLat = (lat2 - lat1) * 111_320;
+  const dLon = (lon2 - lon1) * 111_320 * Math.cos(latRad);
+  return Math.sqrt(dLat * dLat + dLon * dLon);
+}
+
+// Un pas între două citiri brute consecutive contează ca funcționare dacă
+// ORICARE dintre semnale o confirmă: contact=true SAU utilajul s-a deplasat
+// cel puțin PRAG_MISCARE_METRI. Vezi comentariul "ORELE DE FUNCȚIONARE" de
+// sus -- semnalul de contact singur s-a dovedit nesigur pe acest lanț de
+// telemetrie (raportează des "oprit" chiar în timp ce utilajul se mișcă
+// vizibil pe GPS).
+function intervalInFunctionare(prev: Citire, curr: Citire): boolean {
+  if (prev.contact === true) return true;
+  if (prev.latitudine == null || prev.longitudine == null || curr.latitudine == null || curr.longitudine == null) {
+    return false;
+  }
+  return distantaMetri(prev.latitudine, prev.longitudine, curr.latitudine, curr.longitudine) >= PRAG_MISCARE_METRI;
+}
+
+// Ore de funcționare între două citiri BRUTE, identificate prin indexul lor
+// în `rows` -- vezi `intervalInFunctionare` pentru criteriul folosit (contact
+// SAU mișcare GPS).
 function oreDeFunctionareIntreIndici(
   rows: Citire[],
   idxStart: number,
   idxStop: number,
-): { ore: number; areDateContact: boolean } {
+): { ore: number; areDateOperare: boolean } {
   let ore = 0;
-  let areDateContact = false;
+  let areDateOperare = false;
 
   for (let i = idxStart; i < idxStop; i++) {
     const prev = rows[i];
     const curr = rows[i + 1];
-    if (prev.contact !== null) areDateContact = true;
-    if (prev.contact !== true) continue;
+    if (prev.contact !== null || (prev.latitudine != null && prev.longitudine != null)) areDateOperare = true;
+    if (!intervalInFunctionare(prev, curr)) continue;
 
     const deltaOre = (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;
     if (deltaOre <= 0 || deltaOre > MAX_GAP_ORE) continue;
@@ -359,7 +357,7 @@ function oreDeFunctionareIntreIndici(
     ore += deltaOre;
   }
 
-  return { ore, areDateContact };
+  return { ore, areDateOperare };
 }
 
 // Ziua locală (România), indiferent de fusul serverului — aceeași funcție ca
@@ -392,7 +390,7 @@ function consumZilnicSiRedFlag(rows: Citire[], extreme: CitireIndexata[]): ZiCon
   for (let i = 0; i < rows.length - 1; i++) {
     const prev = rows[i];
     const curr = rows[i + 1];
-    if (prev.contact !== true) continue;
+    if (!intervalInFunctionare(prev, curr)) continue;
     const deltaOre = (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;
     if (deltaOre <= 0 || deltaOre > MAX_GAP_ORE) continue;
     const zi = ziuaLocala(prev.data_ora);
@@ -490,7 +488,7 @@ Deno.serve(async (req) => {
     const { data: citiri, error: citiriError } = await fetchToateRandurile((from, to) =>
       adminClient
         .from('combustibil_citiri')
-        .select('data_ora, nivel_litri, contact')
+        .select('data_ora, nivel_litri, contact, latitudine, longitudine')
         .eq('utilaj_id', u.id)
         .not('nivel_litri', 'is', null)
         .gte('data_ora', de_la)
@@ -524,16 +522,17 @@ Deno.serve(async (req) => {
       const oreIntreCitiriCalendar =
         (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;
 
-      const { ore: oreFunctionare, areDateContact } = oreDeFunctionareIntreIndici(
+      const { ore: oreFunctionare, areDateOperare } = oreDeFunctionareIntreIndici(
         rows,
         extreme[i - 1].index,
         extreme[i].index,
       );
 
-      // Cu date de contact disponibile, folosim orele REALE de funcționare --
-      // fără ele, cădem înapoi pe orele calendaristice (comportamentul vechi),
-      // ca să nu marcăm totul suspect din lipsă de semnal de ignition.
-      const oreDeFolosit = areDateContact ? oreFunctionare : oreIntreCitiriCalendar;
+      // Cu date de contact/poziție disponibile, folosim orele REALE de
+      // funcționare -- fără ele, cădem înapoi pe orele calendaristice
+      // (comportamentul vechi), ca să nu marcăm totul suspect din lipsă de
+      // semnal.
+      const oreDeFolosit = areDateOperare ? oreFunctionare : oreIntreCitiriCalendar;
 
       const pragScaderePlauzibila = Math.max(
         PRAG_MINIM_EVENIMENT_L,
@@ -547,7 +546,7 @@ Deno.serve(async (req) => {
         scaderiSuspecte.push({
           data_ora: curr.data_ora,
           delta_litri: Math.round(delta * 10) / 10,
-          ore_functionare: areDateContact ? Math.round(oreFunctionare * 10) / 10 : null,
+          ore_functionare: areDateOperare ? Math.round(oreFunctionare * 10) / 10 : null,
         });
       } else if (delta < 0) {
         consumNormalLitri += Math.abs(delta);

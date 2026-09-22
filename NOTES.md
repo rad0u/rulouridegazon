@@ -1045,6 +1045,44 @@ tiparul de zgomot pare specific senzorului DUT-E/lanțului Traccar și posibil
 prezent, în grade diferite, pe toată flota (vezi 5z pentru procentele pe
 utilaj).
 
+### 5ab. Semnalul de contact e nesigur — orele de funcționare completate cu mișcare GPS (2026-09-22)
+Continuare a secțiunilor 5z/5aa. După fixurile de zgomot pe `nivel_litri`,
+raportul pentru Steyr 4105 tot arăta rate "peste plauzibil" (81-203 L/h) pe
+zile în care Radu a confirmat că utilajul chiar lucra ore întregi ("azi nu
+cred ca a furat cineva motorina, probabil asta e consumul normal al
+utilajului in sarcina"). Root cause, GĂSIT DIFERIT de zgomotul pe combustibil:
+**semnalul de `contact` (ignition) e el însuși nesigur** pe acest lanț de
+telemetrie — verificare SQL pe 18.09.2026, 05:00-13:00 UTC: utilajul a avut
+sute de poziții GPS distincte pe oră (mișcare reală, continuă — confirmată și
+de Radu cu Traccar Replay) dar `contact=true` apărea în doar câteva citiri pe
+oră, uneori deloc într-o oră întreagă cu 47 de poziții diferite. Rezultat:
+orele calculate DOAR din contact (0.72h acea zi) erau de ~7.5x mai mici decât
+orele reale de funcționare (5.47h, calculate incluzând mișcarea GPS) — ceea
+ce umfla artificial rata L/h calculată (141.8L / 0.72h = 202 L/h fals, vs.
+141.8L / 5.47h ≈ 26 L/h, plauzibil pentru un tractor sub sarcină).
+
+**Fix (`get-combustibil-report` v11)**: un pas între două citiri brute
+consecutive contează acum ca funcționare dacă ORICARE dintre semnale o
+confirmă — `contact=true` SAU utilajul s-a deplasat ≥20m între cele două
+citiri (`intervalInFunctionare`, distanță aproximată prin proiecție plană
+simplă). Aplicat atât la clasificarea evenimentelor (scădere suspectă vs.
+normală) cât și la calculul orelor din consumul zilnic. Interfața `Citire` +
+query-ul au fost extinse cu `latitudine`/`longitudine` (fetch-uite deja de la
+`combustibil_citiri`, doar nefolosite până acum în acest raport).
+
+**Notă importantă, NEREZOLVATĂ încă**: același semnal de `contact` e folosit
+STRICT (fără fallback pe mișcare) în `get-sesiuni-detectate`
+(activități-parcele, secțiunea 5x) — decizia lui Radu a fost explicit "Da,
+strict" pentru contact=true pe toată durata unei sesiuni detectate. Dacă
+`contact` flichează fals în timpul lucrului real (exact tiparul găsit aici),
+e posibil ca sesiunile GPS detectate acolo să fie fragmentate incorect sau
+chiar pierdute (sesiune sub pragul de 10 minute din cauza unei întreruperi
+false de contact în mijlocul lucrului real). NU s-a investigat/corectat încă
+— necesită o decizie separată a lui Radu, pentru că "strict contact" a fost
+ales intenționat ca să excludă exact cazul opus (utilaj remorcat/mutat cu
+motorul oprit). O eventuală relaxare (contact SAU mișcare) ar trebui
+cântărită cu grijă față de acel risc.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
