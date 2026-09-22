@@ -937,6 +937,60 @@ nejustificat" (numărul de zile flagged, roșu dacă > 0) în tabelul principal;
 consum, consum/oră), cu rândurile nejustificate evidențiate roșu și motivul
 afișat inline.
 
+### 5z. Filtru dropout senzor combustibil — raport Steyr 4105 "de speriat" era fals (2026-09-22)
+Radu a trimis screenshot cu raportul `/combustibil` pentru Steyr 4105 (Săbăreni):
+2206.9L realimentat în 21 realimentări, 1930.3L "scăderi suspecte" în 18
+evenimente, 5 zile marcate "nejustificat" cu rate de consum fizic imposibile
+(până la 4739 L/h — un rezervor de 153L nu poate face asta). Întrebare: "verifică
+dacă este adevărat".
+
+**Verificare pe datele brute din `combustibil_citiri`** (utilaj_id
+`8717c223-79ca-4a96-8ff9-e6a48e07d62e`, tanc 153L): senzorul DUT-E are
+dropout-uri tranzitorii în care raportează 0L timp de câteva citiri consecutive
+(secunde), apoi revine singur la nivelul dinainte. Exemplu găsit, care se
+potrivește exact cu un eveniment din screenshot (21.09.2026, ora 10:36):
+```
+10:36:15  105.1L  contact=false
+10:36:42    0.0L  contact=true   <- rafală de 6 citiri la 0L, 15 secunde
+10:36:57    0.0L  contact=true
+10:37:11  104.1L  contact=true   <- revine singur, 56s mai târziu
+```
+`extrageExtreme()` (algoritmul care comprimă citirile în puncte de întoarcere)
+citea fiecare asemenea puseu ca o pereche reală "scădere suspectă" +
+"realimentare", de zeci-sute de litri fictivi.
+
+**NU e specific acestui utilaj.** Verificare pe toată flota (ultimele 10 zile,
+citiri = 0L): John Deere 5403 — 5218/5378 (97%!), Belarus 1523.3 — 4323/13723
+(31%), Steyr 4105 — 2411/15233 (16%), Steyr 4100 Kompakt — 465/4341 (11%), și
+alte câteva utilaje cu procente mai mici. E o problemă sistemică de telemetrie
+(senzor DUT-E și/sau lanțul Traccar → `sync-traccar-fuel`), nu un caz izolat.
+
+**Fix (`get-combustibil-report` v9)**: funcție nouă `eliminaDropoutTranzitoriu`,
+aplicată pe citiri ÎNAINTE de `extrageExtreme()`. Regulă: o rafală de citiri
+≤5L se elimină complet din calcul DOAR dacă citirea de dinainte și prima
+citire de după rafală sunt apropiate (diferență ≤15L) și la mai puțin de 5
+minute distanță ("revine la fel", deci dropout, nu rezervor gol real). Dacă
+rezervorul chiar rămâne gol (nu revine în 5 minute, sau nu există citire de
+comparat înainte/după), citirile NU se elimină — nu vrem să ascundem un
+rezervor cu adevărat gol sau un furt real doar pentru că seamănă parțial cu
+tiparul de dropout.
+
+Verificat după deploy: pe zilele problematice (21-22 Sept), după eliminarea
+rafalelor de dropout, nivelurile rămase pentru Steyr 4105 sunt toate în banda
+plauzibilă 66-159L (sub capacitatea de 153×1.05=160.65L) — fără citiri
+aproape-zero izolate rămase.
+
+**Aplicabilitate**: fix-ul e local în `get-combustibil-report` (evenimente +
+consum zilnic/red-flag, secțiunea 5y). `get-sesiuni-detectate` și
+`get-utilaj-istoric-parcele` (secțiunea 5x) NU sunt afectate de acest bug —
+folosesc poziția GPS (lat/lon) și `contact`, nu `nivel_litri`, din aceleași
+citiri brute.
+
+**Răspuns către Radu**: raportul arătat NU reflectă furt sau consum real —
+e artefact de telemetrie. Numerele corectate (după fix) sunt de încredere;
+dacă apar în continuare zile/evenimente marcate suspecte după acest fix, ele
+merită investigate ca reale.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
