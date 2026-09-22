@@ -1083,6 +1083,41 @@ ales intenționat ca să excludă exact cazul opus (utilaj remorcat/mutat cu
 motorul oprit). O eventuală relaxare (contact SAU mișcare) ar trebui
 cântărită cu grijă față de acel risc.
 
+### 5ac. get-sesiuni-detectate v2 — fallback pe mișcare GPS, sub observație până la 1 octombrie (2026-09-22)
+Continuare directă a secțiunii 5ab: aceeași instabilitate a semnalului
+`contact` găsită la `get-combustibil-report` afecta și `get-sesiuni-detectate`
+(coada „Activități parcele", secțiunea 5x), care folosea `contact=true`
+STRICT pe toată durata unei sesiuni.
+
+**Cuantificare pe Săbăreni (10 zile, utilaje cu parcele desenate)**: am
+reconstruit „rulajele" de `contact=true` așa cum le vede algoritmul. Pentru
+Steyr 4105: 1766 rulaje candidate, din care 1760 (99.7%) sub pragul de 10
+minute cerut de Radu — dispar tăcut din coadă; rămân doar 6 sesiuni
+raportabile, însumând 11.8h din 10 zile, deși utilajul a lucrat continuu ore
+în șir în zile individuale (confirmat separat prin Traccar Replay, secțiunea
+5aa). Verificare pe restul flotei din Săbăreni a arătat același tipar, cu
+severitate diferită per utilaj (de la aproape total-nefuncțional, ca Steyr
+4105, la doar parțial afectat, ca Belarus 1523.3) — corelat cu problema deja
+cunoscută de fiabilitate a senzorului (secțiunea 5z).
+
+**Fix (`get-sesiuni-detectate` v2)**: adăugat `intervalInFunctionare()`,
+identic cu cel din `get-combustibil-report` v11 — un interval contează ca „în
+funcțiune" dacă `contact=true` LA ÎNCEPUT SAU utilajul s-a mișcat efectiv
+≥20m (`PRAG_MISCARE_METRI`) până la citirea următoare. Garda inițială a lui
+Radu (un utilaj parcat cu motorul oprit nu trebuie să apară ca „operațiune")
+rămâne valabilă: fără mișcare reală ȘI fără contact, intervalul tot nu
+contează. Rămâne o mențiune cunoscută: un utilaj REMORCAT cu motorul oprit
+poate trece pragul de mișcare — același compromis deja acceptat la v11.
+
+**Decizie Radu**: algoritmul (v2) rămâne SUB OBSERVAȚIE până pe 1 octombrie
+2026 — se urmăresc sesiunile produse (`/activitati-parcele`) pentru eventuale
+anomalii (sesiuni greșit atribuite, falsuri din remorcare, parcele greșite
+etc.) înainte de decizia finală: rămâne așa sau se mai ajustează.
+
+**Notă tehnică**: `get-sesiuni-detectate` nu exista în `supabase/functions/`
+din repo (fusese livrat direct pe Supabase, fără commit, la 5x) — codul
+curent (v2) a fost adus acum în git odată cu acest fix.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
