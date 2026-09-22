@@ -991,6 +991,60 @@ e artefact de telemetrie. Numerele corectate (după fix) sunt de încredere;
 dacă apar în continuare zile/evenimente marcate suspecte după acest fix, ele
 merită investigate ca reale.
 
+### 5aa. Filtru zgomot senzor combustibil, v2 — generalizat (2026-09-22)
+Continuare a secțiunii 5z. Radu a arătat cu Traccar Replay că utilajul Steyr
+4105 chiar lucra masiv în perioadele marcate "suspecte" de v9 — deci volumul
+mare de citiri NU era semnul problemei (corectare adusă în conversație, nu
+doar în cod). Investigând mai departe pe raportul live, tot pe Steyr 4105,
+au ieșit la iveală DOUĂ tipare de zgomot distincte, nu unul:
+
+**(a) Excursii de amplitudine mare, nu doar spre 0** — pe 15-16.09.2026,
+senzorul a produs citiri haotice pe o plajă largă (0L, dar și 53.7, 107.4,
+121.3, 137.8L — plus valori peste capacitate, deja eliminate de filtrul de
+capacitate) timp de peste 2 ore, fiecare revenind rapid (secunde până la ~9
+minute) la nivelul dinainte. Filtrul v9, limitat strict la citiri ≤5L, nu
+prindea excursiile mai mari (ex. 121.3L), care „contaminau" ancora folosită
+pentru verificarea rafalelor de 0 învecinate — motiv pentru care raportul tot
+arăta evenimente fictive (`-121.3L`, `+53.7L`, `-107.4L`, `+107.4L`...) chiar
+și după fix-ul din 5z, exact la orele 17:23-17:46 din 15.09, confirmate de
+Radu ca fiind reale mișcări GPS ale utilajului, nu perioade suspecte.
+
+**(b) Zgomot fin, continuu (1-8L), care nu revine niciodată complet** — o
+oscilație lentă în jurul unei valori, prezentă chiar și cu utilajul staționat
+(contact=false) — vizibilă pe 17.09.2026 ora 07:25-07:45, unde nivelul
+fluctuează ±1-5L la fiecare câteva secunde fără nicio activitate a
+motorului. Fiecare pas individual e sub pragul de eveniment (15L), deci
+algoritmul vechi de extrase-extreme (fără histerezis) trata FIECARE inversare
+ca o schimbare reală de direcție — iar `consumZilnicSiRedFlag` aduna fiecare
+scădere, oricât de mică, fără să scadă urcările simetrice care o compensau.
+Pe o zi cu mii de citiri, sutele de asemenea oscilații mici se adună fals la
+sute de litri "consumați" (exact tiparul raportat: 292.6L în doar 1.3h ore
+reale de funcționare, pe un rezervor de 153L).
+
+**Fix (`get-combustibil-report` v10)**:
+- `eliminaFluctuatiiTranzitorii` (generalizare a `eliminaDropoutTranzitoriu`
+  din v9): verifică "revine la loc" pentru ORICE salt peste
+  PRAG_MINIM_EVENIMENT_L (15L), nu doar pentru valori ≤5L; fereastra de timp
+  a fost lărgită de la 5 la 15 minute, pe baza golului real de ~9 minute
+  observat între citiri plauzibile în timpul unei rafale de zgomot.
+- `extrageExtreme` rescris cu HISTEREZIS (algoritmul clasic "zigzag" de
+  detecție a extremelor pe semnale zgomotoase): un nou punct de întoarcere se
+  confirmă doar când seria inversează cu cel puțin PRAG_ZGOMOT_L (5L) față de
+  candidatul curent — o oscilație mai mică nu mai fragmentează seria în
+  extreme false.
+
+Cele două fixuri sunt complementare: (a) prinde salturile mari care revin
+(rafale/excursii izolate de amplitudine mare), (b) prinde zgomotul mic
+continuu care nu revine niciodată dar nici nu reprezintă o tendință reală.
+Trasat manual pe date reale (SQL) pentru ambele cazuri raportate de Radu
+înainte de deploy — verificare vizuală, nu doar teoretică.
+
+**Notă pentru viitor**: dacă apar în continuare rapoarte "de speriat" pe alte
+utilaje, primul pas e tot verificarea manuală pe `combustibil_citiri` brut —
+tiparul de zgomot pare specific senzorului DUT-E/lanțului Traccar și posibil
+prezent, în grade diferite, pe toată flota (vezi 5z pentru procentele pe
+utilaj).
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

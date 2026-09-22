@@ -10,13 +10,12 @@
 //      sunt "litri prea mulți din greșeală" — sunt semn că senzorul DUT-E raporta
 //      încă în unități brute ("kvants"), nu în litri calibrați. O citire imposibilă
 //      nu poate fi folosită ca reper pentru un eveniment — se ignoră complet.
-//   0b. Se elimină rafalele scurte de citiri aproape-zero care revin singure la
-//       nivelul dinainte în câteva minute — artefact de senzor, nu rezervor gol.
-//       Vezi comentariul de la `eliminaDropoutTranzitoriu` mai jos.
-//   1. Citirile valide rămase se comprimă în puncte de întoarcere (extreme locale):
-//      cât timp nivelul se mișcă în aceeași direcție, pașii intermediari se
-//      contopesc într-un singur eveniment (altfel o realimentare turnată treptat
-//      ar apărea fragmentată în mai multe pași mici, sub prag).
+//   0b. Se elimină excursiile tranzitorii — salturi (de orice mărime) care revin
+//       singure aproape de nivelul dinainte în câteva minute — artefact de senzor,
+//       nu un eveniment real. Vezi comentariul de la `eliminaFluctuatiiTranzitorii`.
+//   1. Citirile valide rămase se comprimă în puncte de întoarcere (extreme locale,
+//      cu histerezis — un mic prag de zgomot sub care o oscilație nu e considerată
+//      o schimbare de direcție reală). Vezi comentariul de la `extrageExtreme`.
 //   2. Se calculează diferența (delta) între punctele de întoarcere consecutive.
 //   3. Un salt POZITIV peste prag = realimentare.
 //   4. Un salt NEGATIV peste prag = scădere suspectă (posibil furt/scurgere).
@@ -53,33 +52,49 @@
 // CONSUM ZILNIC + RED FLAG (Radu, 2026-09-22): pe lângă evenimentele izolate de
 // mai sus, se calculează acum și, per utilaj, un total de consum PE ZI (ziua
 // locală România) + orele de funcționare din aceeași zi, cu un steag roșu când
-// consumul nu e justificat de orele lucrate — fie utilajul n-a funcționat deloc
-// dar nivelul a scăzut peste pragul de zgomot, fie consumul/oră depășește
-// pragul plauzibil. E complementar cu „scăderi suspecte" de mai sus, nu un
-// duplicat: acolo se prinde un salt BRUSC izolat; aici se prinde și cazul unor
-// scăderi mici, distribuite pe parcursul zilei, care per eveniment nu trec
-// pragul, dar însumate pe zi depășesc consumul plauzibil pentru orele lucrate.
-// Fiecare interval (extreme pentru consum, citiri brute consecutive pentru ore)
-// se atribuie zilei locale a ÎNCEPUTULUI intervalului — aceeași simplificare ca
-// în get-utilaj-istoric-parcele (un interval care traversează miezul nopții se
-// atribuie integral zilei de început, nu împărțit proporțional).
+// consumul nu e justificat de orele lucrate. Fiecare interval se atribuie zilei
+// locale a ÎNCEPUTULUI intervalului — aceeași simplificare ca în
+// get-utilaj-istoric-parcele.
 //
-// FILTRU DROPOUT SENZOR (Radu, 2026-09-22 — după raportare "arată de speriat,
-// verifică dacă e adevărat" pe Steyr 4105/Săbăreni): raportul inițial (v8)
-// arăta zeci de evenimente "scădere suspectă"/"realimentare" fictive și zile
-// întregi marcate nejustificat, cu rate de consum fizic imposibile (mii de
-// l/h). Verificare pe datele brute: senzorul DUT-E are dropout-uri tranzitorii
-// în care raportează 0 L timp de câteva citiri consecutive (secunde), apoi
-// revine singur la nivelul dinainte — ex. Steyr 4105, 21.09.2026 10:36:15
-// (105.1L) -> 10:36:42-10:36:57 (0L x6) -> 10:37:11 (104.1L), în 56 de secunde.
-// Un rezervor de 150L+ nu se golește și realimentă singur în sub un minut, deci
-// `extrageExtreme()` citea fiecare asemenea puseu ca o pereche reală de
-// evenimente. NU e specific acestui utilaj — verificare pe toată flota arată
-// același tipar peste tot, cu severitate diferită (ex. John Deere 5403: 97%
-// din citirile ultimelor 10 zile sunt exact 0). `eliminaDropoutTranzitoriu`
-// elimină aceste rafale ÎNAINTE de extrageExtreme, dar doar atunci când citirea
-// de dinainte și cea de după rafală sunt apropiate (revine la fel) și rafala e
-// scurtă — dacă rezervorul chiar rămâne gol (nu revine), citirile NU se elimină.
+// FILTRU ZGOMOT SENZOR, v2 — GENERALIZAT (Radu, 2026-09-22, după verificare pe
+// Steyr 4105/Săbăreni): prima variantă a filtrului (v9) elimina doar rafale de
+// citiri APROAPE-ZERO care revin la loc — bazat pe un caz real (dropout la 0L
+// timp de 15 secunde, apoi revenire). Radu a arătat însă, cu Traccar Replay,
+// că utilajul chiar lucra masiv în perioadele marcate suspecte — deci volumul
+// mare de citiri NU e semnul problemei. Investigând mai departe (21.09.2026),
+// am găsit DOUĂ tipare diferite de zgomot, nu unul:
+//
+//   (a) Excursii de amplitudine mare, nu doar spre 0 — pe 15-16.09.2026,
+//       senzorul a produs citiri haotice pe o plajă largă (0, 53.7, 107.4,
+//       121.3, 137.8L, dar și valori peste capacitate care erau deja
+//       eliminate de filtrul de la pasul 0) timp de peste 2 ore, fiecare
+//       revenind rapid (secunde-minute) la nivelul dinainte. Filtrul v9,
+//       limitat la <=5L, nu prindea aceste excursii mai mari (ex. 121.3L),
+//       care contaminau ancora folosită pentru verificarea rafalelor de 0
+//       învecinate. Fix: `eliminaFluctuatiiTranzitorii` (v10) generalizează
+//       verificarea "revine la loc" la ORICE salt peste pragul minim de
+//       eveniment, nu doar la valorile aproape-zero.
+//
+//   (b) Zgomot fin, continuu (1-8L), care NU revine niciodată complet — o
+//       oscilație lentă în jurul unei valori, chiar și cu utilajul staționat
+//       (contact=false), vizibilă pe 17.09.2026 ora 07:25-07:45. Fiecare pas
+//       individual e sub pragul de eveniment (15L), deci `extrageExtreme()`
+//       (v9) îl trata ca o schimbare reală de direcție de fiecare dată când
+//       oscila — iar `consumZilnicSiRedFlag` aduna FIECARE scădere, oricât de
+//       mică, fără să scadă urcările simetrice. Pe o zi întreagă cu mii de
+//       citiri, zecile-sutele de asemenea oscilații mici se adună fals la sute
+//       de litri "consumați" (exact tiparul din raport: 292.6L in 1.3h ore
+//       reale de funcționare). Fix: `extrageExtreme` (v10) folosește acum
+//       histerezis — un punct de întoarcere nou se confirmă doar când seria
+//       inversează cu cel puțin PRAG_ZGOMOT_L față de candidatul curent, nu la
+//       orice schimbare nenulă (algoritm clasic "zigzag", folosit pentru
+//       detecția de extreme pe semnale zgomotoase).
+//
+// Cele două fixuri sunt complementare: (a) elimină salturile mari care revin
+// (rafale/excursii izolate), (b) elimină zgomotul mic continuu care nu revine
+// niciodată dar nici nu reprezintă o tendință reală. Verificat după deploy pe
+// exact cazurile raportate de Radu (evenimentele din 15.09.2026 17:23-17:46 și
+// ziua de 17.09.2026).
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -109,7 +124,9 @@ const MAX_PLAUSIBLE_CONSUM_L_PE_ORA = 15;
 // Prag minim absolut (litri) pentru un eveniment (realimentare sau scădere
 // suspectă), indiferent de câte ore de funcționare — evită să marcăm zgomot
 // mic (sloshing, precizia senzorului) ca eveniment. E și pragul folosit când
-// utilajul a stat parcat tot intervalul (0 ore de funcționare).
+// utilajul a stat parcat tot intervalul (0 ore de funcționare). Reutilizat și
+// ca prag de "salt suspect" + toleranță de "revenire" în
+// `eliminaFluctuatiiTranzitorii` (vezi comentariul de acolo).
 const PRAG_MINIM_EVENIMENT_L = 15;
 // Același prag, reutilizat pentru a marca o diferență manual-vs-sondă drept
 // "semnificativă" în UI.
@@ -122,18 +139,17 @@ const TOLERANTA_CAPACITATE = 1.05;
 // orelor de funcționare — aceeași convenție ca în get-utilaj-istoric-parcele:
 // un gol mai mare înseamnă device offline, nu funcționare/staționare certă.
 const MAX_GAP_ORE = 1;
-// Sub acest nivel absolut (litri), o citire e suspectă de dropout de senzor —
-// vezi comentariul "FILTRU DROPOUT SENZOR" de sus. Nu se elimină automat doar
-// pentru că e mică; se elimină doar dacă rafala revine la fel (vezi mai jos).
-const PRAG_DROPOUT_SENZOR_L = 5;
-// Durata maximă (minute), de la ultima citire plauzibilă dinainte de rafala de
-// dropout până la prima citire plauzibilă de după, ca revenirea să fie
-// considerată "instant" (deci dropout, nu un gol real urmat de realimentare
-// separată, reală).
-const MAX_MINUTE_REVENIRE_DROPOUT = 5;
-// Cât de aproape trebuie să fie nivelul de dinainte și cel de după rafală ca
-// să considerăm că "a revenit la fel" — reutilizăm pragul minim de eveniment.
-const TOLERANTA_REVENIRE_DROPOUT_L = PRAG_MINIM_EVENIMENT_L;
+// Prag de zgomot (litri) pentru histerezis în `extrageExtreme` — o oscilație
+// mai mică decât asta NU e considerată o schimbare reală de direcție. Vezi
+// comentariul "FILTRU ZGOMOT SENZOR, v2" de sus, cazul (b).
+const PRAG_ZGOMOT_L = 5;
+// Fereastra de timp (minute) în care o excursie (salt peste
+// PRAG_MINIM_EVENIMENT_L) trebuie să revină aproape de nivelul dinainte ca să
+// fie considerată zgomot tranzitoriu, nu un eveniment real. Vezi comentariul
+// "FILTRU ZGOMOT SENZOR, v2" de sus, cazul (a). Lărgit față de v9 (5 minute)
+// la 15, pe baza unui caz real cu un gol de aproape 9 minute între citiri
+// plauzibile în timpul unei rafale de zgomot.
+const FEREASTRA_REVENIRE_MINUTE = 15;
 
 interface Citire {
   data_ora: string;
@@ -197,87 +213,123 @@ function filtreazaCitiriPlauzibile(rows: Citire[], capacitate: number): Citire[]
   return rows.filter((r) => r.nivel_litri >= 0 && r.nivel_litri <= prag);
 }
 
-// Elimină rafale scurte de citiri aproape-zero care sunt artefacte de senzor
-// (dropout tranzitoriu al sondei DUT-E), nu un rezervor gol real. Semnul
-// caracteristic, confirmat pe date reale: mai multe citiri consecutive de
-// exact 0 L, la câteva secunde distanță, imediat înainte și după niveluri
-// normale foarte apropiate (ex: 105.1L -> 0L x6 -> 104.1L, în 56 de secunde)
-// — un rezervor de 150L+ nu se golește și realimentă singur în sub un minut.
-// Fără acest filtru, fiecare asemenea puseu e citit de extrageExtreme() ca o
-// "scădere suspectă" + "realimentare" fictive, de zeci-sute de litri.
+// Elimină excursii tranzitorii: un salt (de ORICE mărime, nu doar spre 0) care
+// revine aproape de nivelul dinainte în câteva minute e aproape sigur zgomot
+// de senzor, nu un eveniment real — un rezervor nu se golește/umple și revine
+// singur la loc în câteva minute. Vezi comentariul "FILTRU ZGOMOT SENZOR, v2",
+// cazul (a), pentru exemplul real care a impus generalizarea față de v9
+// (limitat la citiri <=5L).
 //
-// Regulă: o rafală de citiri sub PRAG_DROPOUT_SENZOR_L se elimină COMPLET doar
-// dacă citirea plauzibilă păstrată chiar dinainte de rafală și prima citire de
-// după rafală sunt apropiate (sub TOLERANTA_REVENIRE_DROPOUT_L) și la mai puțin
-// de MAX_MINUTE_REVENIRE_DROPOUT minute distanță. Altfel (nu revine, sau
-// revenirea durează prea mult, sau rafala e la începutul/sfârșitul intervalului
-// și n-avem cu ce compara) citirile rămân neatinse — nu vrem să ascundem un
-// rezervor cu adevărat gol doar pentru că se potrivește parțial tiparul.
-function eliminaDropoutTranzitoriu(rows: Citire[]): Citire[] {
-  const rezultat: Citire[] = [];
-  let i = 0;
+// Regulă: pornind de la ultima citire păstrată ("ancora"), dacă o citire nouă
+// diferă cu cel puțin PRAG_MINIM_EVENIMENT_L, căutăm în următoarele
+// FEREASTRA_REVENIRE_MINUTE minute o citire care revine la mai puțin de
+// PRAG_MINIM_EVENIMENT_L față de ancoră. Dacă găsim una, TOATE citirile dintre
+// ele sunt zgomot și se elimină complet. Dacă nu găsim nicio revenire în
+// fereastră, saltul e considerat real (posibilă realimentare sau scădere
+// reală) și devine noua ancoră — nu vrem să ascundem un eveniment real doar
+// pentru că nu a revenit la timp.
+function eliminaFluctuatiiTranzitorii(rows: Citire[]): Citire[] {
+  if (rows.length === 0) return [];
+  const rezultat: Citire[] = [rows[0]];
+  let i = 1;
   while (i < rows.length) {
+    const ancora = rezultat[rezultat.length - 1];
     const r = rows[i];
-    if (r.nivel_litri > PRAG_DROPOUT_SENZOR_L) {
+    const diff = Math.abs(r.nivel_litri - ancora.nivel_litri);
+
+    if (diff < PRAG_MINIM_EVENIMENT_L) {
       rezultat.push(r);
       i++;
       continue;
     }
 
-    // Am dat peste o citire aproape-zero -- găsim finalul rafalei.
+    // Salt suspect fața de ancoră -- căutăm o revenire în fereastra de timp.
     let j = i;
-    while (j < rows.length && rows[j].nivel_litri <= PRAG_DROPOUT_SENZOR_L) j++;
-
-    const inainte = rezultat[rezultat.length - 1] ?? null; // ultima citire plauzibilă păstrată
-    const dupa = j < rows.length ? rows[j] : null;
-
-    const minuteRevenire =
-      inainte && dupa
-        ? (new Date(dupa.data_ora).getTime() - new Date(inainte.data_ora).getTime()) / 60_000
-        : Infinity;
-    const revineLaFel =
-      inainte !== null &&
-      dupa !== null &&
-      minuteRevenire >= 0 &&
-      minuteRevenire <= MAX_MINUTE_REVENIRE_DROPOUT &&
-      Math.abs(dupa.nivel_litri - inainte.nivel_litri) <= TOLERANTA_REVENIRE_DROPOUT_L;
-
-    if (!revineLaFel) {
-      for (let k = i; k < j; k++) rezultat.push(rows[k]);
+    let gasitRevenire = -1;
+    while (j < rows.length) {
+      const minute = (new Date(rows[j].data_ora).getTime() - new Date(ancora.data_ora).getTime()) / 60_000;
+      if (minute > FEREASTRA_REVENIRE_MINUTE) break;
+      if (Math.abs(rows[j].nivel_litri - ancora.nivel_litri) < PRAG_MINIM_EVENIMENT_L) {
+        gasitRevenire = j;
+        break;
+      }
+      j++;
     }
-    // else: rafala e omisă complet din rezultat -- artefact de senzor.
 
-    i = j;
+    if (gasitRevenire >= 0) {
+      // Tot ce e între i și gasitRevenire (exclusiv) e zgomot -- sărim direct
+      // la punctul de revenire, care va fi acceptat ca simplă continuare a
+      // ancorei la următoarea iterație (diferența față de ancoră e mică).
+      i = gasitRevenire;
+      continue;
+    }
+
+    // Nicio revenire în fereastră -- salt real, devine noua ancoră.
+    rezultat.push(r);
+    i++;
   }
   return rezultat;
 }
 
 // Comprimă o serie de citiri valide în punctele ei de întoarcere (extreme
-// locale), păstrând și indexul în `rows` al fiecărei extreme — necesar ca să
-// putem re-străbate citirile BRUTE dintre două extreme consecutive, la
-// calculul orelor de funcționare.
+// locale), folosind HISTEREZIS: un nou punct de întoarcere se confirmă doar
+// când seria inversează cu cel puțin PRAG_ZGOMOT_L față de candidatul curent
+// (algoritmul clasic "zigzag" pentru detecția extremelor pe semnale
+// zgomotoase). Vezi comentariul "FILTRU ZGOMOT SENZOR, v2", cazul (b): fără
+// histerezis, o oscilație continuă de 1-8L (des întâlnită chiar cu utilajul
+// staționat) genera câte o extremă nouă la fiecare inversare, iar suma
+// scăderilor individuale (fiecare sub pragul de eveniment, deci nemarcată
+// "suspectă", dar tot adunată ca și consum) umfla artificial consumul zilnic
+// raportat.
+//
+// Păstrează și indexul în `rows` al fiecărei extreme -- necesar ca să putem
+// re-străbate citirile BRUTE dintre două extreme consecutive, la calculul
+// orelor de funcționare.
 function extrageExtreme(rows: Citire[]): CitireIndexata[] {
-  const extreme: CitireIndexata[] = [];
-  let directie = 0; // 0 = necunoscută, 1 = crește, -1 = scade
+  if (rows.length === 0) return [];
 
-  rows.forEach((r, index) => {
-    if (extreme.length === 0) {
-      extreme.push({ citire: r, index });
-      return;
+  const extreme: CitireIndexata[] = [{ citire: rows[0], index: 0 }];
+  let directie = 0; // 0 = nedeterminată, 1 = căutăm un maxim, -1 = căutăm un minim
+  let candidat: CitireIndexata = { citire: rows[0], index: 0 };
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+
+    if (directie === 0) {
+      const delta = r.nivel_litri - extreme[0].citire.nivel_litri;
+      if (Math.abs(delta) < PRAG_ZGOMOT_L) continue; // încă în zgomot, direcția nu e clară
+      directie = delta > 0 ? 1 : -1;
+      candidat = { citire: r, index: i };
+      continue;
     }
-    const ultimul = extreme[extreme.length - 1].citire;
-    const delta = r.nivel_litri - ultimul.nivel_litri;
-    if (delta === 0) return; // fără schimbare, ignorăm
 
-    const nouaDirectie = delta > 0 ? 1 : -1;
-    if (directie === 0 || nouaDirectie === directie) {
-      extreme[extreme.length - 1] = { citire: r, index };
-      directie = nouaDirectie;
+    if (directie === 1) {
+      // Căutăm un maxim -- extindem candidatul cât timp urcă.
+      if (r.nivel_litri >= candidat.citire.nivel_litri) {
+        candidat = { citire: r, index: i };
+      } else if (candidat.citire.nivel_litri - r.nivel_litri >= PRAG_ZGOMOT_L) {
+        // A scăzut destul față de candidat -- confirmăm candidatul ca maxim.
+        extreme.push(candidat);
+        directie = -1;
+        candidat = { citire: r, index: i };
+      }
     } else {
-      extreme.push({ citire: r, index });
-      directie = nouaDirectie;
+      // directie === -1, căutăm un minim -- extindem candidatul cât timp scade.
+      if (r.nivel_litri <= candidat.citire.nivel_litri) {
+        candidat = { citire: r, index: i };
+      } else if (r.nivel_litri - candidat.citire.nivel_litri >= PRAG_ZGOMOT_L) {
+        extreme.push(candidat);
+        directie = 1;
+        candidat = { citire: r, index: i };
+      }
     }
-  });
+  }
+
+  // Ultimul candidat (coada seriei) se adaugă și el, chiar dacă nu s-a mai
+  // confirmat printr-o inversare -- altfel am pierde ultimul segment.
+  if (candidat.index !== extreme[extreme.length - 1].index) {
+    extreme.push(candidat);
+  }
 
   return extreme;
 }
@@ -456,7 +508,7 @@ Deno.serve(async (req) => {
       continue;
     }
 
-    const rows = eliminaDropoutTranzitoriu(filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number));
+    const rows = eliminaFluctuatiiTranzitorii(filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number));
     const extreme = extrageExtreme(rows);
 
     let consumNormalLitri = 0;
