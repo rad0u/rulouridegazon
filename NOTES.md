@@ -1233,6 +1233,25 @@ type="date">` + buton „Aplică" în `CombustibilScreen.tsx`, cu o notă
 explicativă despre perioada de calibrare și recomandarea de a alege 22
 septembrie încoace pentru cifre de încredere.
 
+### 5ag. Pagină nouă „Realimentări utilaje" — comparație sondă vs manual pe o zi aleasă (2026-09-23)
+După ce am scos coloanele Manual/Diferență din `/combustibil` (Radu: raportul
+se bazează doar pe sondă), Radu a cerut un instrument separat pentru
+verificare punctuală: un buton unde alege o dată și scoate un raport doar cu
+realimentările acelei zile, ca să compare cu ce a înregistrat operatoarea.
+
+Pagină nouă `/realimentari-utilaje` (admin_central, link în meniu lângă
+Combustibil): un `<input type="date">` + buton „Generează raport", care
+afișează două liste una lângă alta pentru ziua aleasă —
+- **Detectate de sondă**: reutilizează `get-combustibil-report` (v14, interval
+  custom `de_la=pana_la=<ziua aleasă>`), extrăgând doar `realimentari` din
+  fiecare utilaj.
+- **Înregistrate manual**: interoghează direct `alimentari_utilaje` pentru
+  aceeași fereastră de timp (limitele zilei interpretate în fusul orar al
+  browserului, la fel ca la înregistrarea manuală).
+
+Fără diff automat — e o verificare vizuală, punctuală, nu un steag (consistent
+cu decizia de a nu mai calcula automat diferența sondă-manual).
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
