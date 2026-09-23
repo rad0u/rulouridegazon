@@ -1252,6 +1252,62 @@ afișează două liste una lângă alta pentru ziua aleasă —
 Fără diff automat — e o verificare vizuală, punctuală, nu un steag (consistent
 cu decizia de a nu mai calcula automat diferența sondă-manual).
 
+### 5ah. get-combustibil-report v15 — bilanț de masă în loc de sumă pe extreme (2026-09-23)
+Radu a semnalat: Faresin FR02 (Săbăreni), 22 septembrie — „a funcționat 8.7h,
+cu un consum de 25.6L/h, doar că nu are rezervor de 222 litri, nu apare
+realimentare". Corect observat: 8.7h × 25.6L/h ≈ 223L, imposibil pentru un
+tanc de 120L fără o realimentare în ziua respectivă — și totuși niciuna nu
+apărea în listă.
+
+**Anchetă** (citiri brute 21-23 sept, replicat exact algoritmul deployat):
+nivelul acestui senzor oscilează continuu cu 5-14L în sus și în jos (probabil
+sloshing/vibrație — nu e tiparul de calibrare de la 5af, nici dropout-ul de la
+5z) — sub pragul de 15L de eveniment. Consecință directă a modului în care
+calcula `consumZilnic`: fiecare mică SCĂDERE dintre extreme (chiar 5-6L) se
+aduna integral ca și consum, dar mica CREȘTERE care o urma imediat (sloshing-ul
+revine) nu ajungea niciodată la pragul de 15L ca să fie recunoscută drept
+realimentare — deci era pur și simplu ignorată. Rezultat: zgomotul care se
+anula practic singur pe parcursul zilei era numărat ca și consum de-a lungul
+întregii lui amplitudini, de multe ori la rând.
+
+Cifre concrete, 22 septembrie: suma tuturor scăderilor dintre extreme = 222.7L
+(cifra din raport) — dar nivelul măsurat efectiv a scăzut cu doar **10.5L**
+între prima citire a zilei (45.1L, 08:10) și ultima (34.6L, 19:27). Pe tot
+intervalul 21-23 sept: suma scăderilor între extreme = 568.9L, suma
+creșterilor = 531.7L — aproape egale, deci aproape tot ce se aduna ca
+"consum" era de fapt zgomot care se compensa singur, nu combustibil ars.
+
+**Fix**: consumul (atât pe zi cât și pe toată perioada cerută) nu se mai
+calculează însumând fiecare scădere extremă-la-extremă, ci prin BILANȚ DE
+MASĂ — nivelul primei citiri minus nivelul ultimei citiri (al zilei / al
+intervalului), plus realimentările confirmate (≥15L) petrecute în acel
+interval. Complet imun la orice amplitudine de zgomot sub pragul de
+realimentare, pentru că ignoră traseul dintre cele două capete și contează
+doar ce s-a măsurat efectiv la capete. Verificat pe cazul semnalat: 22
+septembrie scade de la 222.7L/25.6 L/h la **10.5L/~1.2 L/h** — plauzibil
+pentru acest utilaj. Pe 21 septembrie (zi cu o realimentare reală de 16.2L
+confirmată) rezultă 35.6L consumate, pe 23 (fereastră parțială de date,
+doar până la 10:13) 25.8L, inclusă o realimentare de 15.2L.
+
+Efect secundar, intenționat: o scădere mare (`scaderi_mari`, >15L) intră acum
+și ea în consumul total — înainte era exclusă din `consum_normal_litri`,
+tratată doar informativ. Corect așa, fizic reprezintă combustibil scăzut real
+din rezervor; rămâne vizibilă separat, pentru control, în caz că era o eroare
+de senzor și nu consum real.
+
+**Notă operațională**: acest bug de dublă numărare a zgomotului nu e limitat
+la Faresin FR02 — poate afecta (mai discret, cu amplitudini mai mici) orice
+utilaj cu senzor mai zgomotos decât pragul de 5L de histerezis. Bilanțul de
+masă din v15 elimină problema pentru toată flota, nu doar pentru cazul
+semnalat.
+
+**Notă separată, găsită cu ocazia asta**: fișierul `index.ts` din git nu avea
+de fapt schimbările de backend din v14 (interval custom) — commit-ul `5061a41`
+a inclus doar `CombustibilScreen.tsx` și `NOTES.md`, funcția fusese deployată
+direct în Supabase fără să ajungă și în repo. Commit-ul de acum include atât
+codul v14 lipsă din git, cât și fix-ul v15 de mai sus, ca să rămână
+sincronizate.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

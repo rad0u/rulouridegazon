@@ -19,7 +19,8 @@
 //   2. Se calculează diferența (delta) între punctele de întoarcere consecutive.
 //   3. Un salt POZITIV peste prag = realimentare.
 //   4. Un salt NEGATIV peste prag = scădere mare (informativ — vezi v12 mai jos).
-//   5. Restul scăderilor (sub prag) se adună ca și consum normal.
+//   5. Consumul (pe zi și pe toată perioada) se calculează prin BILANȚ DE
+//      MASĂ, nu prin însumarea scăderilor individuale — vezi v15 mai jos.
 //
 // ORELE DE FUNCȚIONARE — CONTACT + MIȘCARE GPS (Radu, 2026-09-22, v11): vezi
 // `intervalInFunctionare` mai jos — un pas contează ca funcționare dacă
@@ -69,6 +70,54 @@
 // "Eroare la încărcarea raportului" (CPU Time exceeded în logurile funcției,
 // ~2043ms folosiți dintr-un buget ~2000ms). Scos formatter-ul o singură dată
 // la nivel de modul -- comportament identic, mult mai ieftin de rulat.
+//
+// v14, 2026-09-23 (Radu) -- INTERVAL CUSTOM + context calibrare senzori:
+// săptămâna trecută s-a calibrat sonda pe fiecare utilaj pe rând (ultimul,
+// John Deere, luni 21 sept) -- procedura de calibrare umple rezervorul în
+// pași cunoscuți (ex. câte 10L) cu utilajul STAȚIONAT, ceea ce arată în
+// citirile brute ca salturi mari, repetate, la valori rotunde -- exact
+// tiparul găsit la verificarea pe toată flota (Solis, Bobcat, Faresin FH
+// 2500, Autostack: L/h zilnic complet nerealist). NU e un bug de algoritm --
+// e perioada de calibrare amestecată cu funcționarea reală. Soluție: raportul
+// primește acum, pe lângă `zile` (presetul „Ultimele N zile"), și un interval
+// CUSTOM (`de_la` + opțional `pana_la`, format YYYY-MM-DD, interpretate ca
+// zile calendaristice România) -- ca să poți exclude explicit perioada de
+// calibrare alegând un interval care începe după ea (ex. 22 septembrie
+// încoace), fără să ștergem istoricul brut din `combustibil_citiri` (rămâne
+// util ca audit al calibrării). `pana_la`, dacă e dat, e inclusiv (acoperă
+// toată ziua respectivă); dacă lipsește, intervalul merge până acum.
+//
+// v15, 2026-09-23 (Radu a semnalat: Faresin FR02, 22 sept, "8.7h / 25.6 L/h",
+// fără tanc de 222L, nicio realimentare afișată) -- BUG DE DUBLĂ NUMĂRARE PE
+// ZGOMOT, nu realimentare lipsă. Anchetă (citiri brute 21-23 sept): nivelul
+// oscilează continuu cu 5-14L în sus și în jos (probabil sloshing/vibrație pe
+// acest senzor anume) -- SUB pragul de 15L de eveniment, deci fiecare mică
+// CREȘTERE (nedetectată ca realimentare, sub prag) era ignorată complet, în
+// timp ce fiecare mică SCĂDERE dintre extreme era adunată INTEGRAL ca
+// "consum". Pe 22 sept: suma tuturor scăderilor dintre extreme a dat 222.7L,
+// dar nivelul măsurat a scăzut de fapt cu doar 10.5L între prima și ultima
+// citire a zilei (45.1L -> 34.6L) -- zgomotul a fost numărat ca și consum de
+// ~21 de ori mai mult decât scăderea reală (confirmat: suma scăderilor
+// 568.9L vs suma creșterilor 531.7L între extreme pe tot intervalul 21-23
+// sept -- aproape egale, deci aproape totul era zgomot care se anula singur,
+// nu consum real).
+//
+// Fix: consumul (atât pe zi cât și pe toată perioada) NU se mai calculează
+// însumând fiecare scădere extremă-la-extremă, ci prin BILANȚ DE MASĂ --
+// nivelul primei citiri minus nivelul ultimei citiri (al zilei / al
+// perioadei), plus realimentările confirmate (≥15L) intervenite în acel
+// interval. Imun la orice amplitudine de zgomot sub pragul de realimentare,
+// pentru că ignoră complet traseul dintre cele două capete și contează doar
+// ce s-a măsurat efectiv la început și la sfârșit -- vezi `consumZilnic` mai
+// jos. Efect secundar, intenționat: o scădere mare (`scaderi_mari`, >15L,
+// rămasă informativă mai jos) intră acum și ea în consumul total (înainte
+// era exclusă din `consum_normal_litri`) -- corect, pentru că fizic
+// reprezintă tot combustibil scăzut din rezervor între cele două capete;
+// rămâne vizibilă separat în `scaderi_mari` pentru control vizual, în caz că
+// e o eroare de senzor și nu consum real. Suma zilelor poate să nu coincidă
+// perfect cu totalul pe toată perioada (diferență mică, la tranziția dintre
+// ultima citire a unei zile și prima a zilei următoare) -- neglijabil față de
+// eroarea corectată (de ordinul a 20x).
 //
 // IMPORTANT: raportul are sens doar pentru utilajele CALIBRATE (cu
 // `tanc_capacitate_litri` completat în tabela `utilaje`) — pe utilajele
@@ -378,25 +427,6 @@ function oreDeFunctionareIntreIndici(
   return { ore, areDateOperare };
 }
 
-// Ca `oreDeFunctionareIntreIndici`, dar întoarce orele defalcate PE ZI LOCALĂ
-// în loc de un singur total -- folosit în `consumZilnic` (v13) ca să
-// distribuim proporțional consumul unui interval extremă-la-extremă pe zilele
-// pe care le acoperă efectiv, în loc să-l punem tot pe ziua lui de start.
-// Vezi nota v13 de sus.
-function oreDeFunctionarePeZiIntreIndici(rows: Citire[], idxStart: number, idxStop: number): Map<string, number> {
-  const oreInterval = new Map<string, number>();
-  for (let i = idxStart; i < idxStop; i++) {
-    const prev = rows[i];
-    const curr = rows[i + 1];
-    if (!intervalInFunctionare(prev, curr)) continue;
-    const deltaOre = (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;
-    if (deltaOre <= 0 || deltaOre > MAX_GAP_ORE) continue;
-    const zi = ziuaLocala(prev.data_ora);
-    oreInterval.set(zi, (oreInterval.get(zi) ?? 0) + deltaOre);
-  }
-  return oreInterval;
-}
-
 // Ziua locală (România), indiferent de fusul serverului — aceeași funcție ca
 // în get-utilaj-istoric-parcele.
 //
@@ -414,34 +444,77 @@ function ziuaLocala(dataIso: string): string {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
-// Consum total (litri) + ore de funcționare, per zi locală, pentru un utilaj —
-// v12: fără steag roșu, vezi nota v12 de sus.
-function consumZilnic(rows: Citire[], extreme: CitireIndexata[]): ZiConsum[] {
-  // v13: vezi nota de sus -- distribuim scăderea fiecărui interval
-  // extremă-la-extremă PROPORȚIONAL cu orele de funcționare ale fiecărei zile
-  // ÎN ACEL interval, nu integral pe ziua lui de start. Fallback la
-  // comportamentul vechi (atribuire integrală pe ziua de start) doar dacă
-  // intervalul n-are deloc date de operare (nici contact, nici poziție).
-  const consumPeZi = new Map<string, number>();
-  for (let i = 1; i < extreme.length; i++) {
-    const prev = extreme[i - 1].citire;
-    const curr = extreme[i].citire;
-    const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
-    if (delta >= 0) continue; // doar scăderile sunt consum
-    const consumAbsolut = Math.abs(delta);
+// v14: instant UTC corespunzător miezului nopții (00:00) în Europe/Bucharest,
+// pentru o dată calendaristică "YYYY-MM-DD" -- folosit ca să transformăm
+// datele alese de utilizator dintr-un calendar (interval custom) în limitele
+// UTC corecte pentru interogarea `combustibil_citiri`, indiferent de ora de
+// vară/iarnă.
+function offsetLocalOre(dataStr: string): number {
+  // Ancorăm la prânz UTC ca să evităm granița de zi la conversie.
+  const ancora = new Date(`${dataStr}T12:00:00.000Z`);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Bucharest',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(ancora);
+  const tz = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+2';
+  const m = tz.match(/GMT([+-]\d+)/);
+  return m ? parseInt(m[1], 10) : 2;
+}
 
-    const oreInterval = oreDeFunctionarePeZiIntreIndici(rows, extreme[i - 1].index, extreme[i].index);
-    const totalOreInterval = Array.from(oreInterval.values()).reduce((a, b) => a + b, 0);
+function inceputZileiLocaleUTC(dataStr: string): Date {
+  const offsetOre = offsetLocalOre(dataStr);
+  return new Date(new Date(`${dataStr}T00:00:00.000Z`).getTime() - offsetOre * 3_600_000);
+}
 
-    if (totalOreInterval > 0) {
-      for (const [zi, ore] of oreInterval) {
-        consumPeZi.set(zi, (consumPeZi.get(zi) ?? 0) + (consumAbsolut * ore) / totalOreInterval);
-      }
+// Ziua calendaristică următoare, ca string "YYYY-MM-DD" -- folosit ca să
+// obținem limita EXCLUSIVĂ de sus a intervalului (ziua următoare lui
+// `pana_la`, la miezul nopții local), ca `pana_la` să fie inclusiv pentru
+// utilizator.
+function ziuaUrmatoare(dataStr: string): string {
+  const d = new Date(`${dataStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
+
+// v15: prima și ultima citire (nivel_litri) din fiecare zi locală -- baza
+// bilanțului de masă din `consumZilnic`. Vezi nota v15 de sus.
+function primaSiUltimaCitirePeZi(rows: Citire[]): Map<string, { prima: number; ultima: number }> {
+  const rezultat = new Map<string, { prima: number; ultima: number }>();
+  for (const r of rows) {
+    const zi = ziuaLocala(r.data_ora);
+    const existent = rezultat.get(zi);
+    if (!existent) {
+      rezultat.set(zi, { prima: r.nivel_litri, ultima: r.nivel_litri });
     } else {
-      const zi = ziuaLocala(prev.data_ora);
-      consumPeZi.set(zi, (consumPeZi.get(zi) ?? 0) + consumAbsolut);
+      existent.ultima = r.nivel_litri;
     }
   }
+  return rezultat;
+}
+
+// v15: suma realimentărilor confirmate (≥15L), grupate pe ziua locală în care
+// s-au produs -- adăugată înapoi la bilanțul de masă din `consumZilnic`,
+// altfel o realimentare ar apărea ca "și mai puțin consum decât real" în ziua
+// respectivă (nivelul crește, dar bilanțul brut ar prinde doar scăderea netă).
+function realimentariPeZi(realimentari: Eveniment[]): Map<string, number> {
+  const rezultat = new Map<string, number>();
+  for (const e of realimentari) {
+    const zi = ziuaLocala(e.data_ora);
+    rezultat.set(zi, (rezultat.get(zi) ?? 0) + e.delta_litri);
+  }
+  return rezultat;
+}
+
+// Consum total (litri) + ore de funcționare, per zi locală, pentru un utilaj —
+// v12: fără steag roșu, vezi nota v12 de sus. v15: consumul se calculează
+// acum prin BILANȚ DE MASĂ (prima citire a zilei minus ultima, plus
+// realimentările confirmate din ziua respectivă), nu mai prin însumarea
+// scăderilor individuale dintre extreme -- vezi nota v15 de sus, la începutul
+// fișierului, pentru motivul schimbării (dublă numărare a zgomotului de
+// senzor ca și consum).
+function consumZilnic(rows: Citire[], realimentari: Eveniment[]): ZiConsum[] {
+  const niveluriPeZi = primaSiUltimaCitirePeZi(rows);
+  const realimentariZi = realimentariPeZi(realimentari);
 
   const orePeZi = new Map<string, number>();
   for (let i = 0; i < rows.length - 1; i++) {
@@ -454,12 +527,19 @@ function consumZilnic(rows: Citire[], extreme: CitireIndexata[]): ZiConsum[] {
     orePeZi.set(zi, (orePeZi.get(zi) ?? 0) + deltaOre);
   }
 
-  const toateZilele = new Set<string>([...consumPeZi.keys(), ...orePeZi.keys()]);
+  const toateZilele = new Set<string>([...niveluriPeZi.keys(), ...orePeZi.keys()]);
 
   return Array.from(toateZilele)
     .sort((a, b) => (a < b ? 1 : -1))
     .map((zi) => {
-      const consum = Math.round((consumPeZi.get(zi) ?? 0) * 10) / 10;
+      const niveluri = niveluriPeZi.get(zi);
+      const netScazut = niveluri ? niveluri.prima - niveluri.ultima : 0;
+      const realimentatZi = realimentariZi.get(zi) ?? 0;
+      // Nu poate exista consum negativ -- dacă nivelul a crescut mai mult
+      // decât realimentările confirmate (posibil: o mică realimentare sub
+      // pragul de 15L, invizibilă ca eveniment), tăiem la 0 în loc să arătăm
+      // un "consum negativ" fără sens.
+      const consum = Math.round(Math.max(0, netScazut + realimentatZi) * 10) / 10;
       const ore = Math.round((orePeZi.get(zi) ?? 0) * 10) / 10;
       // v12: zi cu 0 ore de funcționare -> nu calculăm nimic (rămâne null),
       // nici steag -- vezi cererea lui Radu ("la cele cu zero inca nu
@@ -521,8 +601,36 @@ Deno.serve(async (req) => {
   }
 
   const url = new URL(req.url);
-  const zile = Math.min(90, Math.max(1, Number(url.searchParams.get('zile')) || 7));
-  const de_la = new Date(Date.now() - zile * 24 * 60 * 60 * 1000).toISOString();
+  const zileParam = url.searchParams.get('zile');
+  const deLaParam = url.searchParams.get('de_la');
+  const panaLaParam = url.searchParams.get('pana_la');
+  const REGEX_DATA_ZI = /^\d{4}-\d{2}-\d{2}$/;
+
+  // v14: interval custom (de_la + opțional pana_la, YYYY-MM-DD, zile
+  // calendaristice România) are prioritate față de presetul `zile`. Vezi nota
+  // v14 de sus.
+  let zile: number | null = null;
+  let de_la: string;
+  let pana_la: string | null = null;
+
+  if (deLaParam && REGEX_DATA_ZI.test(deLaParam)) {
+    const start = inceputZileiLocaleUTC(deLaParam);
+    de_la = start.toISOString();
+    if (panaLaParam && REGEX_DATA_ZI.test(panaLaParam)) {
+      const stopExclusiv = inceputZileiLocaleUTC(ziuaUrmatoare(panaLaParam));
+      if (stopExclusiv.getTime() <= start.getTime()) {
+        return jsonResponse({ error: 'Interval invalid: data de sfârșit trebuie să fie după data de început.' }, 400);
+      }
+      const nrZile = (stopExclusiv.getTime() - start.getTime()) / (24 * 3_600_000);
+      if (nrZile > 366) {
+        return jsonResponse({ error: 'Intervalul selectat e prea mare (peste 366 de zile).' }, 400);
+      }
+      pana_la = stopExclusiv.toISOString();
+    }
+  } else {
+    zile = Math.min(90, Math.max(1, Number(zileParam) || 7));
+    de_la = new Date(Date.now() - zile * 24 * 60 * 60 * 1000).toISOString();
+  }
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -543,10 +651,12 @@ Deno.serve(async (req) => {
   // Alimentările manuale (operatoare de fermă / admin) din aceeași perioadă,
   // pentru toate utilajele deodată -- mai eficient decât un query per utilaj.
   const manualPorUtilaj = new Map<string, { suma: number; nr: number }>();
-  const { data: alimentariManuale, error: alimentariManualeError } = await adminClient
+  let alimentariQuery = adminClient
     .from('alimentari_utilaje')
     .select('utilaj_id, cantitate_litri')
     .gte('data_ora', de_la);
+  if (pana_la) alimentariQuery = alimentariQuery.lt('data_ora', pana_la);
+  const { data: alimentariManuale, error: alimentariManualeError } = await alimentariQuery;
 
   if (!alimentariManualeError) {
     for (const a of (alimentariManuale ?? []) as AlimentareManuala[]) {
@@ -560,16 +670,16 @@ Deno.serve(async (req) => {
   const rezultate = [];
 
   for (const u of calibrate as any[]) {
-    const { data: citiri, error: citiriError } = await fetchToateRandurile((from, to) =>
-      adminClient
+    const { data: citiri, error: citiriError } = await fetchToateRandurile((from, to) => {
+      let q = adminClient
         .from('combustibil_citiri')
         .select('data_ora, nivel_litri, contact, latitudine, longitudine')
         .eq('utilaj_id', u.id)
         .not('nivel_litri', 'is', null)
-        .gte('data_ora', de_la)
-        .order('data_ora', { ascending: true })
-        .range(from, to),
-    );
+        .gte('data_ora', de_la);
+      if (pana_la) q = q.lt('data_ora', pana_la);
+      return q.order('data_ora', { ascending: true }).range(from, to);
+    });
 
     if (citiriError) {
       rezultate.push({
@@ -584,7 +694,6 @@ Deno.serve(async (req) => {
     const rows = eliminaFluctuatiiTranzitorii(filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number));
     const extreme = extrageExtreme(rows);
 
-    let consumNormalLitri = 0;
     let realimentatLitri = 0;
     const realimentari: Eveniment[] = [];
     const scaderiMari: EvenimentScadereMare[] = [];
@@ -614,12 +723,21 @@ Deno.serve(async (req) => {
           delta_litri: Math.round(delta * 10) / 10,
           ore_functionare: areDateOperare ? Math.round(oreFunctionare * 10) / 10 : null,
         });
-      } else if (delta < 0) {
-        consumNormalLitri += Math.abs(delta);
       }
     }
 
-    const zileConsum = consumZilnic(rows, extreme);
+    // v15: consumul total pe perioadă, ca și cel pe zi în `consumZilnic`, se
+    // calculează acum prin BILANȚ DE MASĂ (nivelul primei citiri minus
+    // nivelul ultimei citiri din tot intervalul cerut, plus realimentările
+    // confirmate) -- nu mai prin însumarea scăderilor mici dintre extreme,
+    // care dubla zgomotul de senzor ca și consum. Vezi nota v15 de sus.
+    let consumNormalLitri = 0;
+    if (rows.length > 0) {
+      const netScazutPerioada = rows[0].nivel_litri - rows[rows.length - 1].nivel_litri;
+      consumNormalLitri = Math.max(0, netScazutPerioada + realimentatLitri);
+    }
+
+    const zileConsum = consumZilnic(rows, realimentari);
 
     const manual = manualPorUtilaj.get(u.id) ?? { suma: 0, nr: 0 };
     const diferentaLitri = Math.round((realimentatLitri - manual.suma) * 10) / 10;
@@ -648,6 +766,7 @@ Deno.serve(async (req) => {
   return jsonResponse({
     zile,
     de_la,
+    pana_la,
     rezultate,
     necalibrate: (necalibrate as any[]).map((u) => {
       const manual = manualPorUtilaj.get(u.id) ?? { suma: 0, nr: 0 };
