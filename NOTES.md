@@ -1202,6 +1202,37 @@ Scos formatter-ul o singură dată la nivel de modul (v13) — comportament
 identic, mult mai ieftin de rulat. Neconfirmat 100% ca soluție completă —
 de urmărit dacă mai reapare eroarea.
 
+### 5af. get-combustibil-report v14 — interval custom + context calibrare sonde (2026-09-23)
+Continuare directă a 5ae: la verificarea pe toată flota (16 utilaje, 14 zile),
+câteva utilaje arătau L/h zilnic complet imposibil (Faresin FH 2500: 730 L/h
+într-o zi; Solis S26+: 250 L/h; Bobcat S250: 39.6 L/h mediu). Radu a explicat
+cauza reală: **săptămâna 14–21 septembrie 2026 s-a calibrat sonda pe fiecare
+utilaj pe rând** (ultimul, John Deere, luni 21 sept) — procedura umple
+rezervorul în pași cunoscuți (ex. câte 10L) cu utilajul STAȚIONAT, ceea ce
+generează exact tiparul găsit (salturi mari, repetate, la valori rotunde). NU
+e un bug de algoritm — e perioada de calibrare amestecată cu funcționarea
+reală. Utilajele Autostack, Belarus 1221.3, Korea MT3.50 și Bobcat S250 nu
+s-au mișcat deloc de la calibrare încoace.
+
+**Verificare**: am reluat analiza fleet-wide restrângând la 22 septembrie
+încoace (excluzând perioada de calibrare) — toate cazurile anterior absurde
+dispar sau devin plauzibile (Faresin FH 2500: 3.2 L/h în loc de 730; Solis,
+Bobcat, Autostack, Belarus 1221.3, Korea: fără date noi de la calibrare —
+confirmă că n-au fost mișcate). Singura excepție notabilă: **Faresin FR02**
+rămâne cu cifre mari (30.3 L/h mediu, vârf 57.6 L/h) chiar și după 22
+septembrie — NU explicat de calibrare, de verificat separat (posibil consum
+real mare sub sarcină, ca la Steyr 4105 — vezi 5x/5aa — sau o problemă
+distinctă).
+
+**Fix (v14) — interval custom în raport**: în loc să ștergem istoricul brut
+din `combustibil_citiri` (rămâne util ca audit al calibrării), raportul
+primește acum un interval CUSTOM ales dintr-un calendar (`de_la` + opțional
+`pana_la`, zile calendaristice România, gestionate corect indiferent de ora
+de vară/iarnă), pe lângă presetul „Ultimele N zile". UI: două `<input
+type="date">` + buton „Aplică" în `CombustibilScreen.tsx`, cu o notă
+explicativă despre perioada de calibrare și recomandarea de a alege 22
+septembrie încoace pentru cifre de încredere.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează

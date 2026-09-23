@@ -54,8 +54,13 @@ type UtilajNecalibrat = {
   manual_nr: number;
 };
 
+// v14: `zile` e null când raportul a fost cerut pe un interval CUSTOM
+// (de_la/pana_la) în loc de presetul „Ultimele N zile". `pana_la` e null
+// când intervalul custom nu are dată de sfârșit (merge până acum).
 type Raport = {
-  zile: number;
+  zile: number | null;
+  de_la: string;
+  pana_la: string | null;
   rezultate: RezultatUtilaj[];
   necalibrate: UtilajNecalibrat[];
 };
@@ -83,18 +88,47 @@ function formatDataZi(data: string) {
   });
 }
 
+// v14: eticheta perioadei active a raportului, pentru afișat sub controale —
+// fie „Ultimele N zile", fie intervalul custom ales (de_la – pana_la, sau
+// „de_la – azi" dacă n-a fost aleasă o dată de sfârșit).
+function formatPerioada(r: Raport): string {
+  if (r.zile !== null) return `Ultimele ${r.zile} zile`;
+  const deLa = new Date(r.de_la).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+  if (!r.pana_la) return `${deLa} — azi`;
+  // pana_la e limita EXCLUSIVĂ (miezul nopții al zilei următoare) — scădem o
+  // zi pentru afișare, ca să arătăm ultima zi inclusă, nu prima exclusă.
+  const panaLaInclusiv = new Date(new Date(r.pana_la).getTime() - 12 * 3_600_000);
+  const panaLa = panaLaInclusiv.toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+  return deLa === panaLa ? deLa : `${deLa} — ${panaLa}`;
+}
+
 export default function CombustibilScreen() {
   const [zile, setZile] = useState(7);
+  // v14: interval custom, ales dintr-un calendar — are prioritate față de
+  // presetul `zile` cât timp `deLaCustom` e completat. Vezi nota v14 din
+  // get-combustibil-report/index.ts (context: calibrarea sondelor din
+  // săptămâna 14-21 septembrie 2026 contaminează perioadele care o includ).
+  const [deLaCustom, setDeLaCustom] = useState('');
+  const [panaLaCustom, setPanaLaCustom] = useState('');
   const [raport, setRaport] = useState<Raport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandat, setExpandat] = useState<string | null>(null);
 
-  async function incarca(zileNoi?: number) {
+  async function incarca(opts?: { zile?: number; deLa?: string; panaLa?: string }) {
     setLoading(true);
     setError(null);
 
-    const zileDeFolosit = zileNoi ?? zile;
+    const deLaDeFolosit = opts?.deLa ?? (opts ? undefined : deLaCustom || undefined);
+    const panaLaDeFolosit = opts?.panaLa ?? (opts ? undefined : panaLaCustom || undefined);
+
+    const params = new URLSearchParams();
+    if (deLaDeFolosit) {
+      params.set('de_la', deLaDeFolosit);
+      if (panaLaDeFolosit) params.set('pana_la', panaLaDeFolosit);
+    } else {
+      params.set('zile', String(opts?.zile ?? zile));
+    }
 
     // supabase-js functions.invoke() nu trece query params ușor pe GET, deci
     // apelăm direct endpointul funcției prin fetch, cu tokenul sesiunii curente.
@@ -102,7 +136,7 @@ export default function CombustibilScreen() {
     const token = session.session?.access_token;
 
     try {
-      const res = await fetch(`${supabaseUrl}/functions/v1/get-combustibil-report?zile=${zileDeFolosit}`, {
+      const res = await fetch(`${supabaseUrl}/functions/v1/get-combustibil-report?${params.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const json = await res.json();
@@ -121,6 +155,18 @@ export default function CombustibilScreen() {
     }
   }
 
+  function aplicaPreset(v: number) {
+    setZile(v);
+    setDeLaCustom('');
+    setPanaLaCustom('');
+    void incarca({ zile: v });
+  }
+
+  function aplicaIntervalCustom() {
+    if (!deLaCustom) return;
+    void incarca({ deLa: deLaCustom, panaLa: panaLaCustom || undefined });
+  }
+
   return (
     <main
       style={{
@@ -134,20 +180,50 @@ export default function CombustibilScreen() {
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h1 style={{ margin: 0 }}>Raport combustibil</h1>
-        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
           <select
             value={zile}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setZile(v);
-              void incarca(v);
-            }}
+            onChange={(e) => aplicaPreset(Number(e.target.value))}
             style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc' }}
           >
             <option value={7}>Ultimele 7 zile</option>
             <option value={14}>Ultimele 14 zile</option>
             <option value={30}>Ultimele 30 zile</option>
           </select>
+
+          {/* v14: interval custom dintr-un calendar — vezi nota v14 din
+              get-combustibil-report/index.ts. „Până la" e opțional (fără el,
+              intervalul merge până acum). */}
+          <span style={{ fontSize: '0.8rem', color: '#666' }}>sau interval:</span>
+          <input
+            type="date"
+            value={deLaCustom}
+            onChange={(e) => setDeLaCustom(e.target.value)}
+            style={{ padding: '0.45rem', borderRadius: '6px', border: '1px solid #ccc' }}
+          />
+          <span style={{ fontSize: '0.8rem', color: '#666' }}>–</span>
+          <input
+            type="date"
+            value={panaLaCustom}
+            onChange={(e) => setPanaLaCustom(e.target.value)}
+            min={deLaCustom || undefined}
+            style={{ padding: '0.45rem', borderRadius: '6px', border: '1px solid #ccc' }}
+          />
+          <button
+            onClick={aplicaIntervalCustom}
+            disabled={loading || !deLaCustom}
+            style={{
+              padding: '0.45rem 0.8rem',
+              borderRadius: '6px',
+              border: '1px solid #ccc',
+              background: !deLaCustom ? '#f5f5f5' : '#fff',
+              cursor: !deLaCustom || loading ? 'default' : 'pointer',
+              fontSize: '0.85rem',
+            }}
+          >
+            Aplică
+          </button>
+
           <button
             onClick={() => void incarca()}
             disabled={loading}
@@ -164,6 +240,10 @@ export default function CombustibilScreen() {
         </div>
       </div>
 
+      {raport && (
+        <p style={{ fontSize: '0.8rem', color: '#888', margin: 0 }}>Perioadă afișată: {formatPerioada(raport)}</p>
+      )}
+
       <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
         Perioadă de teste până pe 30 septembrie 2026: raportul arată consumul calculat, fără steaguri
         roșii automate — adunăm date reale înainte să calibrăm un prag de plauzibilitate. Coloana
@@ -175,6 +255,11 @@ export default function CombustibilScreen() {
         invers (posibil o cantitate introdusă greșit, sau o alimentare dintr-o altă sursă decât
         rezervorul central) — acesta rămâne singurul semnal evidențiat, fiindcă nu depinde de pragul de
         consum în discuție. Apasă „Detalii" pentru defalcarea zi cu zi a fiecărui utilaj.
+        <br />
+        <strong>Notă calibrare:</strong> săptămâna 14–21 septembrie 2026 s-a calibrat sonda pe fiecare
+        utilaj — perioada de calibrare arată consumuri complet nerealiste (rezervorul era umplut în pași
+        cunoscuți, cu utilajul staționat). Pentru cifre de încredere, alege intervalul custom de mai sus
+        începând cu 22 septembrie 2026.
       </p>
 
       {error && (
