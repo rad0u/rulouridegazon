@@ -200,6 +200,9 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                           <Link href="/combustibil" style={navLinkStyle} onClick={closeMenu}>
                             Combustibil
                           </Link>
+                          <Link href="/realimentari-utilaje" style={navLinkStyle} onClick={closeMenu}>
+                            Realimentări utilaje
+                          </Link>
                           <Link href="/rezervor-central" style={navLinkStyle} onClick={closeMenu}>
                             Rezervor central
                           </Link>
