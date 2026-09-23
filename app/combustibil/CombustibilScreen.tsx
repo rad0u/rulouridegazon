@@ -248,13 +248,9 @@ export default function CombustibilScreen() {
         Perioadă de teste până pe 30 septembrie 2026: raportul arată consumul calculat, fără steaguri
         roșii automate — adunăm date reale înainte să calibrăm un prag de plauzibilitate. Coloana
         „Consum mediu (L/h)" e consumul mediu PONDERAT pe oră, calculat doar din zilele în care utilajul
-        chiar a funcționat (o zi cu 0 ore de funcționare nu intră în calcul). Coloana „Manual" e ce a
-        înregistrat operatoarea în /alimentari-utilaje pentru acest utilaj, în aceeași perioadă. Coloana
-        „Diferență" compară cele două surse — pozitiv înseamnă că sonda a detectat mai multă motorină
-        alimentată decât s-a raportat manual (posibil o alimentare neînregistrată), negativ înseamnă
-        invers (posibil o cantitate introdusă greșit, sau o alimentare dintr-o altă sursă decât
-        rezervorul central) — acesta rămâne singurul semnal evidențiat, fiindcă nu depinde de pragul de
-        consum în discuție. Apasă „Detalii" pentru defalcarea zi cu zi a fiecărui utilaj.
+        chiar a funcționat (o zi cu 0 ore de funcționare nu intră în calcul). Raportul se bazează doar pe
+        sondă — nu mai compară cu alimentările înregistrate manual de operatoare. Apasă „Detalii" pentru
+        defalcarea zi cu zi a fiecărui utilaj.
         <br />
         <strong>Notă calibrare:</strong> săptămâna 14–21 septembrie 2026 s-a calibrat sonda pe fiecare
         utilaj — perioada de calibrare arată consumuri complet nerealiste (rezervorul era umplut în pași
@@ -285,8 +281,6 @@ export default function CombustibilScreen() {
                 <th style={{ padding: '0.4rem' }}>Fermă</th>
                 <th style={{ padding: '0.4rem' }}>Consum normal</th>
                 <th style={{ padding: '0.4rem' }}>Realimentat (sondă)</th>
-                <th style={{ padding: '0.4rem' }}>Manual (operator)</th>
-                <th style={{ padding: '0.4rem' }}>Diferență</th>
                 <th style={{ padding: '0.4rem' }}>Scăderi mari</th>
                 <th style={{ padding: '0.4rem' }}>Consum mediu (L/h)</th>
                 <th style={{ padding: '0.4rem' }}></th>
@@ -305,20 +299,6 @@ export default function CombustibilScreen() {
                       <td style={{ padding: '0.4rem' }}>{r.consum_normal_litri} L</td>
                       <td style={{ padding: '0.4rem' }}>
                         {r.realimentat_litri} L{r.realimentari.length > 0 ? ` (${r.realimentari.length}x)` : ''}
-                      </td>
-                      <td style={{ padding: '0.4rem' }}>
-                        {r.manual_litri} L{r.manual_nr > 0 ? ` (${r.manual_nr}x)` : ''}
-                      </td>
-                      <td
-                        style={{
-                          padding: '0.4rem',
-                          color: r.diferenta_semnificativa ? '#8a1f13' : '#666',
-                          fontWeight: r.diferenta_semnificativa ? 600 : undefined,
-                        }}
-                      >
-                        {r.diferenta_litri > 0 ? '+' : ''}
-                        {r.diferenta_litri} L
-                        {r.diferenta_semnificativa ? ' ⚠️' : ''}
                       </td>
                       <td style={{ padding: '0.4rem' }}>
                         {areScaderi
@@ -350,7 +330,7 @@ export default function CombustibilScreen() {
                     </tr>
                     {deschis && (
                       <tr key={`${r.utilaj_id}-detalii`}>
-                        <td colSpan={9} style={{ padding: '0.6rem', background: '#fafafa' }}>
+                        <td colSpan={7} style={{ padding: '0.6rem', background: '#fafafa' }}>
                           {r.consum_zilnic.length > 0 && (
                             <div style={{ marginBottom: '0.75rem' }}>
                               <strong>Consum zilnic:</strong>
