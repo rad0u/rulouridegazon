@@ -47,6 +47,29 @@
 // `MAX_PLAUSIBLE_CONSUM_L_PE_ORA` rămâne definit doar ca referință istorică
 // în cod, dar nu mai e folosit nicăieri în calcul.
 //
+// v13, 2026-09-23 (Radu a semnalat: Belarus 1523.3, 19 sept, "0.3h / 69.5L /
+// 231.7 L/h" -- cifră absurdă) -- BUG DE ATRIBUIRE PE ZI, nu problemă de
+// senzor: un interval extremă-la-extremă poate acoperi mai multe zile (gol
+// de date, senzor "înțepenit" ore în șir etc.); `consumZilnic` punea TOT
+// consumul intervalului pe ziua lui de ÎNCEPUT, în timp ce orele de
+// funcționare erau (corect) distribuite zi cu zi din citirile brute -- de aici
+// un raport L/h absurd pe ziua de start, chiar dacă media ponderată pe toată
+// perioada rămânea corectă (aceleași litri, aceleași ore, doar pe zile
+// greșite). Fix: `consumZilnic` distribuie acum scăderea fiecărui interval
+// PROPORȚIONAL cu orele de funcționare ale fiecărei zile ÎN ACEL interval
+// (vezi `oreDeFunctionarePeZiIntreIndici`) -- o zi fără nicio oră de
+// funcționare în interval nu mai primește nimic din consum. Verificat pe
+// cazul semnalat: 19 septembrie scade de la 69.5L/231.7 L/h la ~3L/~12 L/h,
+// iar cea mai mare parte a celor 69.5L se mută pe 21-22 septembrie, unde
+// utilajul chiar a funcționat ore în șir.
+//
+// Cu ocazia asta: `ziuaLocala` recrea `Intl.DateTimeFormat` la FIECARE apel
+// (construcție scumpă), deși se cheamă de mii de ori per cerere pe toată
+// flota -- suspectat drept contribuitor principal la erorile intermitente
+// "Eroare la încărcarea raportului" (CPU Time exceeded în logurile funcției,
+// ~2043ms folosiți dintr-un buget ~2000ms). Scos formatter-ul o singură dată
+// la nivel de modul -- comportament identic, mult mai ieftin de rulat.
+//
 // IMPORTANT: raportul are sens doar pentru utilajele CALIBRATE (cu
 // `tanc_capacitate_litri` completat în tabela `utilaje`) — pe utilajele
 // necalibrate, `nivel_litri` e o valoare brută a senzorului ("kvants"), nu
@@ -355,15 +378,38 @@ function oreDeFunctionareIntreIndici(
   return { ore, areDateOperare };
 }
 
+// Ca `oreDeFunctionareIntreIndici`, dar întoarce orele defalcate PE ZI LOCALĂ
+// în loc de un singur total -- folosit în `consumZilnic` (v13) ca să
+// distribuim proporțional consumul unui interval extremă-la-extremă pe zilele
+// pe care le acoperă efectiv, în loc să-l punem tot pe ziua lui de start.
+// Vezi nota v13 de sus.
+function oreDeFunctionarePeZiIntreIndici(rows: Citire[], idxStart: number, idxStop: number): Map<string, number> {
+  const oreInterval = new Map<string, number>();
+  for (let i = idxStart; i < idxStop; i++) {
+    const prev = rows[i];
+    const curr = rows[i + 1];
+    if (!intervalInFunctionare(prev, curr)) continue;
+    const deltaOre = (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;
+    if (deltaOre <= 0 || deltaOre > MAX_GAP_ORE) continue;
+    const zi = ziuaLocala(prev.data_ora);
+    oreInterval.set(zi, (oreInterval.get(zi) ?? 0) + deltaOre);
+  }
+  return oreInterval;
+}
+
 // Ziua locală (România), indiferent de fusul serverului — aceeași funcție ca
 // în get-utilaj-istoric-parcele.
+//
+// v13: formatter-ul e construit O SINGURĂ DATĂ la nivel de modul (nu la
+// fiecare apel) -- vezi nota v13 de sus.
+const FORMATTER_ZI_LOCALA = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Europe/Bucharest',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+});
 function ziuaLocala(dataIso: string): string {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Europe/Bucharest',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date(dataIso));
+  const parts = FORMATTER_ZI_LOCALA.formatToParts(new Date(dataIso));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
@@ -371,14 +417,30 @@ function ziuaLocala(dataIso: string): string {
 // Consum total (litri) + ore de funcționare, per zi locală, pentru un utilaj —
 // v12: fără steag roșu, vezi nota v12 de sus.
 function consumZilnic(rows: Citire[], extreme: CitireIndexata[]): ZiConsum[] {
+  // v13: vezi nota de sus -- distribuim scăderea fiecărui interval
+  // extremă-la-extremă PROPORȚIONAL cu orele de funcționare ale fiecărei zile
+  // ÎN ACEL interval, nu integral pe ziua lui de start. Fallback la
+  // comportamentul vechi (atribuire integrală pe ziua de start) doar dacă
+  // intervalul n-are deloc date de operare (nici contact, nici poziție).
   const consumPeZi = new Map<string, number>();
   for (let i = 1; i < extreme.length; i++) {
     const prev = extreme[i - 1].citire;
     const curr = extreme[i].citire;
     const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
     if (delta >= 0) continue; // doar scăderile sunt consum
-    const zi = ziuaLocala(prev.data_ora);
-    consumPeZi.set(zi, (consumPeZi.get(zi) ?? 0) + Math.abs(delta));
+    const consumAbsolut = Math.abs(delta);
+
+    const oreInterval = oreDeFunctionarePeZiIntreIndici(rows, extreme[i - 1].index, extreme[i].index);
+    const totalOreInterval = Array.from(oreInterval.values()).reduce((a, b) => a + b, 0);
+
+    if (totalOreInterval > 0) {
+      for (const [zi, ore] of oreInterval) {
+        consumPeZi.set(zi, (consumPeZi.get(zi) ?? 0) + (consumAbsolut * ore) / totalOreInterval);
+      }
+    } else {
+      const zi = ziuaLocala(prev.data_ora);
+      consumPeZi.set(zi, (consumPeZi.get(zi) ?? 0) + consumAbsolut);
+    }
   }
 
   const orePeZi = new Map<string, number>();

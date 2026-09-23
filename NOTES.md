@@ -1163,6 +1163,45 @@ adunate, se decide un prag de plauzibilitate calibrat pe consumul mediu
 ponderat real al fiecărui utilaj — posibil diferit per utilaj, nu un singur
 prag fix pentru toată flota.
 
+### 5ae. get-combustibil-report v13 — bug de atribuire pe zi + optimizare CPU (2026-09-23)
+Radu a semnalat un caz absurd în raport: utilajul Belarus 1523.3 0227
+(Săbăreni) apărea pe 19 septembrie cu „0.3h funcționare, 69.5L consum,
+231.7 L/h" — evident imposibil pentru un motor Diesel.
+
+**Root cause (confirmat prin reconstrucție Python bit-cu-bit a algoritmului
+v12, pe datele brute din `combustibil_citiri`)**: NU e o problemă de senzor.
+E un bug de ATRIBUIRE PE ZI. Un interval extremă-la-extremă poate acoperi mai
+multe zile (gol de date, senzor „înțepenit" ore în șir etc.) — în cazul
+semnalat, o scădere de -69.5L s-a întins din 19 septembrie 14:38 (ora
+României) până în 22 septembrie 08:40. `consumZilnic` (v12) punea TOT
+consumul intervalului pe ziua lui de ÎNCEPUT (19 sept), în timp ce orele de
+funcționare erau (corect) distribuite zi cu zi din citirile brute — pe 19
+sept au căzut doar 0.3h din cele 6.5h ale intervalului, restul pe 21-22 sept,
+unde utilajul chiar a lucrat ore în șir. De-aici raportul absurd de 231.7 L/h
+pe o zi cu aproape zero activitate.
+
+Important: **media ponderată pe toată perioada NU era afectată** (aceiași
+litri, aceleași ore, doar atribuite pe zile greșite în tabelul zilnic) — doar
+detalierea pe zi arăta greșit.
+
+**Fix (v13)**: `consumZilnic` distribuie acum scăderea fiecărui interval
+PROPORȚIONAL cu orele de funcționare ale fiecărei zile ÎN ACEL interval (nu
+mai integral pe ziua de start). O zi fără nicio oră de funcționare în
+interval nu mai primește nimic din consum. Verificat pe cazul semnalat: 19
+septembrie scade de la 69.5L/231.7 L/h la ~3L/~12 L/h, iar cea mai mare parte
+din cele 69.5L se mută pe 21-22 septembrie.
+
+**Bonus găsit în aceeași investigație — bug de disponibilitate**: în logurile
+funcției (`mcp__Supabase__query_logs`, `source = 'function_logs'`) apăreau
+erori intermitente `"CPU Time exceeded"` (~2043ms folosiți dintr-un buget
+~2000ms), cauzând răspunsuri HTTP 546 și mesajul generic „Eroare la
+încărcarea raportului." văzut de Radu prin screenshot. Suspect principal:
+`ziuaLocala()` recrea `Intl.DateTimeFormat` (construcție scumpă) la FIECARE
+apel, deși se cheamă de mii de ori per cerere, pe toată flota calibrată.
+Scos formatter-ul o singură dată la nivel de modul (v13) — comportament
+identic, mult mai ieftin de rulat. Neconfirmat 100% ca soluție completă —
+de urmărit dacă mai reapare eroarea.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
