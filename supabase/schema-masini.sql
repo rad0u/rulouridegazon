@@ -244,6 +244,25 @@ DROP POLICY IF EXISTS "admin_ferma sterge bonurile proprii" ON public.bonuri_com
 CREATE POLICY "admin_ferma sterge bonurile proprii" ON public.bonuri_combustibil_masini
 FOR DELETE USING (auth.role() = 'authenticated' AND introdus_de = auth.uid());
 
+-- ─────────────────────────────────────────────────────────────────────────
+-- Adrese pe curse + coordonate de pornire (2026-09-23, Radu) — inspirat de
+-- raportul AROBS Track GPS atașat ca referință pentru foaia de parcurs.
+-- adresa_pornire/adresa_sosire sunt completate o singură dată per capăt de
+-- cursă, de sync-traccar-masini, via geocodare inversă Nominatim
+-- (OpenStreetMap) — vezi acel fișier pentru detalii. latitudine_start/
+-- longitudine_start rețin coordonatele de pornire ale unei curse ÎNCĂ
+-- deschise, ca sync-traccar-masini să poată geocoda adresa de plecare fără
+-- să recitească tot lanțul de poziții la fiecare rulare de cron.
+--
+-- APLICATE deja direct în Supabase prin migrațiile
+-- "curse_adresa_pornire_sosire" și "curse_coordonate_start".
+-- ─────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE public.curse ADD COLUMN IF NOT EXISTS adresa_pornire text;
+ALTER TABLE public.curse ADD COLUMN IF NOT EXISTS adresa_sosire text;
+ALTER TABLE public.curse ADD COLUMN IF NOT EXISTS latitudine_start numeric;
+ALTER TABLE public.curse ADD COLUMN IF NOT EXISTS longitudine_start numeric;
+
 -- 2026-08-31: decizie — nu se creează conturi cu rol Șofer (foaia de parcurs
 -- e doar acoperire ANAF pentru cheltuiala cu combustibilul, nu justifică
 -- overhead-ul de conturi separate per șofer). În loc de asta, admin_ferma

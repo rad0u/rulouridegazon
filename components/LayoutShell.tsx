@@ -163,25 +163,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                   )}
 
                   {(role === 'admin_central' || role === 'admin_ferma') && (
-                    <>
-                      <div style={sectionHeaderStyle}>Flotă auto</div>
-                      <Link href="/masini" style={navLinkStyle} onClick={closeMenu}>
-                        Mașini
-                      </Link>
-                      <Link href="/curse" style={navLinkStyle} onClick={closeMenu}>
-                        Curse
-                      </Link>
-                      {role === 'admin_central' && (
-                        <>
-                          <Link href="/foi-parcurs" style={navLinkStyle} onClick={closeMenu}>
-                            Foi de parcurs
-                          </Link>
-                          <Link href="/alerte" style={navLinkStyle} onClick={closeMenu}>
-                            Alerte
-                          </Link>
-                        </>
-                      )}
-                    </>
+                    // 2026-09-23: legăturile individuale (Mașini/Curse/Foi de
+                    // parcurs/Alerte/Zone) s-au mutat pe pagina de start
+                    // dedicată /flota-auto (carduri) — cerința lui Radu de a
+                    // separa clar flota de mașini de utilaje în navigare.
+                    <Link href="/flota-auto" style={navLinkStyle} onClick={closeMenu}>
+                      Flotă auto
+                    </Link>
                   )}
 
                   {(role === 'admin_central' || role === 'admin_ferma') && (
@@ -216,9 +204,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                       <div style={sectionHeaderStyle}>Administrare</div>
                       <Link href="/utilizatori" style={navLinkStyle} onClick={closeMenu}>
                         Utilizatori
-                      </Link>
-                      <Link href="/geofences" style={navLinkStyle} onClick={closeMenu}>
-                        Zone
                       </Link>
                       <Link href="/jurnal-activitate" style={navLinkStyle} onClick={closeMenu}>
                         Jurnal de activitate

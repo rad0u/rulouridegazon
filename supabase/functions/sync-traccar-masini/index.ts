@@ -18,6 +18,23 @@
 // Secrete necesare (aceleași ca sync-traccar-fuel): TRACCAR_URL, TRACCAR_USER,
 // TRACCAR_PASSWORD.
 //
+// v2, 2026-09-23 (Radu) -- ADRESE PE FOAIA DE PARCURS: Radu a atașat un
+// raport "Foaie de parcurs" de la firma care monitoriza flota înainte
+// (AROBS Track GPS), ca inspirație pentru raportul din aplicație -- arată
+// adresă completă (stradă, localitate) la plecare/sosire pentru fiecare
+// cursă, nu doar coordonate. Adăugat: la momentul în care o cursă se START-ează
+// (INSERT) și la momentul în care se ÎNCHIDE prima dată (data_ora_stop trece
+// din NULL în nenul), se face o geocodare INVERSĂ (coordonate -> adresă text)
+// prin Nominatim (OpenStreetMap, gratuit) și se salvează în `curse.adresa_pornire`
+// / `curse.adresa_sosire`. Se face O SINGURĂ DATĂ per capăt de cursă (nu la
+// fiecare rulare de cron cât cursa e încă deschisă) -- rezultatul rămâne
+// stocat, raportul de foaie de parcurs doar îl citește, nu recalculează.
+// Respectă politica de utilizare Nominatim (max ~1 cerere/secundă, User-Agent
+// obligatoriu) -- volumul e mic (câteva curse noi finalizate per rulare de 5
+// min, pe o flotă de câteva mașini), deci throttling-ul e neglijabil ca timp.
+// Eșec de geocodare (rețea, adresă negăsită) -> NULL, nu blochează salvarea
+// cursei; foaia de parcurs arată "—" în acel caz.
+//
 // DEPLOYAT deja direct în Supabase (verify_jwt: false, la fel ca
 // sync-traccar-fuel) — acest fișier e copia sursă de adevăr.
 
@@ -64,6 +81,47 @@ function pointInRing(lon: number, lat: number, ring: number[][]): boolean {
     if (intersect) inside = !inside;
   }
   return inside;
+}
+
+// v2: geocodare inversă via Nominatim (OpenStreetMap) — vezi nota v2 de sus.
+// Throttling la nivel de modul (o singură instanță per rulare de cron), ca
+// să respectăm limita Nominatim de ~1 cerere/secundă indiferent de câte
+// mașini/curse se procesează în aceeași rulare.
+const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse';
+let ultimaCerereGeocodareMs = 0;
+async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
+  const acum = Date.now();
+  const asteapta = 1100 - (acum - ultimaCerereGeocodareMs);
+  if (asteapta > 0) await new Promise((r) => setTimeout(r, asteapta));
+  ultimaCerereGeocodareMs = Date.now();
+
+  try {
+    const url = `${NOMINATIM_URL}?format=jsonv2&lat=${lat}&lon=${lon}&zoom=17&addressdetails=1`;
+    const res = await fetch(url, {
+      headers: {
+        // Nominatim cere un User-Agent care identifică aplicația (nu cel
+        // implicit generic al fetch) — vezi politica lor de utilizare.
+        'User-Agent': 'RulouriDeGazon-FlotaAuto/1.0 (radu.dragulinescu@me.com)',
+      },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    const a = (json?.address ?? {}) as Record<string, string>;
+    const strada = a.road ?? a.pedestrian ?? a.footway ?? a.residential ?? null;
+    const numar = a.house_number ?? null;
+    const localitate = a.city ?? a.town ?? a.village ?? a.municipality ?? a.suburb ?? null;
+    const judet = a.county ?? null;
+
+    const parti: string[] = [];
+    if (strada) parti.push(numar ? `${strada} ${numar}` : strada);
+    if (localitate) parti.push(localitate);
+    else if (judet) parti.push(judet);
+
+    if (parti.length === 0) return typeof json?.display_name === 'string' ? json.display_name : null;
+    return parti.join(', ');
+  } catch {
+    return null;
+  }
 }
 
 interface TraccarPosition {
@@ -233,7 +291,7 @@ Deno.serve(async () => {
     // --- Detectare curse ---
     const { data: openCurseRaw } = await supabase
       .from('curse')
-      .select('data_ora_start, km')
+      .select('data_ora_start, km, latitudine_start, longitudine_start')
       .eq('masina_id', masina.id)
       .is('data_ora_stop', null)
       .order('data_ora_start', { ascending: false })
@@ -242,9 +300,23 @@ Deno.serve(async () => {
 
     let curStart: string | null = openCurseRaw?.data_ora_start ?? null;
     let curKm: number = openCurseRaw?.km ?? 0;
+    // v2: coordonatele capătului de plecare al cursei deschise, dacă exista
+    // deja una — necesare doar ca fallback (normal, adresa de plecare a fost
+    // deja geocodată la INSERT-ul inițial); dacă lipsesc (rânduri foarte
+    // vechi fără aceste coloane), rămân null și pur și simplu nu recalculăm.
+    let curStartLat: number | null = (openCurseRaw as any)?.latitudine_start ?? null;
+    let curStartLon: number | null = (openCurseRaw as any)?.longitudine_start ?? null;
     let curseSalvate = 0;
 
-    async function salveazaSegment(dataStart: string, dataStop: string | null, km: number) {
+    async function salveazaSegment(
+      dataStart: string,
+      latStart: number | null,
+      lonStart: number | null,
+      dataStop: string | null,
+      latStop: number | null,
+      lonStop: number | null,
+      km: number,
+    ) {
       if (dataStop) {
         const durataSec = (new Date(dataStop).getTime() - new Date(dataStart).getTime()) / 1000;
         if (durataSec < MIN_DURATA_SECUNDE && km < MIN_KM) {
@@ -255,17 +327,29 @@ Deno.serve(async () => {
       }
       const { data: existent } = await supabase
         .from('curse')
-        .select('id, sofer_id')
+        .select('id, sofer_id, adresa_pornire')
         .eq('masina_id', masina.id)
         .eq('data_ora_start', dataStart)
         .maybeSingle();
 
       if (existent) {
-        await supabase
-          .from('curse')
-          .update({ data_ora_stop: dataStop, km: Math.round(km * 100) / 100 })
-          .eq('id', existent.id);
+        const update: Record<string, unknown> = { data_ora_stop: dataStop, km: Math.round(km * 100) / 100 };
+        // v2: geocodăm adresa de sosire o singură dată — exact la momentul
+        // în care cursa asta se închide prima dată acum (nu la fiecare
+        // update ulterior, care ar fi doar km recalculat pe o cursă deja
+        // închisă — asta nu se întâmplă în fluxul curent, dar verificăm
+        // oricum ca să nu geocodăm de două ori).
+        if (dataStop && latStop != null && lonStop != null) {
+          update.adresa_sosire = await reverseGeocode(latStop, lonStop);
+        }
+        if (!existent.adresa_pornire && latStart != null && lonStart != null) {
+          update.adresa_pornire = await reverseGeocode(latStart, lonStart);
+        }
+        await supabase.from('curse').update(update).eq('id', existent.id);
       } else {
+        const adresaPornire = latStart != null && lonStart != null ? await reverseGeocode(latStart, lonStart) : null;
+        const adresaSosire =
+          dataStop && latStop != null && lonStop != null ? await reverseGeocode(latStop, lonStop) : null;
         await supabase.from('curse').insert({
           masina_id: masina.id,
           sofer_id: masina.sofer_implicit_id,
@@ -273,6 +357,10 @@ Deno.serve(async () => {
           data_ora_stop: dataStop,
           km: Math.round(km * 100) / 100,
           status: 'detectata',
+          latitudine_start: latStart,
+          longitudine_start: lonStart,
+          adresa_pornire: adresaPornire,
+          adresa_sosire: adresaSosire,
         });
         curseSalvate++;
       }
@@ -286,28 +374,37 @@ Deno.serve(async () => {
       const intervalContinuu = gapOre > 0 && gapOre <= MAX_GAP_ORE;
 
       if (aEraPornit && intervalContinuu) {
-        if (curStart === null) curStart = a.data_ora;
+        if (curStart === null) {
+          curStart = a.data_ora;
+          curStartLat = a.latitudine;
+          curStartLon = a.longitudine;
+        }
         curKm += distantaMetri(a.latitudine, a.longitudine, b.latitudine, b.longitudine) / 1000;
       } else if (aEraPornit && !intervalContinuu) {
         // Gol prea mare cât timp mergea — închide cursa la ultima poziție bună (a).
         if (curStart !== null) {
-          await salveazaSegment(curStart, a.data_ora, curKm);
+          await salveazaSegment(curStart, curStartLat, curStartLon, a.data_ora, a.latitudine, a.longitudine, curKm);
           curStart = null;
+          curStartLat = null;
+          curStartLon = null;
           curKm = 0;
         }
       }
 
       if (b.contact !== true && curStart !== null) {
         // Contactul s-a oprit — închide cursa la poziția curentă (b).
-        await salveazaSegment(curStart, b.data_ora, curKm);
+        await salveazaSegment(curStart, curStartLat, curStartLon, b.data_ora, b.latitudine, b.longitudine, curKm);
         curStart = null;
+        curStartLat = null;
+        curStartLon = null;
         curKm = 0;
       }
     }
 
     if (curStart !== null) {
-      // Cursă încă în desfășurare — salvează progresul, fără dată de stop.
-      await salveazaSegment(curStart, null, curKm);
+      // Cursă încă în desfășurare — salvează progresul, fără dată de stop
+      // (deci fără geocodare de sosire încă).
+      await salveazaSegment(curStart, curStartLat, curStartLon, null, null, null, curKm);
     }
     perMasina[masina.id].curse = curseSalvate;
 

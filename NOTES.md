@@ -1308,6 +1308,67 @@ direct în Supabase fără să ajungă și în repo. Commit-ul de acum include a
 codul v14 lipsă din git, cât și fix-ul v15 de mai sus, ca să rămână
 sincronizate.
 
+### Foi de parcurs redesenate + separare navigare flotă/utilaje (2026-09-23)
+
+Radu a atașat raportul PDF „Foaie de parcurs" al firmei care monitoriza
+flota auto înainte de a trece pe aplicația proprie (AROBS Track GPS), ca
+inspirație, și a cerut (1) o separare clară în navigare/UI între flota de
+mașini și utilaje, și (2) un raport de foaie de parcurs mai bun — fie ca cel
+AROBS, fie o propunere proprie.
+
+**Decizii confirmate de Radu** (3 întrebări):
+- Adrese pe traseu: DA, via geocodare gratuită (Nominatim/OpenStreetMap).
+- Rezumat flotă: DA — pagină de rezumat lunar (toate mașinile) + detaliu
+  per mașină (ca înainte).
+- Separare navigare: pagină proprie „Flotă auto" cu carduri, nu meniu
+  expandat.
+
+**Adrese pe traseu — `sync-traccar-masini` v2**: la momentul în care o
+cursă pornește (INSERT) și la momentul în care se închide prima dată
+(`data_ora_stop` trece din NULL în nenul), se face o geocodare INVERSĂ
+(coordonate → adresă text) prin Nominatim (gratuit, OpenStreetMap) și se
+salvează în `curse.adresa_pornire` / `curse.adresa_sosire`. O singură dată
+per capăt de cursă, nu recalculat la fiecare rulare de cron cât cursa e
+încă deschisă. Respectă politica de utilizare Nominatim (~1 cerere/secundă,
+User-Agent obligatoriu) — volum mic (câteva curse finalizate per rulare de
+5 min), deci throttling-ul e neglijabil. Eșec de geocodare → NULL, nu
+blochează salvarea cursei; UI arată „—". Coloane noi pe `curse`:
+`adresa_pornire`, `adresa_sosire` text, plus `latitudine_start`/
+`longitudine_start` numeric (rețin capătul de plecare al unei curse încă
+deschise, ca funcția să nu recitească tot lanțul de poziții la fiecare
+rulare doar ca să afle unde a pornit).
+
+**„Km cumulat"**: pe foaia de parcurs detaliată (`get-foaie-parcurs` v2),
+fiecare cursă arată acum și suma GPS a tuturor curselor mașinii de la
+începutul monitorizării, până la și inclusiv cursa respectivă. Explicit
+NU e un odometru real — n-avem integrare hardware pentru asta — e un reper
+relativ, calculat strict din traseele GPS. Etichetat clar așa în UI.
+
+**Rezumat flotă — funcție nouă `get-rezumat-flota`**: un rând per mașină
+activă (nume, nr. înmatriculare, total km, număr curse, număr nevalidate)
+pentru luna cerută. Devine ecranul implicit al paginii `/foi-parcurs`;
+„Vezi foaia de parcurs" pe un rând trece la foaia detaliată a mașinii
+respective (fost singurul mod de a vedea raportul).
+
+**Separare navigare — pagină `/flota-auto`**: pagină de start cu carduri
+(Mașini, Curse, Foi de parcurs, Alerte, Zone), rol-aware — admin_ferma vede
+doar Mașini + Curse (ca și înainte), admin_central vede tot. În
+`LayoutShell.tsx`, secțiunea „Flotă auto" din meniu (care avea legături
+individuale către Mașini/Curse/Foi de parcurs/Alerte) devine un singur link
+către `/flota-auto`. Legătura separată „Zone" din secțiunea „Administrare"
+a fost eliminată din meniu — Zone (geofences) e fleet-specific (folosit
+doar pentru alertele mașinilor), acum accesibil doar prin cardul din
+`/flota-auto` (admin_central).
+
+**Migrații aplicate live** (`curse_adresa_pornire_sosire`,
+`curse_coordonate_start`): adaugă cele 4 coloane de mai sus pe `curse`. La
+momentul aplicării, tabelul `curse` era complet gol (0 rânduri) — nu a fost
+nevoie de backfill.
+
+**Funcții deployate**: `sync-traccar-masini` v2, `get-foaie-parcurs` v2,
+`get-rezumat-flota` (nouă) — toate verificate cu `get_edge_function` după
+deploy, conținutul livrat corespunde exact cu sursa intenționată.
+
 ### Flotă auto (mașini de pasageri) — modul complet construit (2026-08-27)
 Scop: doar foi de parcurs (trip logs) + geofencing/alerte viteză, fără
 monitorizare combustibil, fără abonament la alt provider GPS — reutilizează
