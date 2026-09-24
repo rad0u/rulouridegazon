@@ -75,6 +75,21 @@
 // get-combustibil-report / get-rezervor-central-miscari). Parametrul `zile`
 // rămâne acceptat ca fallback (compatibilitate), dar front-end-ul nou trimite
 // întotdeauna `de_la`/`pana_la`.
+//
+// v5, 2026-09-24 (Radu): "la fiecare utilaj/parcela sa fie scrise si
+// totalizate toate orele [...], si sa apara utilajul/parcela o singura
+// data [...] In final ma intereseaza cata motorina a consumat utilajul
+// respectiv in parcela pe ziua respectiva" — gruparea vizuală (utilaj +
+// parcelă + zi, o singură dată, cu totalul orelor și detaliul sesiunilor
+// dedesubt) se face în front-end (ActivitatiParceleScreen.tsx), dar consumul
+// de motorină per sesiune se calculează AICI, pe server, cu exact bilanțul de
+// masă din get-combustibil-parcele (nivelul senzorului la începutul sesiunii
+// minus la sfârșit, plus realimentările confirmate din acel interval) —
+// reutilizează aceleași citiri deja aduse pentru detecția GPS (se adaugă doar
+// `nivel_litri` la select, fără interogare suplimentară). Fiecare sesiune
+// întoarsă capătă `litri_combustibil: number | null` (null = utilaj
+// necalibrat, fără `tanc_capacitate_litri`); front-end-ul le însumează pe
+// grup pentru totalul cerut de Radu.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -95,12 +110,19 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-// Aceleași convenții ca get-utilaj-istoric-parcele / get-combustibil-report.
+// Aceleași convenții ca get-utilaj-istoric-parcele / get-combustibil-report /
+// get-combustibil-parcele.
 const MAX_GAP_ORE = 1;
 const PRAG_MINIM_MINUTE = 10;
 // v2: prag de mișcare GPS pentru fallback-ul la semnalul de contact nesigur
 // — identic cu PRAG_MISCARE_METRI din get-combustibil-report v11.
 const PRAG_MISCARE_METRI = 20;
+// v5: praguri de curățare a zgomotului de senzor pentru nivelul de
+// combustibil — identice cu get-combustibil-parcele / get-combustibil-report.
+const PRAG_MINIM_EVENIMENT_L = 15;
+const TOLERANTA_CAPACITATE = 1.05;
+const PRAG_ZGOMOT_L = 5;
+const FEREASTRA_REVENIRE_MINUTE = 15;
 
 const RO_LAT_MIN = 42;
 const RO_LAT_MAX = 50;
@@ -136,6 +158,27 @@ interface Citire {
   latitudine: number | null;
   longitudine: number | null;
   contact: boolean | null;
+  nivel_litri: number | null;
+}
+
+// v5: citire "de combustibil" — aceeași formă ca în get-combustibil-parcele,
+// unde nivel_litri e mereu garantat non-null (filtrat înainte de curățare).
+interface CitireCombustibil {
+  data_ora: string;
+  nivel_litri: number;
+  contact: boolean | null;
+  latitudine: number | null;
+  longitudine: number | null;
+}
+
+interface CitireIndexata {
+  citire: CitireCombustibil;
+  index: number;
+}
+
+interface Eveniment {
+  data_ora: string;
+  delta_litri: number;
 }
 
 interface ParcelaRaw {
@@ -200,6 +243,138 @@ function intervalInFunctionare(prev: Citire, curr: Citire): boolean {
   return distantaMetri(prev.latitudine, prev.longitudine, curr.latitudine, curr.longitudine) >= PRAG_MISCARE_METRI;
 }
 
+// v5: curățarea zgomotului de senzor pe nivelul de combustibil — identică cu
+// get-combustibil-parcele / get-combustibil-report.
+function filtreazaCitiriPlauzibile(rows: CitireCombustibil[], capacitate: number): CitireCombustibil[] {
+  const prag = capacitate * TOLERANTA_CAPACITATE;
+  return rows.filter((r) => r.nivel_litri >= 0 && r.nivel_litri <= prag);
+}
+
+function eliminaFluctuatiiTranzitorii(rows: CitireCombustibil[]): CitireCombustibil[] {
+  if (rows.length === 0) return [];
+  const rezultat: CitireCombustibil[] = [rows[0]];
+  let i = 1;
+  while (i < rows.length) {
+    const ancora = rezultat[rezultat.length - 1];
+    const r = rows[i];
+    const diff = Math.abs(r.nivel_litri - ancora.nivel_litri);
+
+    if (diff < PRAG_MINIM_EVENIMENT_L) {
+      rezultat.push(r);
+      i++;
+      continue;
+    }
+
+    let j = i;
+    let gasitRevenire = -1;
+    while (j < rows.length) {
+      const minute = (new Date(rows[j].data_ora).getTime() - new Date(ancora.data_ora).getTime()) / 60_000;
+      if (minute > FEREASTRA_REVENIRE_MINUTE) break;
+      if (Math.abs(rows[j].nivel_litri - ancora.nivel_litri) < PRAG_MINIM_EVENIMENT_L) {
+        gasitRevenire = j;
+        break;
+      }
+      j++;
+    }
+
+    if (gasitRevenire >= 0) {
+      i = gasitRevenire;
+      continue;
+    }
+
+    rezultat.push(r);
+    i++;
+  }
+  return rezultat;
+}
+
+function extrageExtreme(rows: CitireCombustibil[]): CitireIndexata[] {
+  if (rows.length === 0) return [];
+
+  const extreme: CitireIndexata[] = [{ citire: rows[0], index: 0 }];
+  let directie = 0;
+  let candidat: CitireIndexata = { citire: rows[0], index: 0 };
+
+  for (let i = 1; i < rows.length; i++) {
+    const r = rows[i];
+
+    if (directie === 0) {
+      const delta = r.nivel_litri - extreme[0].citire.nivel_litri;
+      if (Math.abs(delta) < PRAG_ZGOMOT_L) continue;
+      directie = delta > 0 ? 1 : -1;
+      candidat = { citire: r, index: i };
+      continue;
+    }
+
+    if (directie === 1) {
+      if (r.nivel_litri >= candidat.citire.nivel_litri) {
+        candidat = { citire: r, index: i };
+      } else if (candidat.citire.nivel_litri - r.nivel_litri >= PRAG_ZGOMOT_L) {
+        extreme.push(candidat);
+        directie = -1;
+        candidat = { citire: r, index: i };
+      }
+    } else {
+      if (r.nivel_litri <= candidat.citire.nivel_litri) {
+        candidat = { citire: r, index: i };
+      } else if (r.nivel_litri - candidat.citire.nivel_litri >= PRAG_ZGOMOT_L) {
+        extreme.push(candidat);
+        directie = 1;
+        candidat = { citire: r, index: i };
+      }
+    }
+  }
+
+  if (candidat.index !== extreme[extreme.length - 1].index) {
+    extreme.push(candidat);
+  }
+
+  return extreme;
+}
+
+// v5: nivelul (litri) cel mai apropiat de un moment dat, dintr-o serie de
+// citiri CURĂȚATE, sortată crescător — identic cu get-combustibil-parcele.
+function nivelLaMoment(rows: CitireCombustibil[], momentIso: string): number | null {
+  if (rows.length === 0) return null;
+  const momentMs = new Date(momentIso).getTime();
+  let rezultat: CitireCombustibil | null = null;
+  for (const r of rows) {
+    if (new Date(r.data_ora).getTime() <= momentMs) {
+      rezultat = r;
+    } else {
+      break;
+    }
+  }
+  return rezultat ? rezultat.nivel_litri : rows[0].nivel_litri;
+}
+
+function sumaRealimentariInInterval(realimentari: Eveniment[], startIso: string, endIso: string): number {
+  const startMs = new Date(startIso).getTime();
+  const endMs = new Date(endIso).getTime();
+  let suma = 0;
+  for (const e of realimentari) {
+    const ms = new Date(e.data_ora).getTime();
+    if (ms > startMs && ms <= endMs) suma += e.delta_litri;
+  }
+  return suma;
+}
+
+// v5: consumul (bilanț de masă) al UNEI sesiuni GPS — nivelul la începutul
+// sesiunii minus nivelul la sfârșit, plus realimentările confirmate din
+// exact acel interval. Identic cu consumSesiune din get-combustibil-parcele.
+function consumSesiune(
+  rows: CitireCombustibil[],
+  realimentari: Eveniment[],
+  startIso: string,
+  endIso: string,
+): number | null {
+  const nivelStart = nivelLaMoment(rows, startIso);
+  const nivelEnd = nivelLaMoment(rows, endIso);
+  if (nivelStart === null || nivelEnd === null) return null;
+  const realimentatInterval = sumaRealimentariInInterval(realimentari, startIso, endIso);
+  return Math.max(0, nivelStart - nivelEnd + realimentatInterval);
+}
+
 // Vezi get-utilaj-istoric-parcele/index.ts pentru raționamentul complet:
 // Supabase trunchiază implicit un .select() la 1000 de rânduri.
 const PAGE_SIZE = 1000;
@@ -228,6 +403,7 @@ interface Sesiune {
   inceput: string;
   sfarsit: string;
   ore: number;
+  litri_combustibil: number | null;
 }
 
 Deno.serve(async (req) => {
@@ -315,7 +491,7 @@ Deno.serve(async (req) => {
 
   const { data: utilajeRaw, error: utilajeError } = await adminClient
     .from('utilaje')
-    .select('id, nume, este_utilaj_recoltare')
+    .select('id, nume, este_utilaj_recoltare, tanc_capacitate_litri')
     .eq('ferma_id', fermaId)
     .eq('activ', true);
 
@@ -323,7 +499,12 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: `Eroare la citirea utilajelor: ${utilajeError.message}` }, 500);
   }
 
-  const utilaje = (utilajeRaw ?? []) as { id: string; nume: string; este_utilaj_recoltare: boolean }[];
+  const utilaje = (utilajeRaw ?? []) as {
+    id: string;
+    nume: string;
+    este_utilaj_recoltare: boolean;
+    tanc_capacitate_litri: number | null;
+  }[];
   if (utilaje.length === 0) {
     return jsonResponse({ de_la: deLaStr, pana_la: panaLaStr, ferma_id: fermaId, are_parcele_desenate: false, sesiuni: [] });
   }
@@ -372,10 +553,13 @@ Deno.serve(async (req) => {
   const sesiuni: Sesiune[] = [];
 
   for (const utilaj of utilaje) {
+    // v5: `nivel_litri` adăugat la select — aceleași rânduri, fără
+    // interogare suplimentară — folosit mai jos doar pentru utilajele
+    // calibrate, ca să calculăm consumul fiecărei sesiuni.
     const { data: citiri, error: citiriError } = await fetchToateRandurile((from, to) =>
       adminClient
         .from('combustibil_citiri')
-        .select('data_ora, latitudine, longitudine, contact')
+        .select('data_ora, latitudine, longitudine, contact, nivel_litri')
         .eq('utilaj_id', utilaj.id)
         .not('latitudine', 'is', null)
         .not('longitudine', 'is', null)
@@ -386,6 +570,28 @@ Deno.serve(async (req) => {
     );
 
     if (citiriError || citiri.length < 2) continue;
+
+    // v5: serie curățată de combustibil (doar rândurile cu nivel_litri
+    // completat) + realimentările detectate pe ea — calculate O SINGURĂ DATĂ
+    // per utilaj, apoi interogate per sesiune mai jos (consumSesiune).
+    const calibrat = typeof utilaj.tanc_capacitate_litri === 'number' && utilaj.tanc_capacitate_litri > 0;
+    let rowsCombustibil: CitireCombustibil[] = [];
+    let realimentari: Eveniment[] = [];
+    if (calibrat) {
+      const citiriCuNivel = citiri.filter((r): r is Citire & { nivel_litri: number } => r.nivel_litri !== null);
+      rowsCombustibil = eliminaFluctuatiiTranzitorii(
+        filtreazaCitiriPlauzibile(citiriCuNivel, utilaj.tanc_capacitate_litri as number),
+      );
+      const extreme = extrageExtreme(rowsCombustibil);
+      for (let i = 1; i < extreme.length; i++) {
+        const prev = extreme[i - 1].citire;
+        const curr = extreme[i].citire;
+        const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
+        if (delta >= PRAG_MINIM_EVENIMENT_L) {
+          realimentari.push({ data_ora: curr.data_ora, delta_litri: delta });
+        }
+      }
+    }
 
     const confirmate = confirmatePorUtilaj.get(utilaj.id) ?? [];
 
@@ -399,6 +605,9 @@ Deno.serve(async (req) => {
         const endMs = new Date(current.end).getTime();
         const seSuprapune = confirmate.some((c) => startMs < c.stop && endMs > c.start);
         if (!seSuprapune) {
+          const litriCombustibil = calibrat
+            ? consumSesiune(rowsCombustibil, realimentari, current.start, current.end)
+            : null;
           sesiuni.push({
             utilaj_id: utilaj.id,
             utilaj_nume: utilaj.nume,
@@ -408,6 +617,7 @@ Deno.serve(async (req) => {
             inceput: current.start,
             sfarsit: current.end,
             ore: Math.round((durataMinute / 60) * 10) / 10,
+            litri_combustibil: litriCombustibil !== null ? Math.round(litriCombustibil * 10) / 10 : null,
           });
         }
       }

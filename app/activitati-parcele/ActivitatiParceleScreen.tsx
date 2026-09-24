@@ -27,6 +27,30 @@ import { LABEL_OPERATIUNE, Substanta, TIPURI_CU_SUBSTANTE, TipOperatiune } from 
 // de timp manual, fara ultimile 3, 7, 14, etc" — dropdown-ul cu preseturi
 // (3/7/14/30 zile) e înlocuit cu două selectoare de dată (De la / Până la),
 // trimise ca `de_la`/`pana_la` către get-sesiuni-detectate (v4).
+//
+// v4, 2026-09-24 (Radu): "la fiecare utilaj/parcela sa fie scrise si
+// totalizate toate orele sau fractiile de ore din parcela respectiva, si sa
+// apara utilajul/parcela o singura data [...] In final ma intereseaza cata
+// motorina a consumat utilajul respectiv in parcela pe ziua respectiva" —
+// coada nu mai arată un card per sesiune GPS brută, ci GRUPEAZĂ sesiunile
+// după (utilaj, parcelă, zi locală): un singur card, cu totalul orelor și
+// totalul de motorină (litri) consumată de acel utilaj în acea parcelă în
+// acea zi, iar dedesubt — detaliat — fiecare sesiune individuală (interval
+// orar, ore, litri). Litrii per sesiune vin acum din get-sesiuni-detectate
+// (v5), care face același calcul de bilanț de masă ca la combustibilul
+// alocat pe parcele; un utilaj necalibrat (fără capacitate de tanc setată)
+// arată "—" în loc de litri.
+//
+// Confirmarea rămâne o singură acțiune PE GRUP (un singur formular: ore de
+// lucru / fertilizare+substanțe / mp recoltat / notă), dar salvează în
+// continuare CÂTE UN rând în `operatiuni` PENTRU FIECARE sesiune GPS din
+// grup — fiecare cu propriul sesiune_inceput/sesiune_sfarsit, ca să
+// funcționeze deduplicarea la interogările viitoare. Ca să nu se numere de
+// două ori orele/suprafața/substanțele în rapoarte, valorile din formular
+// (ore_lucru, cantitate_mp_recoltat, notă, substanțe) se atașează DOAR
+// primului rând din grup — celelalte rânduri au aceste câmpuri goale, dar
+// păstrează tip/dată/parcelă/utilaj identice, ca să apară corect oriunde se
+// listează operațiunile pe parcelă.
 
 type Sesiune = {
   utilaj_id: string;
@@ -37,6 +61,7 @@ type Sesiune = {
   inceput: string;
   sfarsit: string;
   ore: number;
+  litri_combustibil: number | null;
 };
 
 type Raport = {
@@ -80,7 +105,8 @@ function formatDataOra(dataIso: string): string {
 }
 
 // Ziua locală (România) în care a început sesiunea — folosită ca `data` la
-// operațiunea creată, indiferent de fusul serverului.
+// operațiunea creată, indiferent de fusul serverului, și ca al treilea
+// element al cheii de grupare (utilaj + parcelă + zi).
 function ziuaLocala(dataIso: string): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Bucharest',
@@ -90,6 +116,17 @@ function ziuaLocala(dataIso: string): string {
   }).formatToParts(new Date(dataIso));
   const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
   return `${get('year')}-${get('month')}-${get('day')}`;
+}
+
+// ziua: 'YYYY-MM-DD' (deja calculată ca zi locală RO) — afișată direct, fără
+// nicio conversie de fus suplimentară.
+function formatZiuaLocala(ziua: string): string {
+  const [an, luna, zi] = ziua.split('-').map(Number);
+  return new Date(an, luna - 1, zi).toLocaleDateString('ro-RO', { day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function formatLitri(litri: number | null): string {
+  return litri === null ? '—' : `${litri.toLocaleString('ro-RO', { maximumFractionDigits: 1 })} L`;
 }
 
 function oreLucruImplicit(ore: number): string {
@@ -107,6 +144,65 @@ function formGol(ore: number): FormSesiune {
     saving: false,
     error: null,
   };
+}
+
+// v4: un grup = toate sesiunile GPS ale aceluiași utilaj, în aceeași
+// parcelă, în aceeași zi locală — afișate ca un singur card, cu totaluri.
+type GrupSesiuni = {
+  cheie: string;
+  utilaj_id: string;
+  utilaj_nume: string;
+  utilaj_recoltare: boolean;
+  parcela_id: string;
+  parcela_nume: string;
+  ziua: string;
+  sesiuni: Sesiune[];
+  oreTotal: number;
+  litriTotal: number | null;
+};
+
+function cheieGrup(s: Sesiune): string {
+  return `${s.utilaj_id}_${s.parcela_id}_${ziuaLocala(s.inceput)}`;
+}
+
+function grupeazaSesiuni(sesiuni: Sesiune[]): GrupSesiuni[] {
+  const map = new Map<string, GrupSesiuni>();
+
+  for (const s of sesiuni) {
+    const cheie = cheieGrup(s);
+    let grup = map.get(cheie);
+    if (!grup) {
+      grup = {
+        cheie,
+        utilaj_id: s.utilaj_id,
+        utilaj_nume: s.utilaj_nume,
+        utilaj_recoltare: s.utilaj_recoltare,
+        parcela_id: s.parcela_id,
+        parcela_nume: s.parcela_nume,
+        ziua: ziuaLocala(s.inceput),
+        sesiuni: [],
+        oreTotal: 0,
+        litriTotal: null,
+      };
+      map.set(cheie, grup);
+    }
+    grup.sesiuni.push(s);
+    grup.oreTotal = Math.round((grup.oreTotal + s.ore) * 10) / 10;
+    if (s.litri_combustibil !== null) {
+      grup.litriTotal = Math.round(((grup.litriTotal ?? 0) + s.litri_combustibil) * 10) / 10;
+    }
+  }
+
+  const grupuri = Array.from(map.values());
+  for (const grup of grupuri) {
+    grup.sesiuni.sort((a, b) => (a.inceput < b.inceput ? -1 : 1));
+  }
+  // Cel mai recent grup primul (după ziua + ora primei sesiuni).
+  grupuri.sort((a, b) => {
+    if (a.ziua !== b.ziua) return a.ziua < b.ziua ? 1 : -1;
+    return a.sesiuni[0].inceput < b.sesiuni[0].inceput ? 1 : -1;
+  });
+  return grupuri;
 }
 
 export default function ActivitatiParceleScreen() {
@@ -202,13 +298,13 @@ export default function ActivitatiParceleScreen() {
       const raportNou = json as Raport;
       setRaport(raportNou);
 
-      // Formulare noi doar pentru sesiunile care nu au deja unul (păstrăm ce
+      // Formulare noi doar pentru grupurile care nu au deja unul (păstrăm ce
       // a completat admin-ul dacă apasă Reîncarcă din greșeală).
+      const grupuriNoi = grupeazaSesiuni(raportNou.sesiuni);
       setForms((prev) => {
         const next = { ...prev };
-        for (const s of raportNou.sesiuni) {
-          const cheie = cheieSesiune(s);
-          if (!next[cheie]) next[cheie] = formGol(s.ore);
+        for (const grup of grupuriNoi) {
+          if (!next[grup.cheie]) next[grup.cheie] = formGol(grup.oreTotal);
         }
         return next;
       });
@@ -259,8 +355,8 @@ export default function ActivitatiParceleScreen() {
     }));
   }
 
-  async function confirmaSesiune(sesiune: Sesiune) {
-    const cheie = cheieSesiune(sesiune);
+  async function confirmaGrup(grup: GrupSesiuni) {
+    const cheie = grup.cheie;
     const form = forms[cheie];
     if (!form) return;
 
@@ -276,10 +372,11 @@ export default function ActivitatiParceleScreen() {
     let tip: TipOperatiune;
     let cantitateMpRecoltat: number | null = null;
     let liniiValide: SubstantaLinie[] = [];
-    const needsSubstante = !sesiune.utilaj_recoltare && form.esteFertilizare;
+    const needsSubstante = !grup.utilaj_recoltare && form.esteFertilizare;
 
-    if (sesiune.utilaj_recoltare) {
-      // Utilaj de recoltare: nicio alegere de tip, doar suprafața recoltată.
+    if (grup.utilaj_recoltare) {
+      // Utilaj de recoltare: nicio alegere de tip, doar suprafața recoltată
+      // (pentru toată ziua/parcela, nu per sesiune GPS).
       const mp = form.cantitateMpRecoltat === '' ? NaN : Number(form.cantitateMpRecoltat);
       if (Number.isNaN(mp) || mp <= 0) {
         actualizeazaForm(cheie, { error: 'Introdu suprafața recoltată (mp), un număr pozitiv.' });
@@ -316,31 +413,33 @@ export default function ActivitatiParceleScreen() {
       data: { user },
     } = await supabase.auth.getUser();
 
-    const { data: opInsert, error: opError } = await supabase
-      .from('operatiuni')
-      .insert({
-        parcela_id: sesiune.parcela_id,
-        tip,
-        data: ziuaLocala(sesiune.inceput),
-        ore_lucru: oreNum,
-        cantitate_mp_recoltat: cantitateMpRecoltat,
-        note: form.note.trim() || null,
-        user_id: user?.id ?? null,
-        utilaj_id: sesiune.utilaj_id,
-        sesiune_inceput: sesiune.inceput,
-        sesiune_sfarsit: sesiune.sfarsit,
-      })
-      .select('id')
-      .single();
+    // Câte un rând per sesiune GPS din grup (pentru deduplicare viitoare —
+    // fiecare cu propriul interval), dar ore_lucru / mp recoltat / notă se
+    // pun DOAR pe primul rând, ca să nu se numere de două ori în rapoarte.
+    const randuri = grup.sesiuni.map((s, index) => ({
+      parcela_id: s.parcela_id,
+      tip,
+      data: ziuaLocala(s.inceput),
+      ore_lucru: index === 0 ? oreNum : null,
+      cantitate_mp_recoltat: index === 0 ? cantitateMpRecoltat : null,
+      note: index === 0 ? form.note.trim() || null : null,
+      user_id: user?.id ?? null,
+      utilaj_id: s.utilaj_id,
+      sesiune_inceput: s.inceput,
+      sesiune_sfarsit: s.sfarsit,
+    }));
 
-    if (opError || !opInsert) {
+    const { data: opInsert, error: opError } = await supabase.from('operatiuni').insert(randuri).select('id');
+
+    if (opError || !opInsert || opInsert.length === 0) {
       actualizeazaForm(cheie, { saving: false, error: opError?.message ?? 'Eroare la salvarea operațiunii.' });
       return;
     }
 
     if (needsSubstante && liniiValide.length > 0) {
+      const primaOperatiuneId = opInsert[0].id;
       const rows = liniiValide.map((l) => ({
-        operatiune_id: opInsert.id,
+        operatiune_id: primaOperatiuneId,
         substanta_id: l.substanta_id,
         cantitate: Number(l.cantitate),
       }));
@@ -355,7 +454,11 @@ export default function ActivitatiParceleScreen() {
     }
 
     actualizeazaForm(cheie, { saving: false });
-    setConfirmate((prev) => new Set(prev).add(cheie));
+    setConfirmate((prev) => {
+      const next = new Set(prev);
+      for (const s of grup.sesiuni) next.add(cheieSesiune(s));
+      return next;
+    });
 
     // Stocul poate să se fi schimbat (dacă alte ecrane au consumat între timp)
     // — reîncărcăm lista de substanțe pentru consistență cu ParcelaPanel.
@@ -388,6 +491,7 @@ export default function ActivitatiParceleScreen() {
   }
 
   const sesiuniDeAfisat = (raport?.sesiuni ?? []).filter((s) => !confirmate.has(cheieSesiune(s)));
+  const grupuriDeAfisat = grupeazaSesiuni(sesiuniDeAfisat);
 
   return (
     <main
@@ -455,10 +559,11 @@ export default function ActivitatiParceleScreen() {
 
       <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
         Aplicația detectează automat, din traseul GPS, unde a lucrat fiecare utilaj — nu mai trebuie să alegi
-        parcela. Pentru utilajele obișnuite, confirmă direct (bifează doar dacă a fost fertilizare, ca să alegi
-        substanța și cantitatea) — pentru utilajele de recoltare, introdu doar suprafața (mp) de gazon recoltată.
-        O sesiune apare aici doar după ce s-a încheiat (utilajul a plecat din parcelă sau a oprit motorul) și doar
-        dacă a durat peste 10 minute.
+        parcela. Fiecare utilaj/parcelă apare o singură dată pe zi, cu totalul orelor și al motorinei consumate;
+        sesiunile individuale sunt detaliate dedesubt. Pentru utilajele obișnuite, confirmă direct (bifează doar
+        dacă a fost fertilizare, ca să alegi substanța și cantitatea) — pentru utilajele de recoltare, introdu doar
+        suprafața (mp) de gazon recoltată. O sesiune apare aici doar după ce s-a încheiat (utilajul a plecat din
+        parcelă sau a oprit motorul) și doar dacă a durat peste 10 minute.
       </p>
 
       {role === 'admin_central' && !fermaSelectata && <p>Alege o fermă pentru a vedea activitățile detectate.</p>}
@@ -475,27 +580,37 @@ export default function ActivitatiParceleScreen() {
         </p>
       )}
 
-      {raport && raport.are_parcele_desenate && sesiuniDeAfisat.length === 0 && !loading && (
+      {raport && raport.are_parcele_desenate && grupuriDeAfisat.length === 0 && !loading && (
         <p style={{ color: '#666' }}>Nicio activitate nouă detectată în perioada aleasă.</p>
       )}
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', overflowY: 'auto' }}>
-        {sesiuniDeAfisat.map((sesiune) => {
-          const cheie = cheieSesiune(sesiune);
-          const form = forms[cheie] ?? formGol(sesiune.ore);
+        {grupuriDeAfisat.map((grup) => {
+          const cheie = grup.cheie;
+          const form = forms[cheie] ?? formGol(grup.oreTotal);
 
           return (
             <div key={cheie} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.6rem' }}>
                 <div>
-                  <strong>{sesiune.utilaj_nume}</strong> — parcela <strong>{sesiune.parcela_nume}</strong>
-                  {sesiune.utilaj_recoltare && (
+                  <strong>{grup.utilaj_nume}</strong> — parcela <strong>{grup.parcela_nume}</strong>
+                  {grup.utilaj_recoltare && (
                     <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#8a5a00' }}>utilaj de recoltare</span>
                   )}
                   <div style={{ fontSize: '0.85rem', color: '#666' }}>
-                    {formatDataOra(sesiune.inceput)}, {formatOra(sesiune.inceput)}–{formatOra(sesiune.sfarsit)} ·{' '}
-                    {sesiune.ore}h
+                    {formatZiuaLocala(grup.ziua)} · total <strong>{grup.oreTotal}h</strong> · motorină{' '}
+                    <strong>{formatLitri(grup.litriTotal)}</strong>
+                    {grup.sesiuni.length > 1 ? ` · ${grup.sesiuni.length} intrări în parcelă` : ''}
                   </div>
+
+                  {/* Detaliul sesiunilor GPS individuale care compun grupul */}
+                  <ul style={{ margin: '0.4rem 0 0', paddingLeft: '1.1rem', fontSize: '0.8rem', color: '#777' }}>
+                    {grup.sesiuni.map((s) => (
+                      <li key={cheieSesiune(s)}>
+                        {formatOra(s.inceput)}–{formatOra(s.sfarsit)} · {s.ore}h · {formatLitri(s.litri_combustibil)}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               </div>
 
@@ -514,7 +629,7 @@ export default function ActivitatiParceleScreen() {
                   />
                 </label>
 
-                {sesiune.utilaj_recoltare ? (
+                {grup.utilaj_recoltare ? (
                   <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
                     Suprafață recoltată (mp)
                     <input
@@ -550,7 +665,7 @@ export default function ActivitatiParceleScreen() {
                 </label>
               </div>
 
-              {!sesiune.utilaj_recoltare && form.esteFertilizare && (
+              {!grup.utilaj_recoltare && form.esteFertilizare && (
                 <div style={{ marginTop: '0.6rem' }}>
                   <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', maxWidth: '260px' }}>
                     Tip fertilizare
@@ -615,7 +730,7 @@ export default function ActivitatiParceleScreen() {
               {form.error && <p style={{ color: '#b00020', margin: '0.6rem 0 0' }}>{form.error}</p>}
 
               <button
-                onClick={() => void confirmaSesiune(sesiune)}
+                onClick={() => void confirmaGrup(grup)}
                 disabled={form.saving}
                 style={{
                   marginTop: '0.75rem',

@@ -1697,6 +1697,63 @@ pe altă fermă e refuzată explicit, ca să nu creeze un rând `substante` orfa
 `editeaza_alimentare_substanta` rescrisă — parametru nou `p_ferma_id`, imediat
 după `p_intrare_id`), `app/substante/SubstanteScreen.tsx`.
 
+### Grupare pe utilaj/parcelă/zi + motorină consumată pe /activitati-parcele (2026-09-24)
+
+Radu, verbatim (după ce a trimis o captură cu coada de confirmare arătând
+"Faresin FR02 — parcela 9" de două ori în aceeași zi, pentru două sesiuni GPS
+separate): "La activitatile desfasurate pe parcele, la fiecare utilaj/parcela
+sa fie scrise si totalizate toate orele sau fractiile de ore din parcela
+respectiva, si sa apara utilajul/parcela o singura data. De exemplu Faresin
+FR02 - parcela 9 sa apara o singura data in ziua respectiva cu totalul orelor
+lucrate in parcela si sub el detaliat orele si fractiile lucrate in parcela
+respectiva. In final ma intereseaza cata motorina a consumat utilajul
+respectiv in parcela pe ziua respectiva."
+
+Pe `/activitati-parcele`, coada de confirmare nu mai arată un card pentru
+fiecare sesiune GPS brută, ci le **grupează pe (utilaj, parcelă, zi locală)**:
+un singur card per combinație, cu antetul utilaj + parcelă + zi, totalul
+orelor (suma orelor/fracțiilor tuturor sesiunilor din grup) și totalul
+motorinei consumate (L) — iar dedesubt, detaliat, fiecare sesiune individuală
+(interval orar, ore, litri). Un utilaj necalibrat (fără capacitate de tanc
+setată în `/utilaje`) arată "—" în loc de litri.
+
+**Confirmarea rămâne o singură acțiune pe grup** (un formular: ore de lucru /
+fertilizare + substanțe / mp recoltat / notă — implicit orele = totalul
+grupului, rotunjit și limitat la 0–8), dar salvează în continuare **câte un
+rând în `operatiuni` pentru fiecare sesiune GPS din grup**, fiecare cu propriul
+`sesiune_inceput`/`sesiune_sfarsit` — altfel s-ar strica deduplicarea la
+interogările viitoare ale `get-sesiuni-detectate` (o sesiune deja confirmată
+nu mai trebuie să reapară). Ca să nu se numere de două ori orele, suprafața
+recoltată sau substanțele consumate în rapoarte (manoperă, cost-producție,
+stoc), valorile din formular se atașează **doar primului rând din grup** —
+celelalte rânduri au aceste câmpuri goale, dar păstrează tip/dată/parcelă/
+utilaj identice, deci apar corect oriunde se listează operațiunile pe parcelă
+(istoric, ParcelaPanel).
+
+**Calculul motorinei (server, nu front-end)**: `get-sesiuni-detectate` v5
+calculează pentru fiecare sesiune GPS detectată consumul ei individual prin
+bilanț de masă — nivelul senzorului de combustibil la începutul sesiunii minus
+la sfârșit, plus realimentările confirmate strict în acel interval — exact
+algoritmul deja folosit în `get-combustibil-parcele` pentru alocarea
+combustibilului pe parcele la operațiunile confirmate (`nivelLaMoment`,
+`sumaRealimentariInInterval`, `consumSesiune`, reutilizate verbatim, cu
+aceleași praguri de curățare a zgomotului de senzor). Nu a fost nevoie de nicio
+interogare suplimentară — `nivel_litri` s-a adăugat la select-ul de citiri deja
+folosit pentru detecția GPS a sesiunilor. Front-end-ul doar însumează
+`litri_combustibil` (per sesiune) pe fiecare grup.
+
+**Asumpție de design, de raportat lui Radu dacă nu corespunde**: un singur
+formular de confirmare pe grup (nu câte unul per sesiune GPS individuală) —
+pare cea mai firească citire a cererii ("să apară o singură dată... cu
+totalul"), dar înseamnă că ore de lucru / mp recoltat / substanțe se declară
+o singură dată PENTRU TOATĂ ziua în acea parcelă, nu separat pentru fiecare
+intrare-ieșire din parcelă.
+
+**Fișiere**: `supabase/functions/get-sesiuni-detectate/index.ts` (v5, adaugă
+`litri_combustibil: number | null` pe fiecare sesiune),
+`app/activitati-parcele/ActivitatiParceleScreen.tsx` (grupare + card unic per
+grup + `confirmaGrup` care inserează mai multe rânduri `operatiuni`).
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).
