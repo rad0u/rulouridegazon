@@ -1928,3 +1928,12 @@ gestiunile fermelor cu cantitatea de seminte de gazon"
 De raportat lui Radu: nomenclatorul de materii prime pornește cu o singură
 intrare ("Semințe gazon", kg) — poate adăuga altele din pagina
 `/materii-prime` (secțiunea Nomenclator) dacă mai apar materii prime noi.
+
+## 2026-09-24 — La pornire, orice admin ajunge direct pe Dashboard
+
+Radu: "la pornirea aplicatiei vrerau sa ma duca direct in dashboard" — Radu
+e admin_ferma cu ferma_id setat, deci ateriza direct pe tarlaua fermei lui
+(/ferme/{fermaId}), nu pe Dashboard. `resolvePostLoginPath` (folosit la
+pornirea aplicației, la login și la auth callback — un singur punct comun)
+a fost simplificat: orice rol de admin (central sau de fermă) ajunge acum
+pe /dashboard; doar șoferii merg în continuare direct pe /curse.

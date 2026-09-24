@@ -2,8 +2,13 @@ import { supabase } from './supabaseClient';
 
 // Calculează unde trebuie dus utilizatorul după autentificare:
 // - sofer -> direct pe /curse (lista lui de curse, mobil-first)
-// - admin_ferma cu ferma_id setat -> direct pe tarlaua fermei lui
-// - admin_central (sau admin_ferma fără fermă atribuită) -> /dashboard
+// - orice admin (central sau de fermă) -> /dashboard
+//
+// 2026-09-24 (Radu): "la pornirea aplicatiei vreau sa ma duca direct in
+// dashboard" — până acum admin_ferma cu ferma_id setat ateriza direct pe
+// tarlaua fermei lui (/ferme/{fermaId}), nu pe Dashboard; asta se aplica și
+// lui Radu, care e admin_ferma. Acum orice admin ajunge pe Dashboard, care
+// oricum are un card către Ferme la un click distanță.
 export async function resolvePostLoginPath(): Promise<string> {
   const {
     data: { user },
@@ -19,10 +24,6 @@ export async function resolvePostLoginPath(): Promise<string> {
 
   if (data?.rol === 'sofer') {
     return '/curse';
-  }
-
-  if (data?.rol === 'admin_ferma' && data.ferma_id) {
-    return `/ferme/${data.ferma_id}`;
   }
 
   return '/dashboard';
