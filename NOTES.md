@@ -1754,6 +1754,49 @@ intrare-ieșire din parcelă.
 `app/activitati-parcele/ActivitatiParceleScreen.tsx` (grupare + card unic per
 grup + `confirmaGrup` care inserează mai multe rânduri `operatiuni`).
 
+### Meniu lipsă pe /activitati-parcele + Dashboard refăcut ca grilă de acces rapid (2026-09-24)
+
+Radu a trimis o captură cu `/activitati-parcele` fără bara de sus (fără meniul
+hamburger, deci fără cale de a reveni la alt ecran) și a cerut și refacerea
+Dashboard-ului: "trebuie sa refacem Dashboard-ul, sa aiba un design
+functional. Pune pe el principalele butoane pe care le foloseste admin-ul cel
+mai des. Sa se vada bine si pe mobil."
+
+**Cauza meniului lipsă**: fiecare rută de nivel 1 din `app/` trebuie să aibă
+propriul `layout.tsx` care împachetează pagina în `ProtectedLayout`
+(`AuthGuard` + `components/LayoutShell.tsx`, care desenează bara de sus cu
+meniul ☰) — Next.js nu moștenește automat acest wrapper de la rutele-surori.
+Verificare: singura rută de nivel 1 fără `layout.tsx` propriu era
+`app/activitati-parcele/` (probabil omis când a fost creat ecranul, în sesiuni
+anterioare) — toate celelalte 22 de rute îl aveau deja. Fix: adăugat
+`app/activitati-parcele/layout.tsx`, identic ca formă cu celelalte (ex.
+`app/substante/layout.tsx`). Dacă un ecran nou viitor apare fără meniu, asta e
+prima verificare de făcut.
+
+**Dashboard**: `app/dashboard/page.tsx` avea doar 2 linkuri text (rapoarte de
+cost). Acum e o grilă de carduri (icon + titlu + descriere scurtă),
+responsivă (`repeat(auto-fill, minmax(200px, 1fr))` — o singură coloană pe
+mobil), grupată pe secțiuni: Activitate zilnică (Activități parcele /
+Substanțe / Alimentări utilaje), Ferme, Flotă & utilaje (Flotă auto pentru
+toți adminii, restul doar admin_central), Rapoarte (cost de producție /
+cheltuieli indirecte), Administrare (doar admin_central: Utilizatori / Jurnal
+de activitate / Tracking). Vizibilitatea fiecărui card respectă EXACT aceleași
+reguli de rol ca în meniul principal (`components/LayoutShell.tsx`) — nu am
+inventat o listă nouă de "cele mai folosite", am dedus-o din ce e deja expus
+în meniu, ca să nu apară carduri către ecrane la care rolul respectiv nu are
+oricum acces. Rolul `sofer` (care oricum nu ajunge normal pe `/dashboard`, e
+redirecționat direct pe `/curse`) primește un mesaj scurt cu link către
+cursele lui, în loc de grilă goală.
+
+**De raportat lui Radu dacă gruparea/selecția cardurilor nu e cea așteptată**:
+nu am o listă explicită de la el cu "ce butoane folosește cel mai des" — am
+dedus-o din structura meniului existent. Dacă anumite ecrane merită scoase în
+față (sau altele ascunse), e o modificare rapidă de reordonat/reconfigurat
+secțiunile din `sectiuniPentru()`.
+
+**Fișiere**: `app/activitati-parcele/layout.tsx` (nou), `app/dashboard/page.tsx`
+(rescris).
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).
