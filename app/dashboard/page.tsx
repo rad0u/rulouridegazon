@@ -15,6 +15,9 @@ import { useUserRole, UserRole } from '../../lib/useUserRole';
 //
 // v3, 2026-09-24 (Radu): cardul "Alimentări utilaje" a fost înlocuit cu
 // "Alimentări auto" (/alimentari-auto) — vezi comentariul din LayoutShell.tsx.
+//
+// v4, 2026-09-24 (Radu): adăugat cardul "Materii prime" (/materii-prime) —
+// gestiune nouă, separată de Substanțe, pentru operațiunea "Însămânțare".
 
 type CardInfo = {
   href: string;
@@ -45,6 +48,12 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
           descriere: 'Confirmă sesiunile de lucru detectate din GPS',
         },
         { href: '/substante', icon: '🧪', titlu: 'Substanțe', descriere: 'Stoc și alimentări cu substanțe' },
+        {
+          href: '/materii-prime',
+          icon: '🌱',
+          titlu: 'Materii prime',
+          descriere: 'Stoc și alimentări cu materii prime (semințe gazon)',
+        },
         {
           href: '/alimentari-auto',
           icon: '⛽',

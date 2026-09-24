@@ -1890,3 +1890,41 @@ tabelul de mișcări).
 - Fișe complete de clienți / comenzi.
 - Integrare completă combustibil (Traccar + DUT-E → aplicație), condiționată de
   finalizarea testelor pe pilot.
+
+## 2026-09-24 — Operațiune nouă „Însămânțare” + gestiune „Materii prime”
+
+Radu: "a mai aparut o operatiune de introdus in Activitati Parcele:
+Insamantare. Mai trebuie o noua baza de date, pe langa cea cu fertilizanti -
+materii prime in care deocamdata trecem seminte gazon, urmand sa incarc
+gestiunile fermelor cu cantitatea de seminte de gazon"
+
+- Tip nou de operațiune în DB: `Insamantare` (etichetă "Însămânțare"),
+  adăugat la `operatiuni_tip_check`. **Nu** s-a reutilizat `Suprainsamantare`
+  — acea valoare e deja folosită activ, sub eticheta "Tratamente foliare"
+  (vezi `lib/operatiuniTypes.ts`), pentru o cu totul altă lucrare; ar fi fost
+  o coliziune de sens dacă foloseam "însămânțare" pentru un nume de coloană
+  care înseamnă altceva în UI.
+- Gestiune nouă, complet separată de `substante`: tabele
+  `materii_prime_nomenclator`, `materii_prime`, `materii_prime_intrari`,
+  `operatiuni_materii_prime` — structură, RLS și RPC-uri (`alimenteaza_materie_prima`,
+  `recalculeaza_stoc_materie_prima`, `editeaza_alimentare_materie_prima`)
+  oglindă exactă a sistemului de substanțe/fertilizanți. Trigger
+  `scade_stoc_materie_prima_trigger` scade stocul la fiecare consum
+  înregistrat, la fel ca la substanțe. Nomenclatorul a fost semănat cu o
+  singură intrare, "Semințe gazon" (kg) — Radu urmează să încarce stocul
+  per fermă din pagina nouă.
+- Pagină nouă `/materii-prime` (`MateriiPrimeScreen.tsx`) — oglindă exactă a
+  `/substante`: nomenclator, alimentare gestiune fermă, stoc curent pe
+  ferme, istoric alimentări cu corectare (inclusiv mutare pe altă fermă).
+  Link nou în meniu (lângă Substanțe) și card nou pe Dashboard.
+- `/activitati-parcele`: checkbox-ul "A fost fertilizare?" a devenit un
+  select unic "Tip lucrare", cu toate opțiunile care cer o resursă din
+  gestiune: Fertilizare solidă / Tratamente foliare (substanțe) și, nou,
+  Însămânțare (materii prime). Alegerea tipului arată fie selectorul de
+  substanțe, fie cel de materii prime — flow-ul de confirmare pe grup rămâne
+  neschimbat altfel (câte un rând `operatiuni` per sesiune GPS, resursele
+  atașate doar primului rând din grup).
+
+De raportat lui Radu: nomenclatorul de materii prime pornește cu o singură
+intrare ("Semințe gazon", kg) — poate adăuga altele din pagina
+`/materii-prime` (secțiunea Nomenclator) dacă mai apar materii prime noi.

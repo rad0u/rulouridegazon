@@ -155,6 +155,12 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                   <Link href="/substante" style={navLinkStyle} onClick={closeMenu}>
                     Substanțe
                   </Link>
+                  {/* 2026-09-24 (Radu): "Insamantare" — gestiune separată de
+                      materii prime (semințe gazon etc.), oglindă a paginii
+                      Substanțe, dar pe tabele proprii. */}
+                  <Link href="/materii-prime" style={navLinkStyle} onClick={closeMenu}>
+                    Materii prime
+                  </Link>
 
                   {(role === 'admin_central' || role === 'admin_ferma') && (
                     <Link href="/activitati-parcele" style={navLinkStyle} onClick={closeMenu}>
