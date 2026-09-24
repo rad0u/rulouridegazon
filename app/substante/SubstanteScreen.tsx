@@ -25,7 +25,7 @@ type Intrare = {
   furnizor: string | null;
   nota: string | null;
   created_at: string;
-  substante: { nume: string; unitate_masura: string; ferme: { nume: string } | null } | null;
+  substante: { nume: string; unitate_masura: string; ferma_id: string | null; ferme: { nume: string } | null } | null;
   utilizatori: { nume: string } | null;
 };
 
@@ -120,6 +120,7 @@ function SubstanteAdminCentral() {
 
   const [intrareExtinsa, setIntrareExtinsa] = useState<string | null>(null);
   const [editIntrareForm, setEditIntrareForm] = useState<{
+    ferma_id: string;
     cantitate: string;
     pret_intrare_unitar: string;
     data: string;
@@ -143,7 +144,7 @@ function SubstanteAdminCentral() {
       supabase
         .from('substante_intrari')
         .select(
-          'id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferme(nume)), utilizatori(nume)',
+          'id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferma_id, ferme(nume)), utilizatori(nume)',
         )
         .order('created_at', { ascending: false })
         .limit(50),
@@ -278,6 +279,7 @@ function SubstanteAdminCentral() {
     setIntrareExtinsa(i.id);
     setEditIntrareError(null);
     setEditIntrareForm({
+      ferma_id: i.substante?.ferma_id ?? '',
       cantitate: String(i.cantitate),
       pret_intrare_unitar: String(i.pret_intrare_unitar),
       data: i.data,
@@ -293,6 +295,10 @@ function SubstanteAdminCentral() {
     const cant = Number(editIntrareForm.cantitate);
     const pret = Number(editIntrareForm.pret_intrare_unitar);
 
+    if (!editIntrareForm.ferma_id) {
+      setEditIntrareError('Alege ferma.');
+      return;
+    }
     if (!editIntrareForm.cantitate || Number.isNaN(cant) || cant <= 0) {
       setEditIntrareError('Cantitatea trebuie să fie un număr pozitiv.');
       return;
@@ -309,6 +315,7 @@ function SubstanteAdminCentral() {
     setEditIntrareSaving(true);
     const { error: rpcError } = await supabase.rpc('editeaza_alimentare_substanta', {
       p_intrare_id: intrareId,
+      p_ferma_id: editIntrareForm.ferma_id,
       p_cantitate: cant,
       p_pret_intrare_unitar: pret,
       p_data: editIntrareForm.data,
@@ -571,6 +578,21 @@ function SubstanteAdminCentral() {
                       <td colSpan={8} style={{ padding: '0.75rem', background: '#fafafa' }}>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }} onClick={(e) => e.stopPropagation()}>
                           <label>
+                            Fermă
+                            <select
+                              value={editIntrareForm.ferma_id}
+                              onChange={(e) => setEditIntrareForm({ ...editIntrareForm, ferma_id: e.target.value })}
+                              style={inputStyle}
+                            >
+                              <option value="">— alege ferma —</option>
+                              {ferme.map((f) => (
+                                <option key={f.id} value={f.id}>
+                                  {f.nume}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <label>
                             Cantitate
                             <input
                               type="number"
@@ -628,9 +650,9 @@ function SubstanteAdminCentral() {
                           </button>
                         </div>
                         <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '0.5rem', marginBottom: 0 }}>
-                          Fermă și substanță nu se pot schimba aici. Corectarea recalculează automat stocul și
-                          prețul mediu al substanței, ca și cum alimentarea ar fi fost introdusă corect de la
-                          început.
+                          Substanța nu se poate schimba aici. Corectarea recalculează automat stocul și prețul
+                          mediu, ca și cum alimentarea ar fi fost introdusă corect de la început — dacă schimbi
+                          ferma, recalculează atât pe ferma veche (care pierde alimentarea), cât și pe cea nouă.
                         </p>
                         {editIntrareError && <p style={{ color: '#b00020', marginTop: '0.5rem', marginBottom: 0 }}>{editIntrareError}</p>}
                       </td>

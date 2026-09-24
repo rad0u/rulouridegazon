@@ -1665,6 +1665,38 @@ trimite întotdeauna intervalul ales manual.
 **Fișiere**: `supabase/functions/get-sesiuni-detectate/index.ts` (v4),
 `app/activitati-parcele/ActivitatiParceleScreen.tsx`.
 
+### Corectarea unei alimentări de substanțe poate schimba și ferma (2026-09-24)
+
+Radu, verbatim: "la gestiunea de substante, campul corecteaza vreau sa poata
+corecta si campul Ferma."
+
+Pe `/substante` (admin general), formularul de corecție dintr-o intrare de
+istoric ("Corectează ▼") avea explicit precizat "Fermă și substanță nu se pot
+schimba aici". Acum ferma e editabilă — a rămas doar substanța fixă (are
+sens: dacă s-a greșit substanța, nu doar ferma, alimentarea trebuie ștearsă
+din baza de date direct și reintrodusă, nu prin acest formular).
+
+**De ce nu a fost trivial**: o `substante_intrari` (o alimentare) nu ține
+`ferma_id` direct — e legată de un rând din `substante`, care e unic per
+(fermă, substanță din nomenclator) și ține stocul curent + prețul mediu
+ponderat al ACELEI ferme pentru acea substanță. Dacă admin-ul schimbă ferma
+la corecție, `editeaza_alimentare_substanta` (RPC, rescrisă) mută rândul de
+intrare pe rândul `substante` al fermei noi (creat automat, cu stoc 0, dacă
+ferma respectivă nu mai avusese niciodată stoc din acea substanță) și
+recalculează stocul/prețul mediu pe AMBELE ferme — cea veche, care pierde
+alimentarea, și cea nouă, care o capătă — cu funcția existentă
+`recalculeaza_stoc_substanta` (aceeași folosită și la corecțiile obișnuite),
+ca să rămână corect chiar dacă între timp s-a mai consumat din stocul
+respectiv (operațiuni de fertilizare/tratamente).
+
+Gardă: dacă substanța editată n-are `nomenclator_id` completat (caz vechi,
+legacy — verificat 2026-09-24: 0 din 38 de rânduri au problema asta), mutarea
+pe altă fermă e refuzată explicit, ca să nu creeze un rând `substante` orfan.
+
+**Fișiere**: `supabase/schema-substante-corectie-ferma.sql` (nou, RPC
+`editeaza_alimentare_substanta` rescrisă — parametru nou `p_ferma_id`, imediat
+după `p_intrare_id`), `app/substante/SubstanteScreen.tsx`.
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).
