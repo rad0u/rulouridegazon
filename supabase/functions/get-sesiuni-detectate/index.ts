@@ -40,15 +40,17 @@
 // mijlocul unei prezențe în parcelă, sesiunea se ÎNCHEIE exact acolo — o
 // eventuală reluare ulterioară pe aceeași parcelă e o sesiune NOUĂ, separată.
 //
-// SESIUNI ÎN CURS: dacă bucla ajunge la ULTIMA citire cu o sesiune încă
-// "deschisă" (n-a fost închisă de o schimbare de parcelă/funcțiune), sesiunea
-// respectivă NU se raportează — s-ar putea ca utilajul să fie încă acolo. O
-// sesiune apare în coadă doar după ce s-a încheiat cu adevărat (utilajul a
-// plecat din parcelă sau a oprit motorul/mișcarea). Asta evită și o problemă
-// de deduplicare: dacă am confirma o sesiune încă în desfășurare, la
-// următoarea interogare traseul brut ar forma un interval mai lung care s-ar
-// suprapune parțial cu cel deja confirmat, iar coada l-ar ignora complet
-// (inclusiv partea neconfirmată încă).
+// SESIUNI ÎN CURS: dacă bucla ajunge la ULTIMA citire (din interval) cu o
+// sesiune încă "deschisă" (n-a fost închisă de o schimbare de
+// parcelă/funcțiune), sesiunea respectivă NU se raportează — s-ar putea ca
+// utilajul să fie încă acolo (dacă `pana_la` e "azi") sau pur și simplu am
+// tăiat fereastra de interogare exact peste ea (dacă `pana_la` e în trecut).
+// O sesiune apare în coadă doar după ce s-a încheiat cu adevărat ÎN
+// INTERIORUL intervalului cerut. Asta evită și o problemă de deduplicare:
+// dacă am confirma o sesiune încă în desfășurare, la următoarea interogare
+// traseul brut ar forma un interval mai lung care s-ar suprapune parțial cu
+// cel deja confirmat, iar coada l-ar ignora complet (inclusiv partea
+// neconfirmată încă).
 //
 // DEDUPLICARE: o sesiune deja confirmată (transformată în rând în
 // `operatiuni`, cu utilaj_id + sesiune_inceput/sesiune_sfarsit completate) nu
@@ -65,6 +67,14 @@
 // front-end-ul ca să decidă ce formular arată e dacă utilajul e marcat
 // „utilaj de recoltare" (`utilaje.este_utilaj_recoltare`) — se adaugă acest
 // flag pe fiecare sesiune returnată.
+//
+// v4, 2026-09-24 (Radu): "vreau sa am posibilitatea de a selecta intervalul
+// de timp manual, fara ultimile 3, 7, 14, etc" — presetul `zile` (dropdown
+// 3/7/14/30 zile) e înlocuit cu un interval ales manual `de_la`/`pana_la`
+// (YYYY-MM-DD, `pana_la` inclusiv, aceeași convenție zi-locală RO → UTC ca
+// get-combustibil-report / get-rezervor-central-miscari). Parametrul `zile`
+// rămâne acceptat ca fallback (compatibilitate), dar front-end-ul nou trimite
+// întotdeauna `de_la`/`pana_la`.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -96,6 +106,30 @@ const RO_LAT_MIN = 42;
 const RO_LAT_MAX = 50;
 const RO_LON_MIN = 18;
 const RO_LON_MAX = 32;
+
+// v4: aceleași helpere de dată zi-locală RO ↔ UTC ca get-combustibil-report
+// / get-rezervor-central-miscari.
+function offsetLocalOre(dataStr: string): number {
+  const ancora = new Date(`${dataStr}T12:00:00.000Z`);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Europe/Bucharest',
+    timeZoneName: 'shortOffset',
+  }).formatToParts(ancora);
+  const tz = parts.find((p) => p.type === 'timeZoneName')?.value ?? 'GMT+2';
+  const m = tz.match(/GMT([+-]\d+)/);
+  return m ? parseInt(m[1], 10) : 2;
+}
+
+function inceputZileiLocaleUTC(dataStr: string): Date {
+  const offsetOre = offsetLocalOre(dataStr);
+  return new Date(new Date(`${dataStr}T00:00:00.000Z`).getTime() - offsetOre * 3_600_000);
+}
+
+function ziuaUrmatoare(dataStr: string): string {
+  const d = new Date(`${dataStr}T00:00:00.000Z`);
+  d.setUTCDate(d.getUTCDate() + 1);
+  return d.toISOString().slice(0, 10);
+}
 
 interface Citire {
   data_ora: string;
@@ -245,8 +279,37 @@ Deno.serve(async (req) => {
     fermaId = paramFerma;
   }
 
-  const zile = Math.min(30, Math.max(1, Number(url.searchParams.get('zile')) || 3));
-  const de_la = new Date(Date.now() - zile * 24 * 60 * 60 * 1000).toISOString();
+  // v4: interval ales manual (de_la/pana_la, YYYY-MM-DD, pana_la inclusiv) —
+  // cu fallback pe vechiul preset `zile` (compatibilitate), dacă nu sunt
+  // trimise date explicite.
+  const REGEX_DATA_ZI = /^\d{4}-\d{2}-\d{2}$/;
+  const deLaParam = url.searchParams.get('de_la');
+  const panaLaParam = url.searchParams.get('pana_la');
+
+  const aziStr = new Date().toISOString().slice(0, 10);
+  let deLaStr: string;
+  let panaLaStr: string;
+
+  if (deLaParam && REGEX_DATA_ZI.test(deLaParam) && panaLaParam && REGEX_DATA_ZI.test(panaLaParam)) {
+    deLaStr = deLaParam;
+    panaLaStr = panaLaParam;
+  } else {
+    const zile = Math.min(366, Math.max(1, Number(url.searchParams.get('zile')) || 3));
+    deLaStr = new Date(Date.now() - zile * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+    panaLaStr = aziStr;
+  }
+
+  const de_la = inceputZileiLocaleUTC(deLaStr).toISOString();
+  const stopExclusiv = inceputZileiLocaleUTC(ziuaUrmatoare(panaLaStr));
+
+  if (stopExclusiv.getTime() <= new Date(de_la).getTime()) {
+    return jsonResponse({ error: 'Interval invalid: data de sfârșit trebuie să fie după data de început.' }, 400);
+  }
+  const nrZile = (stopExclusiv.getTime() - new Date(de_la).getTime()) / (24 * 3_600_000);
+  if (nrZile > 366) {
+    return jsonResponse({ error: 'Intervalul selectat e prea mare (peste 366 de zile).' }, 400);
+  }
+  const pana_la = stopExclusiv.toISOString();
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -262,7 +325,7 @@ Deno.serve(async (req) => {
 
   const utilaje = (utilajeRaw ?? []) as { id: string; nume: string; este_utilaj_recoltare: boolean }[];
   if (utilaje.length === 0) {
-    return jsonResponse({ zile, de_la, ferma_id: fermaId, are_parcele_desenate: false, sesiuni: [] });
+    return jsonResponse({ de_la: deLaStr, pana_la: panaLaStr, ferma_id: fermaId, are_parcele_desenate: false, sesiuni: [] });
   }
 
   const { data: parceleRaw, error: parceleError } = await adminClient
@@ -282,7 +345,7 @@ Deno.serve(async (req) => {
     .filter((p): p is ParcelaRing => p !== null);
 
   if (parcele.length === 0) {
-    return jsonResponse({ zile, de_la, ferma_id: fermaId, are_parcele_desenate: false, sesiuni: [] });
+    return jsonResponse({ de_la: deLaStr, pana_la: panaLaStr, ferma_id: fermaId, are_parcele_desenate: false, sesiuni: [] });
   }
 
   const utilajIds = utilaje.map((u) => u.id);
@@ -317,6 +380,7 @@ Deno.serve(async (req) => {
         .not('latitudine', 'is', null)
         .not('longitudine', 'is', null)
         .gte('data_ora', de_la)
+        .lt('data_ora', pana_la)
         .order('data_ora', { ascending: true })
         .range(from, to),
     );
@@ -374,11 +438,10 @@ Deno.serve(async (req) => {
       }
     }
     // Notă: NU închidem `current` rămas deschis la finalul buclei — vezi
-    // comentariul de sus ("SESIUNI ÎN CURS"). O sesiune încă în desfășurare
-    // nu e raportată până nu se încheie cu adevărat.
+    // comentariul de sus ("SESIUNI ÎN CURS").
   }
 
   sesiuni.sort((a, b) => (a.inceput < b.inceput ? 1 : -1));
 
-  return jsonResponse({ zile, de_la, ferma_id: fermaId, are_parcele_desenate: true, sesiuni });
+  return jsonResponse({ de_la: deLaStr, pana_la: panaLaStr, ferma_id: fermaId, are_parcele_desenate: true, sesiuni });
 });

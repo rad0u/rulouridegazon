@@ -1644,6 +1644,27 @@ discutat cu Radu dacă merită aliniate.
 **Fișiere**: `supabase/functions/get-rezervor-central-miscari/index.ts`
 (nou), `app/rezervor-central/RezervorCentralScreen.tsx`.
 
+### Interval manual pe /activitati-parcele, fără preseturi 3/7/14/30 zile (2026-09-24)
+
+Radu, verbatim: "la activitati detectate pe parcele vreau sa am
+posibilitatea de a selecta intervalul de timp manual, fara ultimile 3, 7,
+14, etc."
+
+Pe `/activitati-parcele`, dropdown-ul cu preseturi ("Ultimele 3/7/14/30
+zile") a fost înlocuit cu două selectoare de dată ("De la" / "Până la",
+implicit ultimele 3 zile — ca să păstreze comportamentul vechi la prima
+încărcare). Butonul "Reîncarcă" relansează interogarea cu intervalul ales.
+
+**Backend**: `get-sesiuni-detectate` v4 acceptă acum `de_la`/`pana_la`
+(YYYY-MM-DD, `pana_la` inclusiv, aceeași conversie zi-locală RO → UTC ca
+`get-combustibil-report`/`get-rezervor-central-miscari`, max. 366 zile).
+Parametrul vechi `zile` rămâne acceptat ca fallback (dacă nu sunt trimise
+`de_la`/`pana_la` explicit), pentru compatibilitate, dar front-end-ul nou
+trimite întotdeauna intervalul ales manual.
+
+**Fișiere**: `supabase/functions/get-sesiuni-detectate/index.ts` (v4),
+`app/activitati-parcele/ActivitatiParceleScreen.tsx`.
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).

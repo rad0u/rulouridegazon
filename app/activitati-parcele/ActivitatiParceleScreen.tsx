@@ -22,6 +22,11 @@ import { LABEL_OPERATIUNE, Substanta, TIPURI_CU_SUBSTANTE, TipOperatiune } from 
 // parcelă și pentru corectări manuale punctuale (admin_central), nu ca flux
 // zilnic principal — acolo lista completă de tipuri de operațiune rămâne
 // disponibilă.
+//
+// v3, 2026-09-24 (Radu): "vreau sa am posibilitatea de a selecta intervalul
+// de timp manual, fara ultimile 3, 7, 14, etc" — dropdown-ul cu preseturi
+// (3/7/14/30 zile) e înlocuit cu două selectoare de dată (De la / Până la),
+// trimise ca `de_la`/`pana_la` către get-sesiuni-detectate (v4).
 
 type Sesiune = {
   utilaj_id: string;
@@ -35,11 +40,19 @@ type Sesiune = {
 };
 
 type Raport = {
-  zile: number;
+  de_la: string;
+  pana_la: string;
   ferma_id: string;
   are_parcele_desenate: boolean;
   sesiuni: Sesiune[];
 };
+
+function aziISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function acumTreiZileISO() {
+  return new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
 
 type SubstantaLinie = { substanta_id: string; cantitate: string };
 
@@ -103,7 +116,8 @@ export default function ActivitatiParceleScreen() {
   const [fermaSelectata, setFermaSelectata] = useState<string>('');
   const [fermaProprie, setFermaProprie] = useState<string | null>(null);
 
-  const [zile, setZile] = useState(3);
+  const [deLa, setDeLa] = useState(acumTreiZileISO());
+  const [panaLa, setPanaLa] = useState(aziISO());
   const [raport, setRaport] = useState<Raport | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -154,21 +168,28 @@ export default function ActivitatiParceleScreen() {
     })();
   }, [fermaActiva]);
 
-  async function incarca(zileNoi?: number) {
+  async function incarca(deLaNou?: string, panaLaNou?: string) {
     if (!fermaActiva) return;
+
+    const deLaDeFolosit = deLaNou ?? deLa;
+    const panaLaDeFolosit = panaLaNou ?? panaLa;
+
+    if (deLaDeFolosit > panaLaDeFolosit) {
+      setError('Data de început trebuie să fie înainte de data de sfârșit.');
+      return;
+    }
+
     setLoading(true);
     setError(null);
-
-    const zileDeFolosit = zileNoi ?? zile;
 
     const { data: session } = await supabase.auth.getSession();
     const token = session.session?.access_token;
 
     try {
-      const res = await fetch(
-        `${supabaseUrl}/functions/v1/get-sesiuni-detectate?ferma_id=${fermaActiva}&zile=${zileDeFolosit}`,
-        { headers: { Authorization: `Bearer ${token}` } },
-      );
+      const params = new URLSearchParams({ ferma_id: fermaActiva, de_la: deLaDeFolosit, pana_la: panaLaDeFolosit });
+      const res = await fetch(`${supabaseUrl}/functions/v1/get-sesiuni-detectate?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       const json = await res.json();
 
       setLoading(false);
@@ -396,20 +417,26 @@ export default function ActivitatiParceleScreen() {
               ))}
             </select>
           )}
-          <select
-            value={zile}
-            onChange={(e) => {
-              const v = Number(e.target.value);
-              setZile(v);
-              void incarca(v);
-            }}
-            style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc' }}
-          >
-            <option value={3}>Ultimele 3 zile</option>
-            <option value={7}>Ultimele 7 zile</option>
-            <option value={14}>Ultimele 14 zile</option>
-            <option value={30}>Ultimele 30 zile</option>
-          </select>
+          <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem' }}>
+            De la
+            <input
+              type="date"
+              value={deLa}
+              max={panaLa}
+              onChange={(e) => setDeLa(e.target.value)}
+              style={{ padding: '0.45rem', borderRadius: '6px', border: '1px solid #ccc' }}
+            />
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem' }}>
+            Până la
+            <input
+              type="date"
+              value={panaLa}
+              min={deLa}
+              onChange={(e) => setPanaLa(e.target.value)}
+              style={{ padding: '0.45rem', borderRadius: '6px', border: '1px solid #ccc' }}
+            />
+          </label>
           <button
             onClick={() => void incarca()}
             disabled={loading || !fermaActiva}
