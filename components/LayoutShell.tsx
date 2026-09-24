@@ -180,9 +180,15 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                           Utilaje
                         </Link>
                       )}
-                      <Link href="/alimentari-utilaje" style={navLinkStyle} onClick={closeMenu}>
-                        Alimentări utilaje
-                      </Link>
+                      {/* 2026-09-24 (Radu): "Utilajele nu vor mai fi alimentate
+                          manual, vom folosi doar citirile de la sonde, deci
+                          pagina e inutila" — linkul spre /alimentari-utilaje a
+                          fost scos din meniu (pagina rămâne funcțională, doar
+                          ascunsă — istoricul vechi tot alimentează raportul
+                          get-combustibil-report). Alimentarea mașinilor de
+                          pasageri din rezervorul central are acum propria
+                          pagină, /alimentari-auto, accesibilă din cardul
+                          "Alimentări auto" de pe /flota-auto. */}
                       {role === 'admin_central' && (
                         <>
                           <Link href="/combustibil-parcele" style={navLinkStyle} onClick={closeMenu}>

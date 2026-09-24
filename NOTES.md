@@ -1797,6 +1797,58 @@ secțiunile din `sectiuniPentru()`.
 **Fișiere**: `app/activitati-parcele/layout.tsx` (nou), `app/dashboard/page.tsx`
 (rescris).
 
+### Alimentări auto din rezervorul central al fermei (înlocuiește Alimentări utilaje) (2026-09-24)
+
+Radu, verbatim: "sectiunea Alimentari utilaje o redenumim Alimentari auto din
+rezervor Ferma. La unele ferme autoturismele se alimenteaza din tancul de
+motorina. Pe pagina sa apara un dropdown cu masinile inregistrate pe ferma
+respectiva, cantitatea alimentata si data."
+
+**Clarificat cu Radu înainte de implementare** (întrebare pusă explicit,
+pentru că o redenumire literală a paginii "Alimentări utilaje" ar fi rupt
+`get-combustibil-report`, care citește din tabela `alimentari_utilaje`):
+- Utilajele nu se mai alimentează manual — se folosesc doar citirile
+  senzorilor — deci pagina "Alimentări utilaje" e inutilă de-acum. Răspunsul
+  lui Radu: "O poti ascunde si crea una noua cu Alimentari Auto." →
+  `/alimentari-utilaje` **NU a fost ștearsă** (rămâne funcțională, tabela ei
+  tot alimentează `get-combustibil-report` cu istoricul vechi), doar
+  **ascunsă din meniu** și din Dashboard.
+- La fermele unde mașinile se alimentează din rezervorul central, alimentările
+  auto trebuie să scadă și ele din "Mișcările rezervorului central" — Radu:
+  "Da, apar ca ieșire."
+
+**Pagină nouă**: `/alimentari-auto` — dropdown cu mașinile înregistrate pe
+fermă (`masini`, filtrate implicit de RLS la ferma admin-ului de fermă, ca și
+la utilaje), cantitate (L) și dată. Nu e link direct în meniul principal (ca
+și restul ecranelor individuale de flotă auto) — accesibilă din cardul
+"Alimentări auto" de pe `/flota-auto` și din Dashboard (secțiunea "Activitate
+zilnică", unde înainte era "Alimentări utilaje").
+
+**Schema**: tabelă nouă `alimentari_masini` (`masina_id`, `data_ora`,
+`cantitate_litri`, `note`, `user_id`), structură + RLS identice cu
+`alimentari_utilaje`, dar legată de `masini` — ferma se deduce prin join la
+`masini.ferma_id`, la fel cum `alimentari_utilaje` o deduce prin
+`utilaje.ferma_id`.
+
+**Backend**: `get-rezervor-central-miscari` v2 — ieșirile zilnice includ acum
+și alimentările din `alimentari_masini` ale mașinilor fermei (nu doar consumul
+utilajelor calibrate). `iesiri_litri` rămâne totalul, dar e defalcat explicit
+în `iesiri_utilaje_litri` / `iesiri_masini_litri`, plus lista itemizată
+`alimentari_masini` (mașină + cantitate) pe fiecare zi, în oglindă cu
+`alimentari` (alimentările rezervorului). La fermele fără mașini alimentate
+din rezervor, `iesiri_masini_litri` e mereu 0 — nimic nu se schimbă față de
+v1. Tabelul de mișcări din `/rezervor-central` arată acum defalcarea (ex.
+"−45 L (utilaje 30 L, auto 15 L: Dacia Duster 15 L)").
+
+**Fișiere**: `supabase/schema-alimentari-masini.sql` (nou),
+`supabase/functions/get-rezervor-central-miscari/index.ts` (v2),
+`app/alimentari-auto/{layout.tsx,page.tsx,AlimentariAutoScreen.tsx}` (nou),
+`components/LayoutShell.tsx` (linkul spre `/alimentari-utilaje` scos),
+`app/flota-auto/page.tsx` (card nou "Alimentări auto"), `app/dashboard/page.tsx`
+(card "Alimentări utilaje" → "Alimentări auto"),
+`app/rezervor-central/RezervorCentralScreen.tsx` (defalcare utilaje/auto în
+tabelul de mișcări).
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).

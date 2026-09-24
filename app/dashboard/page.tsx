@@ -12,6 +12,9 @@ import { useUserRole, UserRole } from '../../lib/useUserRole';
 // cardurile afișate depind de rol — aceleași reguli de vizibilitate ca în
 // meniul principal (components/LayoutShell.tsx), ca să nu apară aici
 // butoane către ecrane la care rolul respectiv nu are oricum acces.
+//
+// v3, 2026-09-24 (Radu): cardul "Alimentări utilaje" a fost înlocuit cu
+// "Alimentări auto" (/alimentari-auto) — vezi comentariul din LayoutShell.tsx.
 
 type CardInfo = {
   href: string;
@@ -43,10 +46,10 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
         },
         { href: '/substante', icon: '🧪', titlu: 'Substanțe', descriere: 'Stoc și alimentări cu substanțe' },
         {
-          href: '/alimentari-utilaje',
+          href: '/alimentari-auto',
           icon: '⛽',
-          titlu: 'Alimentări utilaje',
-          descriere: 'Înregistrează o alimentare la un utilaj',
+          titlu: 'Alimentări auto',
+          descriere: 'Alimentare mașină din rezervorul central al fermei',
         },
       ],
     });

@@ -19,6 +19,17 @@
 // get-combustibil-report v15/v16 (filtreazaCitiriPlauzibile,
 // eliminaFluctuatiiTranzitorii, extrageExtreme, consumZilnic) — de data asta
 // SUMAT peste toate utilajele calibrate ale fermei, nu afișat per utilaj.
+//
+// v2, 2026-09-24 (Radu): "La unele ferme autoturismele se alimenteaza din
+// tancul de motorina" — la fermele unde mașinile de pasageri se alimentează
+// tot din rezervorul central (vezi noua pagină /alimentari-auto, tabela
+// `alimentari_masini`), acele alimentări sunt și ele o IEȘIRE reală din
+// rezervor, la fel ca motorina arsă de utilaje — altfel "diferența netă"
+// zilnică nu mai era corectă la fermele cu acest obicei. `iesiri_litri`
+// rămâne totalul (utilaje + mașini), dar acum e defalcat explicit în
+// `iesiri_utilaje_litri` / `iesiri_masini_litri`, plus lista itemizată
+// `alimentari_masini` pe fiecare zi (mașină + cantitate), în oglindă cu
+// `alimentari` (alimentările rezervorului central).
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -268,11 +279,24 @@ interface AlimentareRezervor {
   note: string | null;
 }
 
+// v2: o alimentare de mașină din rezervorul central, cu numele mașinii deja
+// atașat (rezolvat din tabela `masini`, nu vine direct din DB).
+interface AlimentareMasina {
+  id: string;
+  data_ora: string;
+  cantitate_litri: number;
+  note: string | null;
+  masina_nume: string;
+}
+
 interface ZiMiscare {
   data: string;
   alimentat_litri: number;
   alimentari: AlimentareRezervor[];
   iesiri_litri: number;
+  iesiri_utilaje_litri: number;
+  iesiri_masini_litri: number;
+  alimentari_masini: AlimentareMasina[];
   diferenta_neta_litri: number;
 }
 
@@ -388,7 +412,7 @@ Deno.serve(async (req) => {
     (u) => typeof u.tanc_capacitate_litri === 'number' && u.tanc_capacitate_litri > 0,
   );
 
-  const iesiriPeZi = new Map<string, number>();
+  const iesiriUtilajePeZi = new Map<string, number>();
 
   for (const u of utilajeCalibrate) {
     const { data: citiri, error: citiriError } = await fetchToateRandurile((from, to) =>
@@ -420,23 +444,82 @@ Deno.serve(async (req) => {
 
     const consumZi = consumZilnicLitri(rows, realimentari);
     for (const [zi, litri] of consumZi) {
-      iesiriPeZi.set(zi, (iesiriPeZi.get(zi) ?? 0) + litri);
+      iesiriUtilajePeZi.set(zi, (iesiriUtilajePeZi.get(zi) ?? 0) + litri);
     }
   }
 
-  const toateZilele = new Set<string>([...alimentariPeZiMap.keys(), ...iesiriPeZi.keys()]);
+  // v2: ieșiri către mașinile de pasageri alimentate din rezervorul central
+  // (tabela nouă `alimentari_masini`, vezi /alimentari-auto) — la fermele
+  // unde asta nu se întâmplă, listele de mai jos sunt goale și nu schimbă
+  // nimic față de v1.
+  const { data: masiniFerma, error: masiniError } = await adminClient
+    .from('masini')
+    .select('id, nume')
+    .eq('ferma_id', fermaId);
+
+  const masiniMap = new Map<string, string>();
+  for (const m of (masiniFerma ?? []) as { id: string; nume: string }[]) {
+    masiniMap.set(m.id, m.nume);
+  }
+
+  const iesiriMasiniPeZi = new Map<string, number>();
+  const alimentariMasiniPeZiMap = new Map<string, AlimentareMasina[]>();
+
+  if (!masiniError && masiniMap.size > 0) {
+    const { data: alimentariMasiniRaw, error: alimentariMasiniError } = await adminClient
+      .from('alimentari_masini')
+      .select('id, data_ora, cantitate_litri, note, masina_id')
+      .in('masina_id', Array.from(masiniMap.keys()))
+      .gte('data_ora', de_la)
+      .lt('data_ora', pana_la)
+      .order('data_ora', { ascending: false });
+
+    if (!alimentariMasiniError) {
+      for (const a of (alimentariMasiniRaw ?? []) as {
+        id: string;
+        data_ora: string;
+        cantitate_litri: number;
+        note: string | null;
+        masina_id: string;
+      }[]) {
+        const zi = ziuaLocala(a.data_ora);
+        iesiriMasiniPeZi.set(zi, (iesiriMasiniPeZi.get(zi) ?? 0) + Number(a.cantitate_litri));
+        const lista = alimentariMasiniPeZiMap.get(zi) ?? [];
+        lista.push({
+          id: a.id,
+          data_ora: a.data_ora,
+          cantitate_litri: a.cantitate_litri,
+          note: a.note,
+          masina_nume: masiniMap.get(a.masina_id) ?? '—',
+        });
+        alimentariMasiniPeZiMap.set(zi, lista);
+      }
+    }
+  }
+
+  const toateZilele = new Set<string>([
+    ...alimentariPeZiMap.keys(),
+    ...iesiriUtilajePeZi.keys(),
+    ...iesiriMasiniPeZi.keys(),
+  ]);
 
   const zile: ZiMiscare[] = Array.from(toateZilele)
     .sort((a, b) => (a < b ? 1 : -1))
     .map((zi) => {
       const alimentari = (alimentariPeZiMap.get(zi) ?? []).sort((a, b) => (a.data_ora < b.data_ora ? 1 : -1));
       const alimentatLitri = Math.round(alimentari.reduce((s, a) => s + Number(a.cantitate_litri), 0) * 10) / 10;
-      const iesiriLitri = Math.round((iesiriPeZi.get(zi) ?? 0) * 10) / 10;
+      const iesiriUtilajeLitri = Math.round((iesiriUtilajePeZi.get(zi) ?? 0) * 10) / 10;
+      const iesiriMasiniLitri = Math.round((iesiriMasiniPeZi.get(zi) ?? 0) * 10) / 10;
+      const iesiriLitri = Math.round((iesiriUtilajeLitri + iesiriMasiniLitri) * 10) / 10;
+      const alimentariMasini = (alimentariMasiniPeZiMap.get(zi) ?? []).sort((a, b) => (a.data_ora < b.data_ora ? 1 : -1));
       return {
         data: zi,
         alimentat_litri: alimentatLitri,
         alimentari,
         iesiri_litri: iesiriLitri,
+        iesiri_utilaje_litri: iesiriUtilajeLitri,
+        iesiri_masini_litri: iesiriMasiniLitri,
+        alimentari_masini: alimentariMasini,
         diferenta_neta_litri: Math.round((alimentatLitri - iesiriLitri) * 10) / 10,
       };
     });

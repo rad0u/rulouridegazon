@@ -5,11 +5,19 @@ import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 
 type Alimentare = { id: string; data_ora: string; cantitate_litri: number; pret_litru: number; note: string | null };
 
+// v2, 2026-09-24 (Radu): "La unele ferme autoturismele se alimenteaza din
+// tancul de motorina" — ieșirile zilnice includ acum și alimentările auto
+// (get-rezervor-central-miscari v2), defalcate explicit utilaje/mașini.
+type AlimentareMasina = { id: string; data_ora: string; cantitate_litri: number; note: string | null; masina_nume: string };
+
 type ZiMiscare = {
   data: string;
   alimentat_litri: number;
   alimentari: Alimentare[];
   iesiri_litri: number;
+  iesiri_utilaje_litri: number;
+  iesiri_masini_litri: number;
+  alimentari_masini: AlimentareMasina[];
   diferenta_neta_litri: number;
 };
 
@@ -413,7 +421,7 @@ export default function RezervorCentralScreen() {
                                   <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
                                     <th style={{ padding: '0.3rem' }}>Zi</th>
                                     <th style={{ padding: '0.3rem' }}>Alimentat</th>
-                                    <th style={{ padding: '0.3rem' }}>Ieșiri (consum utilaje)</th>
+                                    <th style={{ padding: '0.3rem' }}>Ieșiri (utilaje + auto)</th>
                                     <th style={{ padding: '0.3rem' }}>Diferență netă</th>
                                   </tr>
                                 </thead>
@@ -440,7 +448,26 @@ export default function RezervorCentralScreen() {
                                           '—'
                                         )}
                                       </td>
-                                      <td style={{ padding: '0.3rem' }}>{zi.iesiri_litri > 0 ? `−${zi.iesiri_litri} L` : '—'}</td>
+                                      <td style={{ padding: '0.3rem' }}>
+                                        {zi.iesiri_litri > 0 ? (
+                                          <>
+                                            −{zi.iesiri_litri} L
+                                            {zi.iesiri_masini_litri > 0 && (
+                                              <span style={{ color: '#666' }}>
+                                                {' '}
+                                                (utilaje {zi.iesiri_utilaje_litri} L, auto {zi.iesiri_masini_litri} L
+                                                {zi.alimentari_masini.length > 0 &&
+                                                  `: ${zi.alimentari_masini
+                                                    .map((a) => `${a.masina_nume} ${a.cantitate_litri} L`)
+                                                    .join(', ')}`}
+                                                )
+                                              </span>
+                                            )}
+                                          </>
+                                        ) : (
+                                          '—'
+                                        )}
+                                      </td>
                                       <td
                                         style={{
                                           padding: '0.3rem',

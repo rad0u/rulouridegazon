@@ -22,6 +22,12 @@ type Card = {
 
 const CARDURI_TOATE: Card[] = [
   { href: '/masini', titlu: 'Mașini', descriere: 'Flota de mașini, poziții live pe hartă, alocare pe fermă.', icon: '🚗' },
+  {
+    href: '/alimentari-auto',
+    titlu: 'Alimentări auto',
+    descriere: 'Alimentări din rezervorul central al fermei, la mașinile care nu merg la pompă.',
+    icon: '⛽',
+  },
   { href: '/curse', titlu: 'Curse', descriere: 'Traseele detectate automat — completează scopul și validează.', icon: '🛣️' },
   { href: '/foi-parcurs', titlu: 'Foi de parcurs', descriere: 'Rezumat lunar al flotei + foaia de parcurs detaliată per mașină.', icon: '📋' },
   { href: '/alerte', titlu: 'Alerte', descriere: 'Depășiri de viteză și intrări/ieșiri din zonele definite.', icon: '⚠️' },
