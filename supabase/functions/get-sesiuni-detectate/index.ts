@@ -58,6 +58,13 @@
 // ACCES: admin_ferma vede doar sesiunile propriei ferme (ferma_id dedus din
 // profilul lui, ignoră orice ferma_id trimis din client); admin_central
 // trebuie să specifice ferma_id explicit (poate vedea orice fermă).
+//
+// v3, 2026-09-24 (Radu): "muncă fără categorie" nu mai există ca listă de
+// alegere pentru șefii de fermă — vezi lib/operatiuniTypes.ts și
+// ActivitatiParceleScreen.tsx. Singura informație nouă de care are nevoie
+// front-end-ul ca să decidă ce formular arată e dacă utilajul e marcat
+// „utilaj de recoltare" (`utilaje.este_utilaj_recoltare`) — se adaugă acest
+// flag pe fiecare sesiune returnată.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -181,6 +188,7 @@ async function fetchToateRandurile(
 interface Sesiune {
   utilaj_id: string;
   utilaj_nume: string;
+  utilaj_recoltare: boolean;
   parcela_id: string;
   parcela_nume: string;
   inceput: string;
@@ -244,7 +252,7 @@ Deno.serve(async (req) => {
 
   const { data: utilajeRaw, error: utilajeError } = await adminClient
     .from('utilaje')
-    .select('id, nume')
+    .select('id, nume, este_utilaj_recoltare')
     .eq('ferma_id', fermaId)
     .eq('activ', true);
 
@@ -252,7 +260,7 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: `Eroare la citirea utilajelor: ${utilajeError.message}` }, 500);
   }
 
-  const utilaje = (utilajeRaw ?? []) as { id: string; nume: string }[];
+  const utilaje = (utilajeRaw ?? []) as { id: string; nume: string; este_utilaj_recoltare: boolean }[];
   if (utilaje.length === 0) {
     return jsonResponse({ zile, de_la, ferma_id: fermaId, are_parcele_desenate: false, sesiuni: [] });
   }
@@ -330,6 +338,7 @@ Deno.serve(async (req) => {
           sesiuni.push({
             utilaj_id: utilaj.id,
             utilaj_nume: utilaj.nume,
+            utilaj_recoltare: utilaj.este_utilaj_recoltare,
             parcela_id: current.parcelaId,
             parcela_nume: current.parcelaNume,
             inceput: current.start,

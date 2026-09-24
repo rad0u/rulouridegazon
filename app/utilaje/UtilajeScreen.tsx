@@ -181,8 +181,12 @@ export default function UtilajeScreen() {
   const [novTip, setNovTip] = useState('utilaj agricol');
   const [novFermaId, setNovFermaId] = useState('');
   const [novCapacitate, setNovCapacitate] = useState('');
+  const [novEsteRecoltare, setNovEsteRecoltare] = useState(false);
   const [novSaving, setNovSaving] = useState(false);
   const [novError, setNovError] = useState<string | null>(null);
+
+  const [recoltareSavingId, setRecoltareSavingId] = useState<string | null>(null);
+  const [recoltareError, setRecoltareError] = useState<string | null>(null);
 
   async function incarcaTraccarDevices() {
     setTraccarLoading(true);
@@ -253,6 +257,7 @@ export default function UtilajeScreen() {
       ferma_id: novFermaId,
       traccar_device_id: novDeviceId || null,
       tanc_capacitate_litri: capacitate,
+      este_utilaj_recoltare: novEsteRecoltare,
       activ: true,
     });
 
@@ -268,9 +273,35 @@ export default function UtilajeScreen() {
     setNovTip('utilaj agricol');
     setNovFermaId('');
     setNovCapacitate('');
+    setNovEsteRecoltare(false);
     setShowAddForm(false);
     void incarcaTraccarDevices();
     void reincarca();
+  }
+
+  // 2026-09-24 (Radu): utilaj de recoltare — la confirmarea sesiunilor din
+  // /activitati-parcele, nu se mai alege tipul de operațiune, doar
+  // suprafața (mp) de gazon recoltată. Toggle direct în tabel, fără mod de
+  // editare separat (ca la `activ` în alte ecrane) — e o simplă bifă.
+  async function toggleRecoltare(utilajId: string, urmatoare: boolean) {
+    setRecoltareSavingId(utilajId);
+    setRecoltareError(null);
+
+    const { error: updateError } = await supabase
+      .from('utilaje')
+      .update({ este_utilaj_recoltare: urmatoare })
+      .eq('id', utilajId);
+
+    setRecoltareSavingId(null);
+
+    if (updateError) {
+      setRecoltareError(updateError.message);
+      return;
+    }
+
+    setUtilaje((prev) =>
+      prev.map((u) => (u.utilaj_id === utilajId ? { ...u, este_utilaj_recoltare: urmatoare } : u)),
+    );
   }
 
   async function incarcaPoza(utilajId: string, file: File) {
@@ -529,6 +560,15 @@ export default function UtilajeScreen() {
               />
             </label>
 
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.8rem', paddingBottom: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={novEsteRecoltare}
+                onChange={(e) => setNovEsteRecoltare(e.target.checked)}
+              />
+              Utilaj de recoltare
+            </label>
+
             <button
               onClick={() => void salveazaUtilajNou()}
               disabled={novSaving}
@@ -607,6 +647,7 @@ export default function UtilajeScreen() {
                   <th style={{ padding: '0.4rem' }}>Status</th>
                   <th style={{ padding: '0.4rem' }}>Ultima poziție</th>
                   <th style={{ padding: '0.4rem' }}>Combustibil</th>
+                  <th style={{ padding: '0.4rem' }}>Recoltare</th>
                   <th style={{ padding: '0.4rem' }}></th>
                 </tr>
               </thead>
@@ -817,13 +858,22 @@ export default function UtilajeScreen() {
                             </>
                           )}
                         </td>
+                        <td style={{ padding: '0.4rem' }} onClick={(e) => e.stopPropagation()}>
+                          <input
+                            type="checkbox"
+                            checked={u.este_utilaj_recoltare}
+                            disabled={recoltareSavingId === u.utilaj_id}
+                            onChange={(e) => void toggleRecoltare(u.utilaj_id, e.target.checked)}
+                            title="Utilaj de recoltare — la confirmare, doar mp recoltați, fără listă de operațiuni"
+                          />
+                        </td>
                         <td style={{ padding: '0.4rem', color: '#666', fontSize: '0.8rem', whiteSpace: 'nowrap' }}>
                           {extins ? 'Ascunde istoric ▲' : 'Istoric parcele ▼'}
                         </td>
                       </tr>
                       {extins && (
                         <tr key={`${u.utilaj_id}-istoric`}>
-                          <td colSpan={7} style={{ padding: '0.75rem', background: '#fafafa' }}>
+                          <td colSpan={8} style={{ padding: '0.75rem', background: '#fafafa' }}>
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.5rem' }}>
                               <strong>Istoric ore pe parcele — {u.nume}</strong>
                               <select
@@ -910,6 +960,12 @@ export default function UtilajeScreen() {
           {capacitateError && (
             <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px', margin: 0 }}>
               Eroare la salvarea capacității tancului: {capacitateError}
+            </p>
+          )}
+
+          {recoltareError && (
+            <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px', margin: 0 }}>
+              Eroare la salvarea utilajului de recoltare: {recoltareError}
             </p>
           )}
 

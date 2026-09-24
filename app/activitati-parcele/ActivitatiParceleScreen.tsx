@@ -3,28 +3,30 @@
 import { useEffect, useState } from 'react';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 import { useUserRole } from '../../lib/useUserRole';
-import {
-  LABEL_OPERATIUNE,
-  Substanta,
-  TIPURI_CU_SUBSTANTE,
-  TIPURI_OPERATIUNE,
-  TipOperatiune,
-} from '../../lib/operatiuniTypes';
+import { LABEL_OPERATIUNE, Substanta, TIPURI_CU_SUBSTANTE, TipOperatiune } from '../../lib/operatiuniTypes';
 
 // Coadă de sesiuni de lucru detectate automat din traseul GPS al utilajelor
 // (vezi supabase/functions/get-sesiuni-detectate) — Radu, 2026-09-19:
 // "munca fără utilaj nu există", deci acest ecran înlocuiește complet
 // selecția manuală de parcelă din ParcelaPanel. Adminul de fermă nu mai
-// alege parcela — aplicația a dedus-o deja din traseu — ci doar confirmă tipul
-// de operațiune și, dacă e cazul, substanțele folosite (filtrate pe stocul
-// fermei, ca la orice altă înregistrare de operațiune).
+// alege parcela — aplicația a dedus-o deja din traseu.
+//
+// v2, 2026-09-24 (Radu): șefii de fermă nu mai aleg tipul de operațiune
+// dintr-o listă — doar dacă a fost FERTILIZARE (solidă sau foliară, cu
+// substanță + cantitate) sau, pentru utilajele marcate "utilaj de
+// recoltare" (checkbox nou în /utilaje), doar suprafața (mp) de gazon
+// recoltată. Orice altă sesiune se confirmă direct, fără nicio alegere de
+// tip (salvată intern ca 'Altele').
 //
 // ParcelaPanel rămâne neschimbat — folosit acum doar pentru istoricul pe
-// parcelă și pentru corectări manuale punctuale, nu ca flux zilnic principal.
+// parcelă și pentru corectări manuale punctuale (admin_central), nu ca flux
+// zilnic principal — acolo lista completă de tipuri de operațiune rămâne
+// disponibilă.
 
 type Sesiune = {
   utilaj_id: string;
   utilaj_nume: string;
+  utilaj_recoltare: boolean;
   parcela_id: string;
   parcela_nume: string;
   inceput: string;
@@ -42,8 +44,10 @@ type Raport = {
 type SubstantaLinie = { substanta_id: string; cantitate: string };
 
 type FormSesiune = {
-  tip: TipOperatiune | '';
+  esteFertilizare: boolean;
+  tipFertilizare: TipOperatiune | '';
   oreLucru: string;
+  cantitateMpRecoltat: string;
   note: string;
   substanteLinii: SubstantaLinie[];
   saving: boolean;
@@ -80,7 +84,16 @@ function oreLucruImplicit(ore: number): string {
 }
 
 function formGol(ore: number): FormSesiune {
-  return { tip: '', oreLucru: oreLucruImplicit(ore), note: '', substanteLinii: [], saving: false, error: null };
+  return {
+    esteFertilizare: false,
+    tipFertilizare: '',
+    oreLucru: oreLucruImplicit(ore),
+    cantitateMpRecoltat: '',
+    note: '',
+    substanteLinii: [],
+    saving: false,
+    error: null,
+  };
 }
 
 export default function ActivitatiParceleScreen() {
@@ -188,12 +201,17 @@ export default function ActivitatiParceleScreen() {
     setForms((prev) => ({ ...prev, [cheie]: { ...prev[cheie], ...patch } }));
   }
 
-  function selecteazaTip(cheie: string, sesiune: Sesiune, tip: TipOperatiune) {
+  function bifeazaFertilizare(cheie: string, esteFertilizare: boolean) {
     actualizeazaForm(cheie, {
-      tip,
-      substanteLinii: TIPURI_CU_SUBSTANTE.includes(tip) ? [{ substanta_id: '', cantitate: '' }] : [],
+      esteFertilizare,
+      tipFertilizare: '',
+      substanteLinii: esteFertilizare ? [{ substanta_id: '', cantitate: '' }] : [],
       error: null,
     });
+  }
+
+  function selecteazaTipFertilizare(cheie: string, tip: TipOperatiune) {
+    actualizeazaForm(cheie, { tipFertilizare: tip, error: null });
   }
 
   function adaugaSubstantaLinie(cheie: string) {
@@ -223,10 +241,7 @@ export default function ActivitatiParceleScreen() {
   async function confirmaSesiune(sesiune: Sesiune) {
     const cheie = cheieSesiune(sesiune);
     const form = forms[cheie];
-    if (!form || !form.tip) {
-      actualizeazaForm(cheie, { error: 'Alege tipul de operațiune.' });
-      return;
-    }
+    if (!form) return;
 
     const oreNum = form.oreLucru === '' ? null : Number(form.oreLucru);
     if (
@@ -237,19 +252,41 @@ export default function ActivitatiParceleScreen() {
       return;
     }
 
-    const needsSubstante = TIPURI_CU_SUBSTANTE.includes(form.tip);
-    const liniiValide = form.substanteLinii.filter((l) => l.substanta_id && l.cantitate);
+    let tip: TipOperatiune;
+    let cantitateMpRecoltat: number | null = null;
+    let liniiValide: SubstantaLinie[] = [];
+    const needsSubstante = !sesiune.utilaj_recoltare && form.esteFertilizare;
 
-    if (needsSubstante && liniiValide.length === 0) {
-      actualizeazaForm(cheie, { error: 'Adaugă cel puțin o substanță folosită (cu cantitate).' });
-      return;
-    }
-    for (const linie of liniiValide) {
-      const cant = Number(linie.cantitate);
-      if (Number.isNaN(cant) || cant <= 0) {
-        actualizeazaForm(cheie, { error: 'Cantitatea trebuie să fie un număr pozitiv pentru fiecare substanță.' });
+    if (sesiune.utilaj_recoltare) {
+      // Utilaj de recoltare: nicio alegere de tip, doar suprafața recoltată.
+      const mp = form.cantitateMpRecoltat === '' ? NaN : Number(form.cantitateMpRecoltat);
+      if (Number.isNaN(mp) || mp <= 0) {
+        actualizeazaForm(cheie, { error: 'Introdu suprafața recoltată (mp), un număr pozitiv.' });
         return;
       }
+      tip = 'Recoltare';
+      cantitateMpRecoltat = mp;
+    } else if (form.esteFertilizare) {
+      if (!form.tipFertilizare) {
+        actualizeazaForm(cheie, { error: 'Alege tipul de fertilizare (solidă sau foliară).' });
+        return;
+      }
+      tip = form.tipFertilizare;
+      liniiValide = form.substanteLinii.filter((l) => l.substanta_id && l.cantitate);
+      if (liniiValide.length === 0) {
+        actualizeazaForm(cheie, { error: 'Adaugă cel puțin o substanță folosită (cu cantitate).' });
+        return;
+      }
+      for (const linie of liniiValide) {
+        const cant = Number(linie.cantitate);
+        if (Number.isNaN(cant) || cant <= 0) {
+          actualizeazaForm(cheie, { error: 'Cantitatea trebuie să fie un număr pozitiv pentru fiecare substanță.' });
+          return;
+        }
+      }
+    } else {
+      // Nicio fertilizare, utilaj obișnuit — confirmăm direct, fără tip ales.
+      tip = 'Altele';
     }
 
     actualizeazaForm(cheie, { saving: true, error: null });
@@ -262,9 +299,10 @@ export default function ActivitatiParceleScreen() {
       .from('operatiuni')
       .insert({
         parcela_id: sesiune.parcela_id,
-        tip: form.tip,
+        tip,
         data: ziuaLocala(sesiune.inceput),
         ore_lucru: oreNum,
+        cantitate_mp_recoltat: cantitateMpRecoltat,
         note: form.note.trim() || null,
         user_id: user?.id ?? null,
         utilaj_id: sesiune.utilaj_id,
@@ -390,9 +428,10 @@ export default function ActivitatiParceleScreen() {
 
       <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
         Aplicația detectează automat, din traseul GPS, unde a lucrat fiecare utilaj — nu mai trebuie să alegi
-        parcela. Alege doar tipul de operațiune (și substanțele, dacă e cazul) pentru fiecare activitate de mai
-        jos și apasă „Confirmă". O sesiune apare aici doar după ce s-a încheiat (utilajul a plecat din parcelă
-        sau a oprit motorul) și doar dacă a durat peste 10 minute.
+        parcela. Pentru utilajele obișnuite, confirmă direct (bifează doar dacă a fost fertilizare, ca să alegi
+        substanța și cantitatea) — pentru utilajele de recoltare, introdu doar suprafața (mp) de gazon recoltată.
+        O sesiune apare aici doar după ce s-a încheiat (utilajul a plecat din parcelă sau a oprit motorul) și doar
+        dacă a durat peste 10 minute.
       </p>
 
       {role === 'admin_central' && !fermaSelectata && <p>Alege o fermă pentru a vedea activitățile detectate.</p>}
@@ -417,13 +456,15 @@ export default function ActivitatiParceleScreen() {
         {sesiuniDeAfisat.map((sesiune) => {
           const cheie = cheieSesiune(sesiune);
           const form = forms[cheie] ?? formGol(sesiune.ore);
-          const needsSubstante = form.tip !== '' && TIPURI_CU_SUBSTANTE.includes(form.tip);
 
           return (
             <div key={cheie} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.6rem' }}>
                 <div>
                   <strong>{sesiune.utilaj_nume}</strong> — parcela <strong>{sesiune.parcela_nume}</strong>
+                  {sesiune.utilaj_recoltare && (
+                    <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#8a5a00' }}>utilaj de recoltare</span>
+                  )}
                   <div style={{ fontSize: '0.85rem', color: '#666' }}>
                     {formatDataOra(sesiune.inceput)}, {formatOra(sesiune.inceput)}–{formatOra(sesiune.sfarsit)} ·{' '}
                     {sesiune.ore}h
@@ -432,22 +473,6 @@ export default function ActivitatiParceleScreen() {
               </div>
 
               <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-                <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
-                  Tip operațiune
-                  <select
-                    value={form.tip}
-                    onChange={(e) => selecteazaTip(cheie, sesiune, e.target.value as TipOperatiune)}
-                    style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '200px' }}
-                  >
-                    <option value="">Alege tipul</option>
-                    {TIPURI_OPERATIUNE.map((tip) => (
-                      <option key={tip} value={tip}>
-                        {LABEL_OPERATIUNE[tip]}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
                 <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
                   Ore de lucru
                   <input
@@ -462,6 +487,31 @@ export default function ActivitatiParceleScreen() {
                   />
                 </label>
 
+                {sesiune.utilaj_recoltare ? (
+                  <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+                    Suprafață recoltată (mp)
+                    <input
+                      type="number"
+                      min="0"
+                      step="1"
+                      inputMode="numeric"
+                      placeholder="mp"
+                      value={form.cantitateMpRecoltat}
+                      onChange={(e) => actualizeazaForm(cheie, { cantitateMpRecoltat: e.target.value })}
+                      style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '140px' }}
+                    />
+                  </label>
+                ) : (
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', paddingBottom: '0.4rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={form.esteFertilizare}
+                      onChange={(e) => bifeazaFertilizare(cheie, e.target.checked)}
+                    />
+                    A fost fertilizare?
+                  </label>
+                )}
+
                 <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', flex: '1 1 160px' }}>
                   Notă (opțional)
                   <input
@@ -473,47 +523,65 @@ export default function ActivitatiParceleScreen() {
                 </label>
               </div>
 
-              {needsSubstante && (
+              {!sesiune.utilaj_recoltare && form.esteFertilizare && (
                 <div style={{ marginTop: '0.6rem' }}>
-                  <span style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.8rem' }}>
-                    Substanțe / sămânță folosită
-                  </span>
-                  {form.substanteLinii.map((linie, index) => (
-                    <div key={index} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
-                      <select
-                        value={linie.substanta_id}
-                        onChange={(e) => actualizeazaSubstantaLinie(cheie, index, 'substanta_id', e.target.value)}
-                        style={{ flex: '1 1 180px', padding: '0.5rem' }}
-                      >
-                        <option value="">Alege substanță</option>
-                        {substanteFerma.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.nume} ({s.unitate_masura}) — stoc {s.stoc_curent ?? 0}
-                          </option>
-                        ))}
-                      </select>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Cantitate"
-                        value={linie.cantitate}
-                        onChange={(e) => actualizeazaSubstantaLinie(cheie, index, 'cantitate', e.target.value)}
-                        style={{ flex: '1 1 100px', padding: '0.5rem' }}
-                      />
-                      <button
-                        type="button"
-                        onClick={() => eliminaSubstantaLinie(cheie, index)}
-                        disabled={form.substanteLinii.length === 1}
-                        style={{ flex: '0 0 auto', padding: '0.5rem 0.9rem' }}
-                      >
-                        ✕
-                      </button>
-                    </div>
-                  ))}
-                  <button type="button" onClick={() => adaugaSubstantaLinie(cheie)}>
-                    + Adaugă substanță
-                  </button>
+                  <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', maxWidth: '260px' }}>
+                    Tip fertilizare
+                    <select
+                      value={form.tipFertilizare}
+                      onChange={(e) => selecteazaTipFertilizare(cheie, e.target.value as TipOperatiune)}
+                      style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc' }}
+                    >
+                      <option value="">Alege tipul</option>
+                      {TIPURI_CU_SUBSTANTE.map((tip) => (
+                        <option key={tip} value={tip}>
+                          {LABEL_OPERATIUNE[tip]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <div style={{ marginTop: '0.6rem' }}>
+                    <span style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.8rem' }}>
+                      Substanțe / sămânță folosită
+                    </span>
+                    {form.substanteLinii.map((linie, index) => (
+                      <div key={index} style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}>
+                        <select
+                          value={linie.substanta_id}
+                          onChange={(e) => actualizeazaSubstantaLinie(cheie, index, 'substanta_id', e.target.value)}
+                          style={{ flex: '1 1 180px', padding: '0.5rem' }}
+                        >
+                          <option value="">Alege substanță</option>
+                          {substanteFerma.map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.nume} ({s.unitate_masura}) — stoc {s.stoc_curent ?? 0}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="Cantitate"
+                          value={linie.cantitate}
+                          onChange={(e) => actualizeazaSubstantaLinie(cheie, index, 'cantitate', e.target.value)}
+                          style={{ flex: '1 1 100px', padding: '0.5rem' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => eliminaSubstantaLinie(cheie, index)}
+                          disabled={form.substanteLinii.length === 1}
+                          style={{ flex: '0 0 auto', padding: '0.5rem 0.9rem' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    <button type="button" onClick={() => adaugaSubstantaLinie(cheie)}>
+                      + Adaugă substanță
+                    </button>
+                  </div>
                 </div>
               )}
 

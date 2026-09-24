@@ -33,6 +33,7 @@ export type UtilajPozitie = {
   combustibil_nivel: number | null;
   combustibil_data: string | null;
   combustibil_capacitate_litri: number | null;
+  este_utilaj_recoltare: boolean;
 };
 
 // Hărțile/imaginile suprapuse calibrate ale fermelor (aceleași ca la

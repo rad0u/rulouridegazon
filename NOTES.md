@@ -1549,6 +1549,58 @@ staționare, sesiuni neconfirmate încă).
 (nou), `app/dashboard/cost-productie/CostProductieScreen.tsx`,
 `components/LayoutShell.tsx`.
 
+### Confirmare simplificată pe /activitati-parcele — doar fertilizare sau recoltare (2026-09-24)
+
+Radu: "șefii de fermă nu trebuie să mai aleagă din listă tipul operațiunii
+efectuate în parcele, decât pentru fertilizare solidă sau foliară, de unde
+vor alege și ce substanță au folosit și cantitatea. Restul operațiunilor nu
+mă mai interesează, cu excepția recoltării, unde vor introduce cantitatea
+în mp de gazon recoltată. Recoltarea nu se poate face decât cu un anumit
+utilaj de recoltare" — cere un checkbox în configurarea utilajelor ca să
+marcheze utilajele de recoltare; la acestea, în loc de listă de operațiuni,
+doar mp de gazon recoltat.
+
+**Citire aplicată** (nicio ambiguitate rămasă nerezolvată nu a fost
+verificată explicit cu Radu — implementat direct, de raportat dacă nu
+corespunde): la confirmarea unei sesiuni GPS detectate din
+`/activitati-parcele`,
+- utilaj marcat „de recoltare" → fără nicio alegere de tip; un singur câmp
+  nou, „Suprafață recoltată (mp)", obligatoriu; tipul salvat automat e
+  `Recoltare`;
+- utilaj obișnuit → o singură bifă „A fost fertilizare?"; nebifat → se
+  confirmă direct, tip salvat automat `Altele` (bucket generic, fără altă
+  informație cerută); bifat → apare un select cu doar 2 opțiuni (Fertilizare
+  solidă / Tratamente foliare — aceleași 2 tipuri care cereau deja substanță
+  + cantitate, `TIPURI_CU_SUBSTANTE`), apoi substanța + cantitatea, exact ca
+  înainte.
+- Ore de lucru rămâne un câmp separat, neschimbat (pre-completat din durata
+  GPS a sesiunii, editabil 0–8h) — folosit în continuare la manoperă în
+  cost-productie, indiferent de tip.
+
+**Schema**: migrare `utilaje_recoltare_si_operatiuni_mp_recoltat` —
+`utilaje.este_utilaj_recoltare boolean NOT NULL DEFAULT false` (checkbox nou
+în `/utilaje`, coloană nouă lângă „Combustibil" în tabel + în formularul
+„Adaugă utilaj"); `operatiuni.cantitate_mp_recoltat numeric` (populat doar
+pentru `tip = 'Recoltare'`); `operatiuni_tip_check` extins cu valoarea nouă
+`'Altele'`. `Udat`/`Tuns`/`Aspirat` rămân valori valide în DB (istoric +
+corectări manuale din ParcelaPanel, admin_central — acel formular păstrează
+lista completă de tipuri, neschimbat) — doar nu mai sunt oferite ca opțiuni
+în fluxul zilnic de confirmare a șefilor de fermă.
+
+**Backend**: `get-sesiuni-detectate` v3 adaugă `utilaj_recoltare: boolean` pe
+fiecare sesiune întoarsă (citit din `utilaje.este_utilaj_recoltare`) — asta
+e tot ce are nevoie front-end-ul ca să decidă ce formular arată.
+`get-utilaje-positions` v12 adaugă `este_utilaj_recoltare` la fiecare rând,
+pentru tabelul/checkbox-ul din `/utilaje`.
+
+**Fișiere**: `supabase/functions/get-sesiuni-detectate/index.ts` (v3),
+`supabase/functions/get-utilaje-positions/index.ts` (v12),
+`lib/operatiuniTypes.ts`, `app/activitati-parcele/ActivitatiParceleScreen.tsx`,
+`app/utilaje/UtilajeScreen.tsx`, `components/UtilajeMapView.tsx`
+(tip `UtilajPozitie`), `components/ParcelaPanel.tsx` (afișare `mp recoltați`
+în istoric), `supabase/schema-fuel-tracking.sql`,
+`supabase/schema-operatiuni-recoltare-parcele.sql` (nou).
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).

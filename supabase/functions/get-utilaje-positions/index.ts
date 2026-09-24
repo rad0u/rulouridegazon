@@ -5,6 +5,11 @@
 //
 // Secrete necesare (Supabase Dashboard -> Edge Functions -> Secrets):
 //   TRACCAR_URL, TRACCAR_USER, TRACCAR_PASSWORD
+//
+// v12, 2026-09-24 (Radu): adăugat `este_utilaj_recoltare` la fiecare utilaj
+// returnat — checkbox nou în /utilaje ("Utilaj de recoltare"), folosit de
+// ActivitatiParceleScreen (prin get-sesiuni-detectate) ca să decidă dacă
+// arată selecția de tip operațiune sau doar suprafața (mp) recoltată.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -87,7 +92,7 @@ Deno.serve(async (req) => {
 
   const { data: utilaje, error: utilajeError } = await adminClient
     .from('utilaje')
-    .select('id, nume, tip, traccar_device_id, ferma_id, tanc_capacitate_litri, poza_url, ferme(nume)')
+    .select('id, nume, tip, traccar_device_id, ferma_id, tanc_capacitate_litri, poza_url, este_utilaj_recoltare, ferme(nume)')
     .eq('activ', true);
 
   if (utilajeError) {
@@ -136,7 +141,7 @@ Deno.serve(async (req) => {
   const deviceByImei = new Map(devices.map((d) => [d.uniqueId, d]));
   const positionByDeviceId = new Map(positions.map((p) => [p.deviceId, p]));
 
-  // Fallback: GET /api/positions?all=true întoarce doar „ultima poziție"
+  // Fallback: GET /api/positions?all=true întoarce doar „ultima poziție“
   // conform pointer-ului intern al Traccar (device.positionId), care nu se
   // actualizează mereu la fel de fiabil ca istoricul real de poziții —
   // confirmat 2026-09-11: unele device-uri au poziție vizibilă în Traccar
@@ -192,6 +197,7 @@ Deno.serve(async (req) => {
       combustibil_nivel: fuel?.nivel_litri ?? null,
       combustibil_data: fuel?.data_ora ?? null,
       combustibil_capacitate_litri: u.tanc_capacitate_litri ?? null,
+      este_utilaj_recoltare: u.este_utilaj_recoltare ?? false,
     };
   });
 

@@ -137,7 +137,9 @@ export default function ParcelaPanel({
     setLoadingIstoric(true);
     const { data: rows, error: fetchError } = await supabase
       .from('operatiuni')
-      .select('id,tip,data,ore_lucru,note,operatiuni_substante(cantitate,substante(nume,unitate_masura))')
+      .select(
+        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,operatiuni_substante(cantitate,substante(nume,unitate_masura))',
+      )
       .eq('parcela_id', parcela.id)
       .order('data', { ascending: false });
 
@@ -536,6 +538,7 @@ export default function ParcelaPanel({
               <li key={op.id} style={{ marginBottom: '0.5rem' }}>
                 <strong>{op.data}</strong> — {LABEL_OPERATIUNE[op.tip]}
                 {op.ore_lucru != null && <> · {op.ore_lucru}h</>}
+                {op.cantitate_mp_recoltat != null && <> · {op.cantitate_mp_recoltat} mp recoltați</>}
                 {op.operatiuni_substante && op.operatiuni_substante.length > 0 && (
                   <div style={{ fontSize: '0.85rem', color: '#555' }}>
                     {op.operatiuni_substante

@@ -24,6 +24,17 @@ CREATE TABLE IF NOT EXISTS public.utilaje (
   created_at timestamptz DEFAULT now()
 );
 
+-- ─────────────────────────────────────────────────────────────────────────
+-- 2026-09-24: migrare "utilaje_recoltare_si_operatiuni_mp_recoltat" — coloană
+-- nouă pe utilaje, checkbox "Utilaj de recoltare" în /utilaje. La confirmarea
+-- sesiunilor din /activitati-parcele, un utilaj marcat astfel nu mai are
+-- listă de tip de operațiune — doar suprafața (mp) de gazon recoltată (vezi
+-- operatiuni.cantitate_mp_recoltat în schema-operatiuni-recoltare-parcele.sql).
+-- ─────────────────────────────────────────────────────────────────────────
+
+ALTER TABLE public.utilaje ADD COLUMN IF NOT EXISTS este_utilaj_recoltare boolean NOT NULL DEFAULT false;
+COMMENT ON COLUMN public.utilaje.este_utilaj_recoltare IS 'Utilaj de recoltare — la confirmarea sesiunilor din /activitati-parcele, nu se mai alege tipul de operațiune, doar suprafața (mp) de gazon recoltată.';
+
 CREATE TABLE IF NOT EXISTS public.combustibil_citiri (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   utilaj_id uuid NOT NULL REFERENCES public.utilaje(id),
