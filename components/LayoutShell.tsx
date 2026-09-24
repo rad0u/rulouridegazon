@@ -185,8 +185,8 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                       </Link>
                       {role === 'admin_central' && (
                         <>
-                          <Link href="/combustibil" style={navLinkStyle} onClick={closeMenu}>
-                            Combustibil
+                          <Link href="/combustibil-parcele" style={navLinkStyle} onClick={closeMenu}>
+                            Combustibil pe parcele
                           </Link>
                           <Link href="/realimentari-utilaje" style={navLinkStyle} onClick={closeMenu}>
                             Realimentări utilaje

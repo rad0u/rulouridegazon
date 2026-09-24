@@ -1484,6 +1484,71 @@ aceeași formulă `net.http_post` + `app.settings.anon_key` ca la utilaje.
    deja setate în Supabase (reutilizate de la modulul utilaje) — nimic nou
    de configurat acolo.
 
+### Combustibil alocat pe parcele — cost de producție direct pe parcelă (2026-09-24)
+
+Radu, pentru calculul prețului de producție: "este esențial să putem aloca
+consumul de motorină al unui utilaj pe fiecare parcelă în parte [...] dacă
+un utilaj a lucrat fragmentat pe o parcelă, vreau să știu doar cât a lucrat
+în total pe parcela respectivă în intervalul dat, câtă motorină a consumat
+în parcela respectivă în intervalul dat."
+
+**Decizii confirmate de Radu** (2 întrebări):
+- Unde apare defalcarea: pagină nouă dedicată **și** direct în Cost de
+  producție (a ales ambele opțiuni — nu doar una). Raportul vechi
+  „/combustibil" nu-l mai interesează ca raport principal.
+- Interval de alocare per sesiune: exact intervalul GPS detectat (nu ore
+  rotunjite manual).
+
+**Ce face posibilă alocarea, fără nicio migrare nouă**: tabela `operatiuni`
+avea deja `utilaj_id` + `parcela_id` + `sesiune_inceput`/`sesiune_sfarsit`,
+completate când un admin confirmă din `/activitati-parcele` o sesiune de
+lucru detectată automat din GPS (vezi 5x). Astea sunt exact granița de timp
+de care era nevoie — tot ce a trebuit e cod nou de calcul, nu schemă nouă.
+
+**`get-combustibil-parcele` (nou, `/combustibil-parcele`, admin_central
+only)**: pentru un interval `de_la`/`pana_la` (implicit luna curentă) și
+opțional o fermă, ia toate sesiunile confirmate din `operatiuni` din
+interval; pentru fiecare, calculează bilanț de masă strict pe fereastra
+`[sesiune_inceput, sesiune_sfarsit]`:
+`consum_sesiune = max(0, nivel(început) − nivel(sfârșit) + realimentări_confirmate_în_interval)`,
+folosind aceleași funcții de curățare a zgomotului senzorului
+(`filtreazaCitiriPlauzibile`, `eliminaFluctuatiiTranzitorii`,
+`extrageExtreme`) din v15 al `get-combustibil-report`. Sesiunile fragmentate
+pe aceeași parcelă se însumează (ore + litri), exact cum a cerut Radu.
+Utilajele fără senzor de combustibil calibrat arată doar orele per parcelă
+(litri = null). Raportul mai arată, ca reper, consumul total cumulat pe zi
+(bilanț de masă pe toată ziua, nu doar pe sesiuni confirmate) — diferența
+față de suma alocată e motorină nealocată unei parcele (deplasare,
+staționare, sesiuni neconfirmate încă).
+
+**`get-cost-productie` v2**: două schimbări.
+1. Algoritmul de consum lunar la nivel de fermă era o simplă sumă a
+   scăderilor negative între citiri consecutive — aceeași eroare de
+   dublă-numărare a zgomotului senzorului pe care v15 a corectat-o în
+   `get-combustibil-report`. Înlocuit cu bilanț de masă pe lună calendaristică
+   (`consumPeLuna`), la fel ca varianta pe zi/pe sesiune.
+2. Fiecare rând fermă+lună are acum și `parcele: [...]` — manoperă,
+   substanțe și motorină (calculată identic cu `get-combustibil-parcele`,
+   pe aceleași sesiuni confirmate deja interogate) defalcate per parcelă —
+   plus `combustibil_nealocat_litri` (motorină din bilanțul lunar care nu
+   s-a putut atribui unei sesiuni confirmate).
+
+**Front-end**:
+- Pagină nouă `/combustibil-parcele` (`CombustibilParceleScreen.tsx`) —
+  interval + fermă opțională, câte un tabel per utilaj cu parcelele
+  lucrate (ore, litri, nr. sesiuni) + consumul zilnic total, opțional
+  expandabil, ca reper. Înlocuiește `/combustibil` ca link din meniu
+  (secțiunea Utilaje → „Combustibil pe parcele"); `/combustibil` (raportul
+  vechi) rămâne funcțional la adresa lui, doar nu mai e legat din meniu.
+- `CostProductieScreen.tsx`: fiecare rând fermă+lună e acum expandabil
+  (click) și arată defalcarea pe parcele (manoperă/substanțe/motorină/total)
+  plus motorina nealocată, dacă există.
+
+**Fișiere**: `supabase/functions/get-combustibil-parcele/index.ts` (nou),
+`supabase/functions/get-cost-productie/index.ts` (v2), `app/combustibil-parcele/`
+(nou), `app/dashboard/cost-productie/CostProductieScreen.tsx`,
+`components/LayoutShell.tsx`.
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).
@@ -1508,6 +1573,10 @@ aceeași formulă `net.http_post` + `app.settings.anon_key` ca la utilaje.
 - `supabase/functions/sync-traccar-masini/`, `get-masini-positions/`, `get-foaie-parcurs/` — modulul flotă auto (vezi secțiunea 5, „Flotă auto").
 - `components/MasiniMapView.tsx`, `components/GeofenceMapEditor.tsx`, `app/masini/`, `app/curse/`, `app/foi-parcurs/`, `app/geofences/`, `app/alerte/` — paginile modulului flotă auto.
 - `app/substante/SubstanteScreen.tsx` — pagina de gestiune substanțe (nomenclator + alimentare + stoc + istoric, vezi secțiunea 5o).
+- `supabase/functions/get-combustibil-parcele/` — combustibil + ore alocate pe parcelă
+  din sesiunile GPS confirmate (`/combustibil-parcele`, admin_central only, vezi secțiunea
+  „Combustibil alocat pe parcele").
+- `app/combustibil-parcele/CombustibilParceleScreen.tsx` — ecranul raportului de mai sus.
 
 ## 7. Ce rămâne pentru faza 2 (neschimbat față de spec-ul inițial din CLAUDE.md)
 

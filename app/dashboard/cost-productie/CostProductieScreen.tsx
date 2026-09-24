@@ -1,8 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { supabase, supabaseUrl } from '../../../lib/supabaseClient';
 import { useUserRole } from '../../../lib/useUserRole';
+
+type RandParcela = {
+  parcela_id: string;
+  parcela_nume: string;
+  labor: number;
+  material: number;
+  combustibil_litri: number;
+  combustibil_cost: number | null;
+  total: number;
+};
 
 type RandCost = {
   ferma_id: string;
@@ -13,9 +23,11 @@ type RandCost = {
   indirect: number;
   combustibil_litri: number;
   combustibil_cost: number | null;
+  combustibil_nealocat_litri: number;
   total: number;
   area: number;
   costPerMp: number;
+  parcele: RandParcela[];
 };
 
 function formatLei(valoare: number): string {
@@ -32,12 +44,17 @@ function formatPeriod(period: string): string {
   return idx >= 0 && idx < 12 ? `${nume[idx]} ${an}` : period;
 }
 
+function cheie(r: RandCost): string {
+  return `${r.ferma_id}-${r.period}`;
+}
+
 export default function CostProductieScreen() {
   const { role, loading: roleLoading } = useUserRole();
 
   const [rows, setRows] = useState<RandCost[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [expandat, setExpandat] = useState<Record<string, boolean>>({});
 
   async function incarca() {
     setLoading(true);
@@ -118,7 +135,9 @@ export default function CostProductieScreen() {
         × prețul mediu al fiecărei alimentări a rezervorului) + costuri indirecte (facturi, salarii,
         chirii etc. de pe /cheltuieli-indirecte), pe fermă și lună calendaristică. Combustibilul apare
         cu cost doar din lunile de după prima alimentare a rezervorului cu preț înregistrat — pentru
-        lunile mai vechi arată litrii consumați, dar fără cost (preț necunoscut).
+        lunile mai vechi arată litrii consumați, dar fără cost (preț necunoscut). Apasă pe un rând
+        pentru defalcarea pe parcele (manoperă, substanțe și motorina alocată din sesiunile GPS
+        confirmate în /activitati-parcele — vezi și raportul dedicat „Combustibil pe parcele”).
       </p>
 
       {error && (
@@ -132,6 +151,7 @@ export default function CostProductieScreen() {
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
             <thead>
               <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                <th style={{ padding: '0.4rem' }} />
                 <th style={{ padding: '0.4rem' }}>Fermă</th>
                 <th style={{ padding: '0.4rem' }}>Lună</th>
                 <th style={{ padding: '0.4rem', textAlign: 'right' }}>Manoperă</th>
@@ -146,38 +166,95 @@ export default function CostProductieScreen() {
             <tbody>
               {rows.length === 0 && (
                 <tr>
-                  <td colSpan={9} style={{ padding: '0.75rem', color: '#666' }}>
+                  <td colSpan={10} style={{ padding: '0.75rem', color: '#666' }}>
                     Niciun cost înregistrat încă (nici operațiuni, nici cheltuieli indirecte, nici consum de motorină).
                   </td>
                 </tr>
               )}
-              {rows.map((r) => (
-                <tr key={`${r.ferma_id}-${r.period}`} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                  <td style={{ padding: '0.4rem' }}>{r.ferma}</td>
-                  <td style={{ padding: '0.4rem' }}>{formatPeriod(r.period)}</td>
-                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>{formatLei(r.labor)}</td>
-                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>{formatLei(r.material)}</td>
-                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>{formatLei(r.indirect)}</td>
-                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>
-                    {r.combustibil_litri > 0 ? (
-                      <>
-                        {r.combustibil_litri} L
-                        {r.combustibil_cost !== null ? ` — ${formatLei(r.combustibil_cost)}` : ' — preț necunoscut'}
-                      </>
-                    ) : (
-                      '—'
+              {rows.map((r) => {
+                const k = cheie(r);
+                const deschis = !!expandat[k];
+                const areParcele = r.parcele.length > 0;
+                return (
+                  <Fragment key={k}>
+                    <tr
+                      onClick={() => areParcele && setExpandat((prev) => ({ ...prev, [k]: !prev[k] }))}
+                      style={{ borderBottom: '1px solid #f0f0f0', cursor: areParcele ? 'pointer' : 'default' }}
+                    >
+                      <td style={{ padding: '0.4rem', color: '#999', width: '1.5rem' }}>
+                        {areParcele ? (deschis ? '▾' : '▸') : ''}
+                      </td>
+                      <td style={{ padding: '0.4rem' }}>{r.ferma}</td>
+                      <td style={{ padding: '0.4rem' }}>{formatPeriod(r.period)}</td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{formatLei(r.labor)}</td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{formatLei(r.material)}</td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{formatLei(r.indirect)}</td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>
+                        {r.combustibil_litri > 0 ? (
+                          <>
+                            {r.combustibil_litri} L
+                            {r.combustibil_cost !== null ? ` — ${formatLei(r.combustibil_cost)}` : ' — preț necunoscut'}
+                          </>
+                        ) : (
+                          '—'
+                        )}
+                      </td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 600 }}>{formatLei(r.total)}</td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{r.area.toLocaleString('ro-RO')} mp</td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{r.costPerMp.toFixed(2)} lei/mp</td>
+                    </tr>
+                    {deschis && areParcele && (
+                      <tr key={`${k}-detaliu`}>
+                        <td />
+                        <td colSpan={9} style={{ padding: '0.5rem 0.4rem 1rem' }}>
+                          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem', background: '#fafafa' }}>
+                            <thead>
+                              <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                                <th style={{ padding: '0.3rem 0.5rem' }}>Parcelă</th>
+                                <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Manoperă</th>
+                                <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Substanțe</th>
+                                <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Motorină</th>
+                                <th style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>Total</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {r.parcele.map((p) => (
+                                <tr key={p.parcela_id} style={{ borderBottom: '1px solid #eee' }}>
+                                  <td style={{ padding: '0.3rem 0.5rem' }}>{p.parcela_nume}</td>
+                                  <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{formatLei(p.labor)}</td>
+                                  <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>{formatLei(p.material)}</td>
+                                  <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right' }}>
+                                    {p.combustibil_litri > 0 ? (
+                                      <>
+                                        {p.combustibil_litri} L
+                                        {p.combustibil_cost !== null ? ` — ${formatLei(p.combustibil_cost)}` : ''}
+                                      </>
+                                    ) : (
+                                      '—'
+                                    )}
+                                  </td>
+                                  <td style={{ padding: '0.3rem 0.5rem', textAlign: 'right', fontWeight: 600 }}>{formatLei(p.total)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                          {r.combustibil_nealocat_litri > 0 && (
+                            <p style={{ fontSize: '0.8rem', color: '#8a5a00', margin: '0.5rem 0 0' }}>
+                              Motorină nealocată unei parcele (deplasare, staționare sau sesiuni neconfirmate încă în
+                              /activitati-parcele): {r.combustibil_nealocat_litri} L.
+                            </p>
+                          )}
+                        </td>
+                      </tr>
                     )}
-                  </td>
-                  <td style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 600 }}>{formatLei(r.total)}</td>
-                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>{r.area.toLocaleString('ro-RO')} mp</td>
-                  <td style={{ padding: '0.4rem', textAlign: 'right' }}>{r.costPerMp.toFixed(2)} lei/mp</td>
-                </tr>
-              ))}
+                  </Fragment>
+                );
+              })}
             </tbody>
             {rows.length > 0 && (
               <tfoot>
                 <tr>
-                  <td colSpan={6} style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 700 }}>
+                  <td colSpan={7} style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 700 }}>
                     Total general
                   </td>
                   <td style={{ padding: '0.4rem', textAlign: 'right', fontWeight: 700 }}>{formatLei(totalGeneral)}</td>
