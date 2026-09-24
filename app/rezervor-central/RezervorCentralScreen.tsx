@@ -5,6 +5,24 @@ import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 
 type Alimentare = { id: string; data_ora: string; cantitate_litri: number; pret_litru: number; note: string | null };
 
+type ZiMiscare = {
+  data: string;
+  alimentat_litri: number;
+  alimentari: Alimentare[];
+  iesiri_litri: number;
+  diferenta_neta_litri: number;
+};
+
+function aziISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+function acumTreizeciDeZileISO() {
+  return new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+}
+function formatDataZi(dataZi: string) {
+  return new Date(`${dataZi}T12:00:00`).toLocaleDateString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 type FermaRezervor = {
   ferma_id: string;
   nume: string;
@@ -33,6 +51,14 @@ export default function RezervorCentralScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expandat, setExpandat] = useState<string | null>(null);
+
+  // Mișcări zilnice (alimentări + ieșiri) pe intervalul ales, pentru ferma expandată
+  const [miscariDeLa, setMiscariDeLa] = useState<string>(acumTreizeciDeZileISO());
+  const [miscariPanaLa, setMiscariPanaLa] = useState<string>(aziISO());
+  const [miscariZile, setMiscariZile] = useState<ZiMiscare[] | null>(null);
+  const [miscariUtilajeCalibrate, setMiscariUtilajeCalibrate] = useState<{ incluse: number; total: number } | null>(null);
+  const [miscariLoading, setMiscariLoading] = useState(false);
+  const [miscariError, setMiscariError] = useState<string | null>(null);
 
   // Formular alimentare nouă
   const [fermaSelectata, setFermaSelectata] = useState<string>('');
@@ -73,6 +99,48 @@ export default function RezervorCentralScreen() {
       setLoading(false);
       setError('Eroare de rețea la încărcarea rezervoarelor.');
     }
+  }
+
+  async function incarcaMiscari(fermaId: string, deLa: string, panaLa: string) {
+    setMiscariLoading(true);
+    setMiscariError(null);
+
+    const { data: session } = await supabase.auth.getSession();
+    const token = session.session?.access_token;
+
+    try {
+      const params = new URLSearchParams({ ferma_id: fermaId, de_la: deLa, pana_la: panaLa });
+      const res = await fetch(`${supabaseUrl}/functions/v1/get-rezervor-central-miscari?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = await res.json();
+
+      setMiscariLoading(false);
+
+      if (!res.ok) {
+        setMiscariError(json?.error ?? 'Eroare la încărcarea mișcărilor de combustibil.');
+        setMiscariZile(null);
+        return;
+      }
+
+      setMiscariZile(json.zile as ZiMiscare[]);
+      setMiscariUtilajeCalibrate({ incluse: json.utilaje_calibrate_incluse, total: json.utilaje_total });
+    } catch {
+      setMiscariLoading(false);
+      setMiscariError('Eroare de rețea la încărcarea mișcărilor de combustibil.');
+      setMiscariZile(null);
+    }
+  }
+
+  function toggleMiscari(fermaId: string) {
+    if (expandat === fermaId) {
+      setExpandat(null);
+      return;
+    }
+    setExpandat(fermaId);
+    setMiscariZile(null);
+    setMiscariError(null);
+    void incarcaMiscari(fermaId, miscariDeLa, miscariPanaLa);
   }
 
   async function salveazaConfigurare(fermaId: string) {
@@ -245,14 +313,12 @@ export default function RezervorCentralScreen() {
                             Configurează
                           </button>
                         ) : (
-                          (f.alimentari?.length ?? 0) > 0 && (
-                            <button
-                              onClick={() => setExpandat(deschis ? null : f.ferma_id)}
-                              style={{ padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}
-                            >
-                              {deschis ? 'Ascunde' : 'Istoric'}
-                            </button>
-                          )
+                          <button
+                            onClick={() => toggleMiscari(f.ferma_id)}
+                            style={{ padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}
+                          >
+                            {deschis ? 'Ascunde' : 'Mișcări'}
+                          </button>
                         )}
                       </td>
                     </tr>
@@ -292,17 +358,105 @@ export default function RezervorCentralScreen() {
                       </tr>
                     )}
 
-                    {deschis && f.alimentari && (
+                    {deschis && (
                       <tr>
                         <td colSpan={6} style={{ padding: '0.6rem', background: '#fafafa' }}>
-                          <strong>Istoric alimentări:</strong>
-                          <ul style={{ margin: '0.25rem 0 0 1rem' }}>
-                            {f.alimentari.map((a) => (
-                              <li key={a.id}>
-                                {formatData(a.data_ora)} — {a.cantitate_litri} L @ {Number(a.pret_litru).toFixed(2)} lei/L
-                              </li>
-                            ))}
-                          </ul>
+                          <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '0.6rem' }}>
+                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+                              De la
+                              <input
+                                type="date"
+                                value={miscariDeLa}
+                                onChange={(e) => setMiscariDeLa(e.target.value)}
+                                style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid #ccc' }}
+                              />
+                            </label>
+                            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+                              Până la
+                              <input
+                                type="date"
+                                value={miscariPanaLa}
+                                onChange={(e) => setMiscariPanaLa(e.target.value)}
+                                style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid #ccc' }}
+                              />
+                            </label>
+                            <button
+                              onClick={() => void incarcaMiscari(f.ferma_id, miscariDeLa, miscariPanaLa)}
+                              disabled={miscariLoading}
+                              style={{ padding: '0.5rem 1rem', borderRadius: '6px', border: '1px solid #ccc', background: miscariLoading ? '#eee' : '#f5f5f5', cursor: miscariLoading ? 'default' : 'pointer' }}
+                            >
+                              {miscariLoading ? 'Se încarcă...' : 'Generează'}
+                            </button>
+                          </div>
+
+                          {miscariError && (
+                            <p style={{ color: '#b00020', background: '#fdecea', padding: '0.5rem', borderRadius: '6px', fontSize: '0.85rem' }}>
+                              {miscariError}
+                            </p>
+                          )}
+
+                          {miscariZile && miscariUtilajeCalibrate && (
+                            <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 0.5rem' }}>
+                              Ieșirile includ {miscariUtilajeCalibrate.incluse} din {miscariUtilajeCalibrate.total} utilaje ale fermei
+                              (doar cele calibrate, cu capacitate de tanc introdusă).
+                            </p>
+                          )}
+
+                          {miscariZile && miscariZile.length === 0 && !miscariLoading && (
+                            <p style={{ fontSize: '0.85rem', color: '#666' }}>Nicio mișcare în intervalul selectat.</p>
+                          )}
+
+                          {miscariZile && miscariZile.length > 0 && (
+                            <div style={{ overflowX: 'auto' }}>
+                              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' }}>
+                                <thead>
+                                  <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                                    <th style={{ padding: '0.3rem' }}>Zi</th>
+                                    <th style={{ padding: '0.3rem' }}>Alimentat</th>
+                                    <th style={{ padding: '0.3rem' }}>Ieșiri (consum utilaje)</th>
+                                    <th style={{ padding: '0.3rem' }}>Diferență netă</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {miscariZile.map((zi) => (
+                                    <tr key={zi.data} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                      <td style={{ padding: '0.3rem' }}>{formatDataZi(zi.data)}</td>
+                                      <td style={{ padding: '0.3rem' }}>
+                                        {zi.alimentat_litri > 0 ? (
+                                          <>
+                                            +{zi.alimentat_litri} L
+                                            {zi.alimentari.length > 0 && (
+                                              <span style={{ color: '#666' }}>
+                                                {' '}
+                                                (
+                                                {zi.alimentari
+                                                  .map((a) => `${a.cantitate_litri} L @ ${Number(a.pret_litru).toFixed(2)} lei/L`)
+                                                  .join(', ')}
+                                                )
+                                              </span>
+                                            )}
+                                          </>
+                                        ) : (
+                                          '—'
+                                        )}
+                                      </td>
+                                      <td style={{ padding: '0.3rem' }}>{zi.iesiri_litri > 0 ? `−${zi.iesiri_litri} L` : '—'}</td>
+                                      <td
+                                        style={{
+                                          padding: '0.3rem',
+                                          fontWeight: 600,
+                                          color: zi.diferenta_neta_litri < 0 ? '#b00020' : undefined,
+                                        }}
+                                      >
+                                        {zi.diferenta_neta_litri > 0 ? '+' : ''}
+                                        {zi.diferenta_neta_litri} L
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                         </td>
                       </tr>
                     )}

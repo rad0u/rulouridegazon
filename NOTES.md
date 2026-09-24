@@ -1601,6 +1601,49 @@ pentru tabelul/checkbox-ul din `/utilaje`.
 în istoric), `supabase/schema-fuel-tracking.sql`,
 `supabase/schema-operatiuni-recoltare-parcele.sql` (nou).
 
+### Mișcări zilnice rezervor central — alimentări și ieșiri pe interval (2026-09-24)
+
+Radu, verbatim: "la rezervorul central pe fermă să am un dropdown sau o
+extindere să văd mișcările de combustibil - alimentări și total ieșiri pe
+zile. Să pot selecta intervalul de raportare."
+
+Pe `/rezervor-central`, butonul din dreptul fiecărei ferme configurate (fost
+"Istoric", acum "Mișcări") deschide un panou cu:
+- selectoare de dată "De la" / "Până la" (implicit ultimele 30 de zile) și
+  un buton "Generează";
+- un tabel cu o linie pe zi: alimentat (L, cu detaliul fiecărei alimentări
+  din ziua respectivă — cantitate + preț), ieșiri (L, consumul zilnic al
+  utilajelor calibrate ale fermei) și diferența netă (alimentat − ieșiri).
+
+**Backend (funcție nouă)**: `get-rezervor-central-miscari` (v1), admin
+central, parametri `ferma_id` + `de_la`/`pana_la` (YYYY-MM-DD, interval
+inclusiv la ambele capete, max. 366 zile, cu aceeași conversie zi-locală→UTC
+ca `get-combustibil-report`, ținând cont de ora de vară RO). Pentru fiecare
+zi din interval:
+- **alimentat** = suma alimentărilor din `rezervor_alimentari` ale fermei,
+  grupate pe ziua locală a înregistrării.
+- **ieșiri** = suma, peste TOATE utilajele calibrate ale fermei (cele cu
+  `tanc_capacitate_litri` completat), a consumului zilnic calculat prin
+  bilanț de masă — exact algoritmul din `get-combustibil-report`
+  (`filtreazaCitiriPlauzibile` → `eliminaFluctuatiiTranzitorii` →
+  `extrageExtreme` → realimentări utilaj detectate → `consum = max(0,
+  (prima citire a zilei − ultima citire a zilei) + realimentări utilaj în
+  ziua respectivă)`), adaptat să sumeze pe fermă în loc să afișeze per
+  utilaj.
+
+**Notă importantă, ne-cerută explicit dar de reținut**: funcția existentă
+`get-rezervor-central` (folosită pentru nivelul curent afișat în tabelul
+principal) calculează `total_consumat_litri` printr-o metodă mai brută —
+suma tuturor scăderilor între citiri consecutive, fără eliminarea
+fluctuațiilor tranzitorii/zgomotului de senzor — spre deosebire de bilanțul
+de masă zilnic de mai sus, care e mai precis. N-am umblat la
+`get-rezervor-central`; dacă apar diferențe vizibile între "Nivel curent" din
+tabel și suma "ieșirilor" din noul panou de mișcări, de-acolo vine — de
+discutat cu Radu dacă merită aliniate.
+
+**Fișiere**: `supabase/functions/get-rezervor-central-miscari/index.ts`
+(nou), `app/rezervor-central/RezervorCentralScreen.tsx`.
+
 ## 6. Structură fișiere / cod — reper rapid
 
 - `lib/supabaseClient.ts` — client Supabase (folosește variabilele de mediu).
