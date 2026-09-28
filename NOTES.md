@@ -1982,3 +1982,12 @@ Ce a rămas: descrierea parcelei (editabilă), redesenare contur, ștergere
 parcelă, și "Istoric operațiuni" — care încă se populează corect din
 tabela `operatiuni`, alimentată acum de fluxul GPS (+ afișează și
 materiile prime, nu doar substanțele, pentru operațiunile de Însămânțare).
+
+## 2026-09-28 — Hartă utilaje: sortare pe ferme + linie despărțitoare
+
+Radu: "la pagina Harta Utilaje, vreau sa le sortezi pe ferme si dupa
+fiecare ferma sa tragi o linie orizontala, sa fie mai usor de vizualizat"
+— tabelul din /utilaje (UtilajeScreen.tsx) e acum sortat alfabetic după
+fermă (apoi după numele utilajului), iar după ultimul utilaj al fiecărei
+ferme apare o linie orizontală despărțitoare, înainte de grupul fermei
+următoare.

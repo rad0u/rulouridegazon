@@ -431,7 +431,18 @@ export default function UtilajeScreen() {
       return;
     }
 
-    setUtilaje((data?.utilaje as UtilajPozitie[]) ?? []);
+    // 2026-09-28 (Radu): "vreau sa le sortezi pe ferme si dupa fiecare
+    // ferma sa tragi o linie orizontala, sa fie mai usor de vizualizat" —
+    // sortăm alfabetic după fermă (apoi după numele utilajului, ca ordinea
+    // să fie stabilă); linia orizontală se desenează la randare, între
+    // grupurile de utilaje ale unor ferme diferite (vezi mai jos, în tabel).
+    const utilajeSortate = ((data?.utilaje as UtilajPozitie[]) ?? []).slice().sort((a, b) => {
+      const fa = a.ferma_nume ?? '';
+      const fb = b.ferma_nume ?? '';
+      if (fa !== fb) return fa.localeCompare(fb, 'ro');
+      return a.nume.localeCompare(b.nume, 'ro');
+    });
+    setUtilaje(utilajeSortate);
   }
 
   return (
@@ -652,10 +663,14 @@ export default function UtilajeScreen() {
                 </tr>
               </thead>
               <tbody>
-                {utilaje.map((u) => {
+                {utilaje.map((u, index) => {
                   const stale = isFuelSignalStale(u);
                   const age = fuelSignalAgeMinutes(u);
                   const extins = utilajExtins === u.utilaj_id;
+                  // Ultimul rând al unei ferme (fermă diferită la următorul
+                  // utilaj, sau ultimul din listă) — desenăm linia despărțitoare.
+                  const esteUltimulDinFerma =
+                    index === utilaje.length - 1 || utilaje[index + 1].ferma_nume !== u.ferma_nume;
 
                   return (
                     <Fragment key={u.utilaj_id}>
@@ -941,6 +956,13 @@ export default function UtilajeScreen() {
                                 </table>
                               </div>
                             )}
+                          </td>
+                        </tr>
+                      )}
+                      {esteUltimulDinFerma && (
+                        <tr aria-hidden>
+                          <td colSpan={8} style={{ padding: 0 }}>
+                            <hr style={{ margin: '0.4rem 0', border: 'none', borderTop: '2px solid #bbb' }} />
                           </td>
                         </tr>
                       )}
