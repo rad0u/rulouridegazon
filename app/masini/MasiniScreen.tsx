@@ -14,6 +14,18 @@ const MasiniMapView = dynamic(() => import('../../components/MasiniMapView'), {
 type Sofer = { id: string; nume: string };
 type Ferma = { id: string; nume: string };
 
+// 2026-09-28 (Radu): "La Utilaje ai facut procedura de adaugate din Traccar
+// foarte facila ... vreau sa faci la fel si la Flota Auto" — acelasi tip ca
+// în /utilaje, întors de aceeași funcție `list-traccar-devices` (acum
+// corectată să excludă și device-urile deja legate în `masini`, nu doar în
+// `utilaje`).
+type DeviceTraccarNelegat = {
+  traccar_device_id: string;
+  nume_traccar: string;
+  status: string;
+  ultima_actualizare: string | null;
+};
+
 const RO_LAT_MIN = 42;
 const RO_LAT_MAX = 50;
 const RO_LON_MIN = 18;
@@ -74,6 +86,10 @@ function MasiniAdminCentral() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const [traccarDevices, setTraccarDevices] = useState<DeviceTraccarNelegat[]>([]);
+  const [traccarLoading, setTraccarLoading] = useState(false);
+  const [traccarError, setTraccarError] = useState<string | null>(null);
+
   const [masinaExtinsa, setMasinaExtinsa] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<{ sofer_implicit_id: string; ferma_id: string; viteza_limita_kmh: string; activ: boolean } | null>(null);
   const [editSaving, setEditSaving] = useState(false);
@@ -97,6 +113,44 @@ function MasiniAdminCentral() {
       );
     }
   }
+
+  async function incarcaTraccarDevices() {
+    setTraccarLoading(true);
+    setTraccarError(null);
+
+    const { data, error: invokeError } = await supabase.functions.invoke('list-traccar-devices');
+
+    setTraccarLoading(false);
+
+    if (invokeError) {
+      const message =
+        (invokeError as { context?: { error?: string } })?.context?.error ?? invokeError.message;
+      setTraccarError(message);
+      return;
+    }
+    if (data?.error) {
+      setTraccarError(data.error);
+      return;
+    }
+
+    setTraccarDevices((data?.device_nelegate as DeviceTraccarNelegat[]) ?? []);
+  }
+
+  function alegeDeviceTraccar(deviceId: string) {
+    updateForm('traccar_device_id', deviceId);
+    if (!deviceId) return;
+    const device = traccarDevices.find((d) => d.traccar_device_id === deviceId);
+    // Pre-completăm numele doar dacă operatorul nu a scris deja ceva — nu
+    // suprascriem o valoare introdusă manual.
+    if (device) {
+      setForm((prev) => (prev.nume.trim() ? prev : { ...prev, nume: device.nume_traccar }));
+    }
+  }
+
+  useEffect(() => {
+    void incarcaTraccarDevices();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   async function reincarca() {
     setLoading(true);
@@ -156,6 +210,7 @@ function MasiniAdminCentral() {
     }
 
     setForm(initialForm);
+    void incarcaTraccarDevices();
     await reincarca();
   }
 
@@ -376,6 +431,33 @@ function MasiniAdminCentral() {
         <h2 style={{ fontSize: '1.1rem' }}>Adaugă mașină nouă</h2>
         <form onSubmit={handleAddSubmit}>
           <fieldset style={{ border: '1px solid #ddd', padding: '1rem', borderRadius: '8px' }} disabled={saving}>
+            {traccarLoading && <p style={{ margin: '0 0 0.6rem', color: '#666' }}>Se încarcă device-urile din Traccar...</p>}
+            {traccarError && (
+              <p style={{ color: '#b00020', margin: '0 0 0.6rem' }}>
+                Nu am putut încărca device-urile din Traccar: {traccarError}. Poți completa IMEI-ul manual mai jos.
+              </p>
+            )}
+            {!traccarLoading && !traccarError && traccarDevices.length === 0 && (
+              <p style={{ margin: '0 0 0.6rem', color: '#666' }}>
+                Niciun device Traccar nelegat găsit — toate device-urile din Traccar sunt deja asociate unei
+                mașini sau unui utilaj, sau poți introduce unul manual mai jos.
+              </p>
+            )}
+            <label style={{ display: 'block', marginBottom: '0.6rem' }}>
+              Device Traccar (opțional)
+              <select
+                value={form.traccar_device_id}
+                onChange={(e) => alegeDeviceTraccar(e.target.value)}
+                style={{ display: 'block', width: '100%', marginTop: '0.3rem', padding: '0.55rem' }}
+              >
+                <option value="">— fără (introdu IMEI manual mai jos) —</option>
+                {traccarDevices.map((d) => (
+                  <option key={d.traccar_device_id} value={d.traccar_device_id}>
+                    {d.nume_traccar} — IMEI {d.traccar_device_id}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label style={{ display: 'block', marginBottom: '0.6rem' }}>
               Nume/etichetă
               <input
@@ -405,7 +487,7 @@ function MasiniAdminCentral() {
               />
             </label>
             <label style={{ display: 'block', marginBottom: '0.6rem' }}>
-              IMEI dispozitiv GPS (FMC130) — Identifier din Traccar
+              IMEI dispozitiv GPS — dacă nu l-ai ales din lista Traccar de mai sus
               <input
                 type="text"
                 value={form.traccar_device_id}

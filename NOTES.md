@@ -1991,3 +1991,40 @@ fiecare ferma sa tragi o linie orizontala, sa fie mai usor de vizualizat"
 fermă (apoi după numele utilajului), iar după ultimul utilaj al fiecărei
 ferme apare o linie orizontală despărțitoare, înainte de grupul fermei
 următoare.
+
+## 2026-09-28 — Separare utilaje/auto + flux „adaugă din Traccar” la Flotă Auto
+
+Radu: "de asemenea as vrea sa separam utilajele de auto, in pagina de
+utilaje sa apara doar utilajele iar Auto sa apara doar in pagina Flota
+Auto. La Utilaje ai facut procedura de adaugate din Traccar foarte facila,
+cu alegerea din lista Traccar. vreau sa faci la fel si la Flota Auto, sa
+pot alege uros auto din lista Traccar, apoi sa personalizez etichetele"
+
+Verificare în baza de date: tabelele `utilaje` și `masini` erau deja
+complet separate (niciun ID comun), deci nu exista o mixare reală de date.
+Problema era în `supabase/functions/list-traccar-devices/index.ts`: lista
+de device-uri Traccar „nelegate", folosită de formularul „Adaugă utilaj",
+excludea doar device-urile deja legate în `utilaje` — nu și pe cele legate
+în `masini`. Rezultat: toate cele 6 device-uri ale mașinilor apăreau ca
+disponibile în dropdown-ul de la Utilaje, cu riscul de a fi adăugate din
+greșeală ca utilaj.
+
+Fix: `list-traccar-devices` interoghează acum ambele tabele
+(`utilaje.traccar_device_id` și `masini.traccar_device_id`) și exclude
+reuniunea celor două seturi de IMEI-uri din lista „nelegate" — corectă
+acum pentru ambele formulare. Redeploy pe Supabase (v3), verificat
+byte-cu-byte.
+
+Formularul „Adaugă mașină nouă" din `app/masini/MasiniScreen.tsx`
+(`MasiniAdminCentral`) a primit exact fluxul deja existent la Utilaje:
+select cu device-urile Traccar nelegate (nume + IMEI), care la alegere
+pre-completează automat „Nume/etichetă" — doar dacă acel câmp e încă gol,
+ca să nu suprascrie o valoare introdusă manual. Câmpul liber de IMEI a
+rămas disponibil sub select, pentru introducere manuală când device-ul nu
+e în listă. Lista de device-uri Traccar se încarcă automat la afișarea
+paginii (spre deosebire de Utilaje, unde se încarcă abia la deschiderea
+formularului „+ Adaugă utilaj" — la Mașini formularul e mereu vizibil sub
+tabel, deci se încarcă direct).
+
+Fișiere: `supabase/functions/list-traccar-devices/index.ts` (redeploy),
+`app/masini/MasiniScreen.tsx`.

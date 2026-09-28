@@ -1,9 +1,16 @@
 // supabase/functions/list-traccar-devices/index.ts
 //
-// Listează device-urile din Traccar care NU sunt încă legate de niciun rând
-// din public.utilaje (după IMEI / uniqueId) — folosit de formularul „Adaugă
-// utilaj” din /utilaje, ca să se poată prelua numele și IMEI-ul direct din
+// Listăză device-urile din Traccar care NU sunt încă legate de niciun rând
+// din public.utilaje SAU public.masini (după IMEI / uniqueId) — folosit de
+// formularul „Adaugă utilaj” din /utilaje și de formularul „Adaugă mașină
+// nouă” din /masini, ca să se poată prelua numele și IMEI-ul direct din
 // Traccar în loc să fie copiate manual. Doar admin_central poate apela.
+//
+// 2026-09-28 (Radu): "as vrea sa separam utilajele de auto" — până acum
+// funcția excludea doar device-urile deja legate în `utilaje`, deci toate
+// device-urile mașinilor (deja legate în `masini`) apăreau ca „nelegate” în
+// formularul de la Utilaje, riscând să fie adăugate din greșeală ca utilaj.
+// Acum excludem ambele tabele, ca lista să fie corectă pentru ambele fluxuri.
 //
 // IMPORTANT: GET /api/devices din Traccar, FĂRĂ parametrul `all=true`,
 // întoarce implicit doar device-urile alocate explicit contului folosit la
@@ -87,16 +94,22 @@ Deno.serve(async (req) => {
 
   const adminClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-  const { data: utilajeExistente, error: utilajeError } = await adminClient
-    .from('utilaje')
-    .select('traccar_device_id')
-    .not('traccar_device_id', 'is', null);
+  const [utilajeRes, masiniRes] = await Promise.all([
+    adminClient.from('utilaje').select('traccar_device_id').not('traccar_device_id', 'is', null),
+    adminClient.from('masini').select('traccar_device_id').not('traccar_device_id', 'is', null),
+  ]);
 
-  if (utilajeError) {
-    return jsonResponse({ error: `Eroare la citirea utilajelor: ${utilajeError.message}` }, 500);
+  if (utilajeRes.error) {
+    return jsonResponse({ error: `Eroare la citirea utilajelor: ${utilajeRes.error.message}` }, 500);
+  }
+  if (masiniRes.error) {
+    return jsonResponse({ error: `Eroare la citirea mașinilor: ${masiniRes.error.message}` }, 500);
   }
 
-  const idLegate = new Set((utilajeExistente ?? []).map((u) => u.traccar_device_id as string));
+  const idLegate = new Set<string>([
+    ...(utilajeRes.data ?? []).map((u) => u.traccar_device_id as string),
+    ...(masiniRes.data ?? []).map((m) => m.traccar_device_id as string),
+  ]);
 
   const auth = 'Basic ' + btoa(`${TRACCAR_USER}:${TRACCAR_PASSWORD}`);
   const devicesRes = await fetch(`${TRACCAR_URL}/api/devices?all=true`, {
