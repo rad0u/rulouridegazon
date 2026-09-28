@@ -3,14 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Parcela } from '../lib/parcelaTypes';
-import {
-  LABEL_OPERATIUNE,
-  Operatiune,
-  Substanta,
-  TIPURI_CU_SUBSTANTE,
-  TIPURI_OPERATIUNE,
-  TipOperatiune,
-} from '../lib/operatiuniTypes';
+import { LABEL_OPERATIUNE, Operatiune } from '../lib/operatiuniTypes';
 
 interface ParcelaPanelProps {
   parcela: Parcela;
@@ -20,12 +13,6 @@ interface ParcelaPanelProps {
   editable: boolean;
   onParcelaUpdated?: (parcela: Parcela) => void;
   onParcelaDeleted?: (parcelaId: string) => void;
-}
-
-type SubstantaLinie = { substanta_id: string; cantitate: string };
-
-function todayISO() {
-  return new Date().toISOString().slice(0, 10);
 }
 
 export default function ParcelaPanel({
@@ -39,17 +26,6 @@ export default function ParcelaPanel({
 }: ParcelaPanelProps) {
   const [istoric, setIstoric] = useState<Operatiune[]>([]);
   const [loadingIstoric, setLoadingIstoric] = useState(true);
-  const [substanteFerma, setSubstanteFerma] = useState<Substanta[]>([]);
-
-  const [tipSelectat, setTipSelectat] = useState<TipOperatiune | null>(null);
-  const [data, setData] = useState(todayISO());
-  const [oreLucru, setOreLucru] = useState('');
-  const [note, setNote] = useState('');
-  const [substanteLinii, setSubstanteLinii] = useState<SubstantaLinie[]>([]);
-
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -64,8 +40,6 @@ export default function ParcelaPanel({
 
   useEffect(() => {
     void loadIstoric();
-    void loadSubstante();
-    resetForm();
     setEditingDescriere(false);
     setEditNume(parcela.nume);
     setEditTipGazon(parcela.tip_gazon ?? '');
@@ -138,7 +112,7 @@ export default function ParcelaPanel({
     const { data: rows, error: fetchError } = await supabase
       .from('operatiuni')
       .select(
-        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,operatiuni_substante(cantitate,substante(nume,unitate_masura))',
+        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,operatiuni_substante(cantitate,substante(nume,unitate_masura)),operatiuni_materii_prime(cantitate,materii_prime(nume,unitate_masura))',
       )
       .eq('parcela_id', parcela.id)
       .order('data', { ascending: false });
@@ -147,139 +121,6 @@ export default function ParcelaPanel({
       setIstoric((rows as unknown as Operatiune[]) ?? []);
     }
     setLoadingIstoric(false);
-  }
-
-  async function loadSubstante() {
-    // Doar substanțele din gestiunea ACESTEI ferme și doar cele cu stoc > 0 —
-    // Radu, 2026-09-15: adminii de fermă nu trebuie să poată selecta din tot
-    // nomenclatorul (36 de substanțe posibile), ci doar din ce chiar există
-    // fizic pe gestiunea fermei lor în acel moment.
-    const { data: rows } = await supabase
-      .from('substante')
-      .select('id,nume,unitate_masura,stoc_curent')
-      .eq('ferma_id', parcela.ferma_id)
-      .gt('stoc_curent', 0)
-      .order('nume');
-
-    setSubstanteFerma((rows as Substanta[]) ?? []);
-  }
-
-  function resetForm() {
-    setTipSelectat(null);
-    setData(todayISO());
-    setOreLucru('');
-    setNote('');
-    setSubstanteLinii([]);
-    setError(null);
-    setSuccess(null);
-  }
-
-  function selectTip(tip: TipOperatiune) {
-    setTipSelectat(tip);
-    setData(todayISO());
-    setOreLucru('');
-    setNote('');
-    setSubstanteLinii(TIPURI_CU_SUBSTANTE.includes(tip) ? [{ substanta_id: '', cantitate: '' }] : []);
-    setError(null);
-    setSuccess(null);
-  }
-
-  function addSubstantaLinie() {
-    setSubstanteLinii((prev) => [...prev, { substanta_id: '', cantitate: '' }]);
-  }
-
-  function updateSubstantaLinie(index: number, field: keyof SubstantaLinie, value: string) {
-    setSubstanteLinii((prev) =>
-      prev.map((linie, i) => (i === index ? { ...linie, [field]: value } : linie))
-    );
-  }
-
-  function removeSubstantaLinie(index: number) {
-    setSubstanteLinii((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!tipSelectat) return;
-
-    setError(null);
-    setSuccess(null);
-
-    if (!data) {
-      setError('Alege data operațiunii.');
-      return;
-    }
-
-    const oreNum = oreLucru === '' ? null : Number(oreLucru);
-    if (
-      oreLucru !== '' &&
-      (Number.isNaN(oreNum) || !Number.isInteger(oreNum) || (oreNum ?? 0) < 0 || (oreNum ?? 0) > 8)
-    ) {
-      setError('Orele de lucru trebuie să fie un număr întreg între 0 și 8.');
-      return;
-    }
-
-    const needsSubstante = TIPURI_CU_SUBSTANTE.includes(tipSelectat);
-    const liniiValide = substanteLinii.filter((l) => l.substanta_id && l.cantitate);
-
-    if (needsSubstante && liniiValide.length === 0) {
-      setError('Adaugă cel puțin o substanță folosită (cu cantitate).');
-      return;
-    }
-
-    for (const linie of liniiValide) {
-      const cant = Number(linie.cantitate);
-      if (Number.isNaN(cant) || cant <= 0) {
-        setError('Cantitatea trebuie să fie un număr pozitiv pentru fiecare substanță.');
-        return;
-      }
-    }
-
-    setSaving(true);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-
-    const { data: opInsert, error: opError } = await supabase
-      .from('operatiuni')
-      .insert({
-        parcela_id: parcela.id,
-        tip: tipSelectat,
-        data,
-        ore_lucru: oreNum,
-        note: note.trim() || null,
-        user_id: user?.id ?? null,
-      })
-      .select('id')
-      .single();
-
-    if (opError || !opInsert) {
-      setError(opError?.message ?? 'Eroare la salvarea operațiunii.');
-      setSaving(false);
-      return;
-    }
-
-    if (needsSubstante && liniiValide.length > 0) {
-      const rows = liniiValide.map((l) => ({
-        operatiune_id: opInsert.id,
-        substanta_id: l.substanta_id,
-        cantitate: Number(l.cantitate),
-      }));
-
-      const { error: substErr } = await supabase.from('operatiuni_substante').insert(rows);
-      if (substErr) {
-        setError(`Operațiunea a fost salvată, dar substanțele nu s-au putut înregistra: ${substErr.message}`);
-        setSaving(false);
-        await loadIstoric();
-        return;
-      }
-    }
-
-    setSuccess('Operațiunea a fost salvată.');
-    resetForm();
-    await Promise.all([loadIstoric(), loadSubstante()]);
-    setSaving(false);
   }
 
   return (
@@ -389,144 +230,19 @@ export default function ParcelaPanel({
         </div>
       )}
 
+      {/* 2026-09-28 (Radu): "in pagina de configurare a unei ferme apare in
+          subsol tabelul cu Ce ai lucrat pe aceasta parcela? si cardurile cu
+          operatiuni. astea trebuie sa dispara, nu mai sunt de actualitate"
+          — formularul de înregistrare manuală a unei lucrări pe parcelă
+          (grila de tipuri de operațiune + formularul de detalii) a fost
+          eliminat de aici; lucrările se înregistrează acum exclusiv prin
+          fluxul GPS din /activitati-parcele. Istoricul de mai jos rămâne —
+          e alimentat în continuare din tabela `operatiuni`, deci arată
+          corect și lucrările confirmate din noul flux. */}
+
       <hr style={{ margin: '1rem 0' }} />
 
-      {!tipSelectat ? (
-        <div>
-          <p style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>Ce ai lucrat pe această parcelă?</p>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
-              gap: '0.6rem',
-            }}
-          >
-            {TIPURI_OPERATIUNE.map((tip) => (
-              <button
-                key={tip}
-                onClick={() => selectTip(tip)}
-                style={{ padding: '0.9rem 0.75rem', fontSize: '1.05rem', fontWeight: 'bold' }}
-              >
-                {LABEL_OPERATIUNE[tip]}
-              </button>
-            ))}
-          </div>
-        </div>
-      ) : (
-        <form onSubmit={handleSubmit}>
-          <fieldset
-            style={{ border: '1px solid #ddd', padding: '1rem', borderRadius: '8px' }}
-            disabled={saving}
-          >
-            <legend style={{ fontWeight: 'bold', padding: '0 0.5rem' }}>
-              {LABEL_OPERATIUNE[tipSelectat]}
-            </legend>
-
-            <label style={{ display: 'block', marginBottom: '0.75rem' }}>
-              Data
-              <input
-                type="date"
-                value={data}
-                onChange={(e) => setData(e.target.value)}
-                style={{ display: 'block', width: '100%', marginTop: '0.35rem', padding: '0.5rem' }}
-              />
-            </label>
-
-            <label style={{ display: 'block', marginBottom: '0.75rem' }}>
-              Ore de lucru
-              <input
-                type="number"
-                min="0"
-                max="8"
-                step="1"
-                inputMode="numeric"
-                value={oreLucru}
-                onChange={(e) => setOreLucru(e.target.value.replace(/[^0-9]/g, ''))}
-                style={{ display: 'block', width: '100%', marginTop: '0.35rem', padding: '0.5rem' }}
-              />
-            </label>
-
-            {TIPURI_CU_SUBSTANTE.includes(tipSelectat) && (
-              <div style={{ marginBottom: '0.75rem' }}>
-                <span style={{ display: 'block', marginBottom: '0.35rem' }}>
-                  Substanțe / sămânță folosită
-                </span>
-                {substanteLinii.map((linie, index) => (
-                  <div
-                    key={index}
-                    style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.5rem', flexWrap: 'wrap' }}
-                  >
-                    <select
-                      value={linie.substanta_id}
-                      onChange={(e) => updateSubstantaLinie(index, 'substanta_id', e.target.value)}
-                      style={{ flex: '1 1 180px', padding: '0.5rem' }}
-                    >
-                      <option value="">Alege substanță</option>
-                      {substanteFerma.map((s) => (
-                        <option key={s.id} value={s.id}>
-                          {s.nume} ({s.unitate_masura}) — stoc {s.stoc_curent ?? 0}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      placeholder="Cantitate"
-                      value={linie.cantitate}
-                      onChange={(e) => updateSubstantaLinie(index, 'cantitate', e.target.value)}
-                      style={{ flex: '1 1 100px', padding: '0.5rem' }}
-                    />
-                    <button
-                      type="button"
-                      onClick={() => removeSubstantaLinie(index)}
-                      disabled={substanteLinii.length === 1}
-                      style={{ flex: '0 0 auto', padding: '0.5rem 0.9rem' }}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ))}
-                <button type="button" onClick={addSubstantaLinie}>
-                  + Adaugă substanță
-                </button>
-              </div>
-            )}
-
-            <label style={{ display: 'block', marginBottom: '0.75rem' }}>
-              Note (opțional)
-              <textarea
-                value={note}
-                onChange={(e) => setNote(e.target.value)}
-                style={{ display: 'block', width: '100%', marginTop: '0.35rem', padding: '0.5rem' }}
-                rows={2}
-              />
-            </label>
-
-            {error && <div style={{ color: '#b00020', marginBottom: '0.75rem' }}>{error}</div>}
-            {success && <div style={{ color: '#0b6623', marginBottom: '0.75rem' }}>{success}</div>}
-
-            <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-              <button
-                type="submit"
-                style={{ flex: '1 1 160px', padding: '0.9rem 1rem', fontWeight: 'bold' }}
-              >
-                {saving ? 'Salvez...' : 'Salvează'}
-              </button>
-              <button
-                type="button"
-                onClick={resetForm}
-                disabled={saving}
-                style={{ flex: '1 1 120px', padding: '0.9rem 1rem' }}
-              >
-                Renunță
-              </button>
-            </div>
-          </fieldset>
-        </form>
-      )}
-
-      <div style={{ marginTop: '1.5rem' }}>
+      <div>
         <h4>Istoric operațiuni</h4>
         {loadingIstoric ? (
           <p>Se încarcă...</p>
@@ -543,6 +259,16 @@ export default function ParcelaPanel({
                   <div style={{ fontSize: '0.85rem', color: '#555' }}>
                     {op.operatiuni_substante
                       .map((s) => `${s.substante?.nume ?? '—'}: ${s.cantitate} ${s.substante?.unitate_masura ?? ''}`)
+                      .join(', ')}
+                  </div>
+                )}
+                {op.operatiuni_materii_prime && op.operatiuni_materii_prime.length > 0 && (
+                  <div style={{ fontSize: '0.85rem', color: '#555' }}>
+                    {op.operatiuni_materii_prime
+                      .map(
+                        (m) =>
+                          `${m.materii_prime?.nume ?? '—'}: ${m.cantitate} ${m.materii_prime?.unitate_masura ?? ''}`,
+                      )
                       .join(', ')}
                   </div>
                 )}

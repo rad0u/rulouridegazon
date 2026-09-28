@@ -1965,3 +1965,20 @@ Medgidia (singura fără județ în mesajul lui Radu) am adăugat "Constanța"
 pentru consistență vizuală cu celelalte carduri — de verificat cu Radu.
 O fermă nouă, neregăsită în listă, tot apare în grilă (fără insignă F#,
 doar cu numele ei din DB), ca nimic să nu dispară din navigare.
+
+## 2026-09-28 — Elimină înregistrarea manuală de lucrări din ParcelaPanel
+
+Radu: "in pagina de configurare a unei ferme apare in subsol tabelul cu Ce
+ai lucrat pe aceasta parcela? si cardurile cu operatiuni. astea trebuie sa
+dispara, nu mai sunt de actualitate" — în ParcelaPanel.tsx (panoul lateral
+al unei parcele, pe /ferme/[fermaId]) am eliminat formularul de
+înregistrare manuală: grila "Ce ai lucrat pe această parcelă?" cu cardurile
+de tip operațiune (Udat/Tuns/Aspirat/etc.) și formularul de detalii
+(dată/ore/substanțe/notă) care apărea după alegerea unui tip. Fluxul e
+înlocuit demult de detecția GPS din /activitati-parcele — panoul manual
+rămăsese acolo, dar nu se mai folosea.
+
+Ce a rămas: descrierea parcelei (editabilă), redesenare contur, ștergere
+parcelă, și "Istoric operațiuni" — care încă se populează corect din
+tabela `operatiuni`, alimentată acum de fluxul GPS (+ afișează și
+materiile prime, nu doar substanțele, pentru operațiunile de Însămânțare).
