@@ -8,10 +8,10 @@
 // lucrat în total pe parcela respectivă în intervalul dat, câtă motorină a
 // consumat în parcela în intervalul dat".
 //
-// Cum se face alocarea: folosește sesiunile GPS deja confirmate în
-// `operatiuni` (utilaj_id + sesiune_inceput + sesiune_sfarsit + parcela_id
-// — vezi get-sesiuni-detectate / ActivitatiParceleScreen, unde adminul
-// confirmă fiecare sesiune detectată automat din traseul GPS). Pentru
+// Cum se face alocarea (sesiuni CONFIRMATE): folosește sesiunile GPS deja
+// confirmate în `operatiuni` (utilaj_id + sesiune_inceput + sesiune_sfarsit +
+// parcela_id — vezi get-sesiuni-detectate / ActivitatiParceleScreen, unde
+// adminul confirmă fiecare sesiune detectată automat din traseul GPS). Pentru
 // fiecare sesiune confirmată a unui utilaj, se calculează consumul prin
 // ACELAȘI BILANȚ DE MASĂ ca în get-combustibil-report v15 (nivelul
 // senzorului la începutul sesiunii minus nivelul la sfârșit, plus
@@ -20,12 +20,35 @@
 // Sesiunile pe aceeași parcelă din intervalul cerut se ÎNSUMEAZĂ (ore +
 // litri) — exact cererea lui Radu pentru munca fragmentată.
 //
+// v2, 2026-09-28 (Radu): "atunci in pagina Consum pe parcele poti afisa
+// consumurile de combustibil si pentru activitatile neconfirmate inca?" —
+// alături de sesiunile confirmate, raportul rulează ACUM și detecția GPS
+// brută (aceeași logică din get-sesiuni-detectate: intervale continue în
+// funcțiune, în interiorul poligonului unei singure parcele, peste
+// PRAG_MINIM_MINUTE, care nu se suprapun cu o sesiune deja confirmată) și
+// întoarce liniile respective alături de cele confirmate, cu `confirmat:
+// false`. Radu a ales explicit varianta „în același tabel, cu etichetă,
+// subtotal separat" — front-end-ul (CombustibilParceleScreen.tsx) le
+// afișează cu o etichetă vizuală și le exclude din totalul folosit la
+// calculul prețului de producție. Detecția e reimplementată aici (nu apelată
+// prin HTTP către get-sesiuni-detectate) ca să nu depindă de un al doilea
+// round-trip și de forward-area manuală a tokenului — logica (constante,
+// funcții, prag-uri) e ținută identică cu acel fișier; orice ajustare a
+// algoritmului de detecție trebuie făcută în AMBELE fișiere.
+//
+// IMPORTANT: liniile neconfirmate sunt un REPER, nu o valoare finală — pot
+// să dispară sau să se modifice ușor de la o interogare la alta (traseu GPS
+// nou sosit, sesiune încă în desfășurare la marginea intervalului etc.) până
+// când sunt confirmate efectiv în /activitati-parcele. De-acolo intră definitiv
+// în `operatiuni` și, la următoarea interogare, trec automat în grupul
+// confirmat de aici.
+//
 // Pe lângă defalcarea pe parcele, raportul include și consumul total
 // cumulat PE ZI (aceeași logică `consumZilnic` ca în get-combustibil-report
-// v15) — util ca reper: suma litrilor alocați pe parcele + timpul
-// nealocat (mers între parcele, staționare, sesiuni încă neconfirmate) ar
-// trebui să se apropie de acest total, dar nu va coincide perfect — normal,
-// nu e un bug.
+// v15) — util ca reper: suma litrilor alocați pe parcele (confirmat +
+// neconfirmat) + timpul nealocat (mers între parcele, staționare) ar trebui
+// să se apropie de acest total, dar nu va coincide perfect — normal, nu e un
+// bug.
 //
 // Utilajele NECALIBRATE (fără tanc_capacitate_litri) apar cu orele lucrate
 // pe fiecare parcelă (calculate GPS, nu au nevoie de senzor de combustibil),
@@ -52,16 +75,37 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-// ── Constante — identice cu get-combustibil-report v15 (vezi acel fișier
-// pentru raționamentul complet din spatele fiecăreia). ──
+// ── Constante — identice cu get-combustibil-report v15 / get-sesiuni-detectate
+// (vezi acele fișiere pentru raționamentul complet din spatele fiecăreia). ──
 const PRAG_MINIM_EVENIMENT_L = 15;
 const TOLERANTA_CAPACITATE = 1.05;
 const MAX_GAP_ORE = 1;
 const PRAG_ZGOMOT_L = 5;
 const FEREASTRA_REVENIRE_MINUTE = 15;
 const PRAG_MISCARE_METRI = 20;
+// v2: prag minim de durată pentru o sesiune GPS neconfirmată — identic cu
+// get-sesiuni-detectate (exclude simpla traversare a unei parcele).
+const PRAG_MINIM_MINUTE = 10;
 
+const RO_LAT_MIN = 42;
+const RO_LAT_MAX = 50;
+const RO_LON_MIN = 18;
+const RO_LON_MAX = 32;
+
+// v2: citire brută de poziție/contact — poate să nu aibă `nivel_litri` (nu
+// mai filtrăm asta la interogare, ca să putem rula detecția GPS și pentru
+// utilaje/intervale fără citiri de combustibil complete).
 interface Citire {
+  data_ora: string;
+  nivel_litri: number | null;
+  contact: boolean | null;
+  latitudine: number | null;
+  longitudine: number | null;
+}
+
+// v2: citire "de combustibil" — aceeași formă ca înainte, cu `nivel_litri`
+// garantat non-null (filtrată separat, doar pentru utilajele calibrate).
+interface CitireCombustibil {
   data_ora: string;
   nivel_litri: number;
   contact: boolean | null;
@@ -70,7 +114,7 @@ interface Citire {
 }
 
 interface CitireIndexata {
-  citire: Citire;
+  citire: CitireCombustibil;
   index: number;
 }
 
@@ -102,14 +146,14 @@ async function fetchToateRandurile<T>(
   return { data: toate, error: null };
 }
 
-function filtreazaCitiriPlauzibile(rows: Citire[], capacitate: number): Citire[] {
+function filtreazaCitiriPlauzibile(rows: CitireCombustibil[], capacitate: number): CitireCombustibil[] {
   const prag = capacitate * TOLERANTA_CAPACITATE;
   return rows.filter((r) => r.nivel_litri >= 0 && r.nivel_litri <= prag);
 }
 
-function eliminaFluctuatiiTranzitorii(rows: Citire[]): Citire[] {
+function eliminaFluctuatiiTranzitorii(rows: CitireCombustibil[]): CitireCombustibil[] {
   if (rows.length === 0) return [];
-  const rezultat: Citire[] = [rows[0]];
+  const rezultat: CitireCombustibil[] = [rows[0]];
   let i = 1;
   while (i < rows.length) {
     const ancora = rezultat[rezultat.length - 1];
@@ -145,7 +189,7 @@ function eliminaFluctuatiiTranzitorii(rows: Citire[]): Citire[] {
   return rezultat;
 }
 
-function extrageExtreme(rows: Citire[]): CitireIndexata[] {
+function extrageExtreme(rows: CitireCombustibil[]): CitireIndexata[] {
   if (rows.length === 0) return [];
 
   const extreme: CitireIndexata[] = [{ citire: rows[0], index: 0 }];
@@ -204,6 +248,48 @@ function intervalInFunctionare(prev: Citire, curr: Citire): boolean {
   return distantaMetri(prev.latitudine, prev.longitudine, curr.latitudine, curr.longitudine) >= PRAG_MISCARE_METRI;
 }
 
+// v2: geometrie de poligon — identică cu get-sesiuni-detectate, mutată aici
+// ca să putem rula aceeași detecție de parcelă pentru sesiunile neconfirmate.
+interface ParcelaRaw {
+  id: string;
+  nume: string;
+  ferma_id: string;
+  poligon_harta: { type: 'Polygon'; coordinates: number[][][] } | null;
+}
+
+interface ParcelaRing {
+  id: string;
+  nume: string;
+  ring: number[][];
+}
+
+function poligonValid(parcela: ParcelaRaw): number[][] | null {
+  const ring = parcela.poligon_harta?.coordinates?.[0];
+  if (!ring || ring.length < 3) return null;
+  const plauzibil = ring.every(
+    ([lon, lat]) => lat >= RO_LAT_MIN && lat <= RO_LAT_MAX && lon >= RO_LON_MIN && lon <= RO_LON_MAX,
+  );
+  return plauzibil ? ring : null;
+}
+
+function pointInRing(lon: number, lat: number, ring: number[][]): boolean {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i];
+    const [xj, yj] = ring[j];
+    const intersect = yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi;
+    if (intersect) inside = !inside;
+  }
+  return inside;
+}
+
+function gasesteParcela(lat: number, lon: number, parcele: ParcelaRing[]): { id: string; nume: string } | null {
+  for (const p of parcele) {
+    if (pointInRing(lon, lat, p.ring)) return { id: p.id, nume: p.nume };
+  }
+  return null;
+}
+
 const FORMATTER_ZI_LOCALA = new Intl.DateTimeFormat('en-CA', {
   timeZone: 'Europe/Bucharest',
   year: 'numeric',
@@ -243,7 +329,7 @@ function primaZiLuniiCurente(): string {
   return `${acum.getUTCFullYear()}-${String(acum.getUTCMonth() + 1).padStart(2, '0')}-01`;
 }
 
-function primaSiUltimaCitirePeZi(rows: Citire[]): Map<string, { prima: number; ultima: number }> {
+function primaSiUltimaCitirePeZi(rows: CitireCombustibil[]): Map<string, { prima: number; ultima: number }> {
   const rezultat = new Map<string, { prima: number; ultima: number }>();
   for (const r of rows) {
     const zi = ziuaLocala(r.data_ora);
@@ -266,7 +352,7 @@ function realimentariPeZi(realimentari: Eveniment[]): Map<string, number> {
   return rezultat;
 }
 
-function consumZilnic(rows: Citire[], realimentari: Eveniment[]): ZiConsum[] {
+function consumZilnic(rows: CitireCombustibil[], realimentari: Eveniment[]): ZiConsum[] {
   const niveluriPeZi = primaSiUltimaCitirePeZi(rows);
   const realimentariZi = realimentariPeZi(realimentari);
 
@@ -295,18 +381,18 @@ function consumZilnic(rows: Citire[], realimentari: Eveniment[]): ZiConsum[] {
     });
 }
 
-// ── NOU: bilanț de masă pe un interval ARBITRAR (granița unei sesiuni GPS
-// pe o parcelă), nu pe o zi calendaristică. ──
+// ── bilanț de masă pe un interval ARBITRAR (granița unei sesiuni GPS pe o
+// parcelă), nu pe o zi calendaristică. ──
 
 // Nivelul (litri) cel mai apropiat de un moment dat, dintr-o serie de citiri
 // CURĂȚATE (după filtreazaCitiriPlauzibile + eliminaFluctuatiiTranzitorii),
 // sortată crescător. Preferă ultima citire ≤ moment; dacă momentul e înainte
 // de prima citire disponibilă, folosește prima citire (cel mai apropiat
 // reper posibil).
-function nivelLaMoment(rows: Citire[], momentIso: string): number | null {
+function nivelLaMoment(rows: CitireCombustibil[], momentIso: string): number | null {
   if (rows.length === 0) return null;
   const momentMs = new Date(momentIso).getTime();
-  let rezultat: Citire | null = null;
+  let rezultat: CitireCombustibil | null = null;
   for (const r of rows) {
     if (new Date(r.data_ora).getTime() <= momentMs) {
       rezultat = r;
@@ -332,7 +418,7 @@ function sumaRealimentariInInterval(realimentari: Eveniment[], startIso: string,
 // începutul sesiunii minus nivelul la sfârșit, plus realimentările
 // confirmate din exact acel interval. null dacă nu există deloc citiri de
 // combustibil pentru utilaj (utilaj necalibrat).
-function consumSesiune(rows: Citire[], realimentari: Eveniment[], startIso: string, endIso: string): number | null {
+function consumSesiune(rows: CitireCombustibil[], realimentari: Eveniment[], startIso: string, endIso: string): number | null {
   const nivelStart = nivelLaMoment(rows, startIso);
   const nivelEnd = nivelLaMoment(rows, endIso);
   if (nivelStart === null || nivelEnd === null) return null;
@@ -346,6 +432,9 @@ interface ParcelaAgregat {
   ore_total: number;
   litri_total: number | null;
   numar_sesiuni: number;
+  // v2: sesiunile confirmate (din `operatiuni`) vs. cele detectate din GPS,
+  // dar încă neconfirmate în /activitati-parcele — vezi comentariul de sus.
+  confirmat: boolean;
 }
 
 interface OperatiuneSesiune {
@@ -426,10 +515,29 @@ Deno.serve(async (req) => {
     return jsonResponse({ error: `Eroare la citirea utilajelor: ${utilajeError.message}` }, 500);
   }
 
+  // v2: poligoanele parcelelor, grupate pe fermă — necesare pentru detecția
+  // sesiunilor neconfirmate (get-sesiuni-detectate face exact asta, per
+  // fermă unică; aici putem avea utilaje din mai multe ferme deodată, deci
+  // indexăm pe ferma_id). O eroare aici nu e fatală pentru restul
+  // raportului — pur și simplu nu se detectează nimic neconfirmat.
+  let parceleQuery = adminClient.from('parcele').select('id, nume, ferma_id, poligon_harta');
+  if (fermaIdParam) parceleQuery = parceleQuery.eq('ferma_id', fermaIdParam);
+  const { data: parceleRaw } = await parceleQuery;
+
+  const parcelePorFerma = new Map<string, ParcelaRing[]>();
+  for (const p of ((parceleRaw ?? []) as ParcelaRaw[])) {
+    const ring = poligonValid(p);
+    if (!ring) continue;
+    const lista = parcelePorFerma.get(p.ferma_id) ?? [];
+    lista.push({ id: p.id, nume: p.nume, ring });
+    parcelePorFerma.set(p.ferma_id, lista);
+  }
+
   const rezultate = [];
 
   for (const u of (utilajeRaw ?? []) as any[]) {
     const calibrat = typeof u.tanc_capacitate_litri === 'number' && u.tanc_capacitate_litri > 0;
+    const parceleUtilaj = parcelePorFerma.get(u.ferma_id) ?? [];
 
     let opQuery = adminClient
       .from('operatiuni')
@@ -448,60 +556,142 @@ Deno.serve(async (req) => {
     }
     const sesiuni = (sesiuniRaw ?? []) as unknown as OperatiuneSesiune[];
 
-    let rows: Citire[] = [];
+    let citiriRaw: Citire[] = [];
+    let rows: CitireCombustibil[] = [];
     let realimentari: Eveniment[] = [];
     let zileConsum: ZiConsum[] = [];
 
-    if (calibrat && sesiuni.length > 0) {
+    // v2: citirile se aduc ori de câte ori sunt necesare pentru calculul de
+    // litri (utilaj calibrat) ORI pentru detecția GPS a sesiunilor
+    // neconfirmate (utilaj cu parcele desenate pe ferma lui) — nu doar
+    // "dacă există deja sesiuni confirmate", ca înainte.
+    if (calibrat || parceleUtilaj.length > 0) {
       const { data: citiri, error: citiriError } = await fetchToateRandurile<Citire>((from, to) => {
         let q = adminClient
           .from('combustibil_citiri')
           .select('data_ora, nivel_litri, contact, latitudine, longitudine')
           .eq('utilaj_id', u.id)
-          .not('nivel_litri', 'is', null)
+          .not('latitudine', 'is', null)
+          .not('longitudine', 'is', null)
           .gte('data_ora', de_la);
         if (panaLaPadded) q = q.lt('data_ora', panaLaPadded);
         return q.order('data_ora', { ascending: true }).range(from, to);
       });
 
       if (!citiriError) {
-        rows = eliminaFluctuatiiTranzitorii(filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number));
-        const extreme = extrageExtreme(rows);
-        for (let i = 1; i < extreme.length; i++) {
-          const prev = extreme[i - 1].citire;
-          const curr = extreme[i].citire;
-          const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
-          if (delta >= PRAG_MINIM_EVENIMENT_L) {
-            realimentari.push({ data_ora: curr.data_ora, delta_litri: Math.round(delta * 10) / 10 });
+        citiriRaw = citiri;
+
+        if (calibrat) {
+          const citiriCuNivel = citiri.filter(
+            (r): r is Citire & { nivel_litri: number } => r.nivel_litri !== null,
+          ) as CitireCombustibil[];
+          rows = eliminaFluctuatiiTranzitorii(filtreazaCitiriPlauzibile(citiriCuNivel, u.tanc_capacitate_litri as number));
+          const extreme = extrageExtreme(rows);
+          for (let i = 1; i < extreme.length; i++) {
+            const prev = extreme[i - 1].citire;
+            const curr = extreme[i].citire;
+            const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
+            if (delta >= PRAG_MINIM_EVENIMENT_L) {
+              realimentari.push({ data_ora: curr.data_ora, delta_litri: Math.round(delta * 10) / 10 });
+            }
           }
+          // consum_zilnic se calculează pe intervalul CERUT, nu pe fereastra
+          // padded folosită doar pentru capătul sesiunilor — filtrăm citirile
+          // padded suplimentare înainte de a apela consumZilnic.
+          const rowsInterval = pana_la ? rows.filter((r) => r.data_ora < pana_la!) : rows;
+          const realimentariInterval = pana_la ? realimentari.filter((e) => e.data_ora < pana_la!) : realimentari;
+          zileConsum = consumZilnic(rowsInterval, realimentariInterval);
         }
-        // consum_zilnic se calculează pe intervalul CERUT, nu pe fereastra
-        // padded folosită doar pentru capătul sesiunilor — filtrăm citirile
-        // padded suplimentare înainte de a apela consumZilnic.
-        const rowsInterval = pana_la ? rows.filter((r) => r.data_ora < pana_la!) : rows;
-        const realimentariInterval = pana_la ? realimentari.filter((e) => e.data_ora < pana_la!) : realimentari;
-        zileConsum = consumZilnic(rowsInterval, realimentariInterval);
       }
     }
 
+    // ── Sesiuni CONFIRMATE (din `operatiuni`) ──
     const perParcela = new Map<string, ParcelaAgregat>();
     for (const s of sesiuni) {
       const oreSesiune = (new Date(s.sesiune_sfarsit).getTime() - new Date(s.sesiune_inceput).getTime()) / 3_600_000;
       const litriSesiune = calibrat ? consumSesiune(rows, realimentari, s.sesiune_inceput, s.sesiune_sfarsit) : null;
 
-      const existent = perParcela.get(s.parcela_id) ?? {
+      const cheie = `${s.parcela_id}::confirmat`;
+      const existent = perParcela.get(cheie) ?? {
         parcela_id: s.parcela_id,
         parcela_nume: s.parcele?.nume ?? '—',
         ore_total: 0,
         litri_total: calibrat ? 0 : null,
         numar_sesiuni: 0,
+        confirmat: true,
       };
       existent.ore_total += oreSesiune;
       if (calibrat && litriSesiune !== null && existent.litri_total !== null) {
         existent.litri_total += litriSesiune;
       }
       existent.numar_sesiuni += 1;
-      perParcela.set(s.parcela_id, existent);
+      perParcela.set(cheie, existent);
+    }
+
+    // ── v2: Sesiuni NECONFIRMATE — aceeași detecție GPS ca
+    // get-sesiuni-detectate, restrânsă la exact intervalul cerut, excluzând
+    // ce se suprapune cu o sesiune deja confirmată mai sus. ──
+    if (parceleUtilaj.length > 0 && citiriRaw.length >= 2) {
+      const confirmateMs = sesiuni.map((s) => ({
+        start: new Date(s.sesiune_inceput).getTime(),
+        stop: new Date(s.sesiune_sfarsit).getTime(),
+      }));
+
+      let current: { parcelaId: string; parcelaNume: string; start: string; end: string } | null = null;
+
+      const inchideSiSalveaza = () => {
+        if (!current) return;
+        const durataMinute = (new Date(current.end).getTime() - new Date(current.start).getTime()) / 60_000;
+        if (durataMinute > PRAG_MINIM_MINUTE) {
+          const startMs = new Date(current.start).getTime();
+          const endMs = new Date(current.end).getTime();
+          const seSuprapune = confirmateMs.some((c) => startMs < c.stop && endMs > c.start);
+          if (!seSuprapune) {
+            const litriSesiune = calibrat ? consumSesiune(rows, realimentari, current.start, current.end) : null;
+
+            const cheie = `${current.parcelaId}::neconfirmat`;
+            const existent = perParcela.get(cheie) ?? {
+              parcela_id: current.parcelaId,
+              parcela_nume: current.parcelaNume,
+              ore_total: 0,
+              litri_total: calibrat ? 0 : null,
+              numar_sesiuni: 0,
+              confirmat: false,
+            };
+            existent.ore_total += durataMinute / 60;
+            if (calibrat && litriSesiune !== null && existent.litri_total !== null) {
+              existent.litri_total += litriSesiune;
+            }
+            existent.numar_sesiuni += 1;
+            perParcela.set(cheie, existent);
+          }
+        }
+        current = null;
+      };
+
+      for (let i = 1; i < citiriRaw.length; i++) {
+        const prev = citiriRaw[i - 1];
+        const curr = citiriRaw[i];
+
+        const deltaOre = (new Date(curr.data_ora).getTime() - new Date(prev.data_ora).getTime()) / 3_600_000;
+        const functionareOk = intervalInFunctionare(prev, curr);
+        const parcelaPrev =
+          functionareOk && prev.latitudine !== null && prev.longitudine !== null
+            ? gasesteParcela(prev.latitudine, prev.longitudine, parceleUtilaj)
+            : null;
+        const valid = functionareOk && parcelaPrev !== null && deltaOre > 0 && deltaOre <= MAX_GAP_ORE;
+
+        if (valid && current && current.parcelaId === parcelaPrev!.id) {
+          current.end = curr.data_ora;
+        } else {
+          inchideSiSalveaza();
+          if (valid) {
+            current = { parcelaId: parcelaPrev!.id, parcelaNume: parcelaPrev!.nume, start: prev.data_ora, end: curr.data_ora };
+          }
+        }
+      }
+      // Nu închidem o sesiune rămasă deschisă la finalul intervalului — la
+      // fel ca get-sesiuni-detectate: ar putea fi încă în desfășurare.
     }
 
     const parcele = Array.from(perParcela.values())
@@ -510,7 +700,11 @@ Deno.serve(async (req) => {
         ore_total: Math.round(p.ore_total * 10) / 10,
         litri_total: p.litri_total !== null ? Math.round(p.litri_total * 10) / 10 : null,
       }))
-      .sort((a, b) => b.ore_total - a.ore_total);
+      .sort((a, b) => {
+        if (a.parcela_nume !== b.parcela_nume) return a.parcela_nume.localeCompare(b.parcela_nume, 'ro');
+        if (a.confirmat !== b.confirmat) return a.confirmat ? -1 : 1;
+        return b.ore_total - a.ore_total;
+      });
 
     rezultate.push({
       utilaj_id: u.id,

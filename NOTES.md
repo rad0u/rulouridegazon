@@ -2028,3 +2028,42 @@ tabel, deci se încarcă direct).
 
 Fișiere: `supabase/functions/list-traccar-devices/index.ts` (redeploy),
 `app/masini/MasiniScreen.tsx`.
+
+## 2026-09-28 — Consum pe parcele: și sesiunile GPS neconfirmate încă
+
+Radu: "atunci in pagina Consum pe parcele poti afisa consumurile de
+combustibil si pentru activitatile neconfirmate inca?"
+
+Context: raportul de combustibil pe parcele aloca motorina doar pe baza
+sesiunilor deja CONFIRMATE în /activitati-parcele. Timpul/motorina din
+sesiuni detectate din GPS dar încă neconfirmate cădea la „nealocat" — nu
+apărea nicăieri defalcat pe parcelă.
+
+Am arătat lui Radu că e fezabil (get-sesiuni-detectate calculează deja
+litri_combustibil per sesiune detectată) și i-am cerut să aleagă cum vrea
+afișarea: separat / în același tabel cu etichetă / doar total agregat. A
+ales: „în același tabel, cu etichetă, subtotal separat".
+
+Implementare:
+- `get-combustibil-parcele` rulează acum, pe lângă alocarea din sesiunile
+  confirmate, ȘI aceeași detecție GPS ca `get-sesiuni-detectate` (interval
+  continuu în funcțiune, în interiorul poligonului unei singure parcele,
+  peste 10 minute, exclus dacă se suprapune cu o sesiune deja confirmată),
+  restrânsă la exact intervalul cerut. Logica de detecție (constante,
+  funcții, praguri) e duplicată identic din get-sesiuni-detectate — nu
+  apelată prin HTTP, ca să evităm un round-trip suplimentar și forward-area
+  manuală a tokenului. Orice ajustare a algoritmului de detecție trebuie
+  făcută în AMBELE fișiere de-acum încolo.
+- Fiecare linie din `parcele` are acum `confirmat: boolean`.
+- Front-end (`CombustibilParceleScreen.tsx`): liniile neconfirmate apar sub
+  cele confirmate, cu etichetă „neconfirmat" și fundal distinct, cu
+  subtotalul lor propriu („Total neconfirmat (estimat)"). Totalul folosit
+  ca reper pentru calculul prețului de producție („Total alocat pe parcele
+  (confirmat)") rămâne neschimbat — include DOAR sesiunile confirmate.
+
+IMPORTANT: liniile neconfirmate sunt un reper, nu o valoare finală — se pot
+schimba ușor de la o interogare la alta până la confirmarea efectivă în
+/activitati-parcele.
+
+Fișiere: `supabase/functions/get-combustibil-parcele/index.ts` (v2,
+redeploy), `app/combustibil-parcele/CombustibilParceleScreen.tsx`.

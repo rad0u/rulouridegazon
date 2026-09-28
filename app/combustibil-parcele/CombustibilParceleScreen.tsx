@@ -8,6 +8,14 @@
 // /activitati-parcele + bilanț de masă pe fiecare sesiune). Înlocuiește
 // vechiul /combustibil ca raport principal de combustibil (Radu: "pagina
 // veche nu mă mai interesează") — link-ul din meniu duce acum aici.
+//
+// v2, 2026-09-28 (Radu): "atunci in pagina Consum pe parcele poti afisa
+// consumurile de combustibil si pentru activitatile neconfirmate inca?" —
+// fiecare linie de parcelă vine acum cu `confirmat: boolean`. Radu a ales
+// explicit „în același tabel, cu etichetă, subtotal separat": liniile
+// neconfirmate apar în același tabel, cu o etichetă vizuală distinctă, dar
+// NU intră în „Total alocat pe parcele" (folosit ca reper pentru calculul
+// prețului de producție) — au propriul subtotal, separat.
 
 import { useEffect, useState } from 'react';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
@@ -18,6 +26,7 @@ type ParcelaLinie = {
   ore_total: number;
   litri_total: number | null;
   numar_sesiuni: number;
+  confirmat: boolean;
 };
 
 type ZiConsum = {
@@ -120,9 +129,11 @@ export default function CombustibilParceleScreen() {
       <p style={{ color: '#555', maxWidth: '760px' }}>
         Pentru fiecare utilaj, orele lucrate și motorina consumată pe fiecare parcelă în intervalul ales — calculate
         din sesiunile GPS confirmate în /activitati-parcele (dacă un utilaj a lucrat fragmentat pe aceeași parcelă,
-        sesiunile se însumează). Alături, consumul total cumulat pe zi, ca reper — diferența față de suma alocată pe
-        parcele e timp/motorină nealocat(ă) unei sesiuni confirmate (deplasare, staționare, sesiuni neconfirmate
-        încă).
+        sesiunile se însumează). Sub liniile confirmate apar, distinct marcate, și sesiunile detectate din GPS dar
+        încă neconfirmate — un reper, nu o valoare finală (poate să se schimbe ușor până la confirmare); NU intră în
+        „Total alocat" folosit ca reper de cost, au subtotalul lor separat. Alături, consumul total cumulat pe zi, ca
+        reper — diferența față de suma alocată pe parcele e timp/motorină nealocat(ă) unei sesiuni (deplasare,
+        staționare).
       </p>
 
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '1rem' }}>
@@ -199,40 +210,84 @@ export default function CombustibilParceleScreen() {
 
             {u.eroare && <p style={{ color: '#b00020' }}>{u.eroare}</p>}
 
-            {u.parcele.length > 0 && (
-              <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
-                <thead>
-                  <tr style={{ textAlign: 'left', borderBottom: '2px solid #333' }}>
-                    <th style={{ padding: '0.4rem' }}>Parcelă</th>
-                    <th style={{ padding: '0.4rem', textAlign: 'right' }}>Ore lucrate</th>
-                    <th style={{ padding: '0.4rem', textAlign: 'right' }}>Litri consumați</th>
-                    <th style={{ padding: '0.4rem', textAlign: 'right' }}>Sesiuni</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {u.parcele.map((p) => (
-                    <tr key={p.parcela_id} style={{ borderBottom: '1px solid #eee' }}>
-                      <td style={{ padding: '0.4rem' }}>{p.parcela_nume}</td>
-                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.ore_total}h</td>
-                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.litri_total ?? '—'}</td>
-                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.numar_sesiuni}</td>
+            {u.parcele.length > 0 && (() => {
+              const confirmate = u.parcele.filter((p) => p.confirmat);
+              const neconfirmate = u.parcele.filter((p) => !p.confirmat);
+              return (
+                <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left', borderBottom: '2px solid #333' }}>
+                      <th style={{ padding: '0.4rem' }}>Parcelă</th>
+                      <th style={{ padding: '0.4rem', textAlign: 'right' }}>Ore lucrate</th>
+                      <th style={{ padding: '0.4rem', textAlign: 'right' }}>Litri consumați</th>
+                      <th style={{ padding: '0.4rem', textAlign: 'right' }}>Sesiuni</th>
                     </tr>
-                  ))}
-                </tbody>
-                <tfoot>
-                  <tr style={{ borderTop: '2px solid #333', fontWeight: 700 }}>
-                    <td style={{ padding: '0.4rem' }}>Total alocat pe parcele:</td>
-                    <td style={{ padding: '0.4rem', textAlign: 'right' }}>
-                      {Math.round(u.parcele.reduce((s, p) => s + p.ore_total, 0) * 10) / 10}h
-                    </td>
-                    <td style={{ padding: '0.4rem', textAlign: 'right' }}>
-                      {u.calibrat ? Math.round(u.parcele.reduce((s, p) => s + (p.litri_total ?? 0), 0) * 10) / 10 : '—'}
-                    </td>
-                    <td />
-                  </tr>
-                </tfoot>
-              </table>
-            )}
+                  </thead>
+                  <tbody>
+                    {confirmate.map((p) => (
+                      <tr key={`${p.parcela_id}-confirmat`} style={{ borderBottom: '1px solid #eee' }}>
+                        <td style={{ padding: '0.4rem' }}>{p.parcela_nume}</td>
+                        <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.ore_total}h</td>
+                        <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.litri_total ?? '—'}</td>
+                        <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.numar_sesiuni}</td>
+                      </tr>
+                    ))}
+                    <tr style={{ borderTop: '2px solid #333', borderBottom: neconfirmate.length > 0 ? '1px solid #eee' : undefined, fontWeight: 700 }}>
+                      <td style={{ padding: '0.4rem' }}>Total alocat pe parcele (confirmat):</td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>
+                        {Math.round(confirmate.reduce((s, p) => s + p.ore_total, 0) * 10) / 10}h
+                      </td>
+                      <td style={{ padding: '0.4rem', textAlign: 'right' }}>
+                        {u.calibrat ? Math.round(confirmate.reduce((s, p) => s + (p.litri_total ?? 0), 0) * 10) / 10 : '—'}
+                      </td>
+                      <td />
+                    </tr>
+
+                    {neconfirmate.length > 0 && (
+                      <>
+                        <tr>
+                          <td colSpan={4} style={{ padding: '0.6rem 0.4rem 0.2rem', fontSize: '0.8rem', color: '#8a5a00', fontWeight: 600 }}>
+                            Sesiuni detectate din GPS, neconfirmate încă (reper — vezi /activitati-parcele)
+                          </td>
+                        </tr>
+                        {neconfirmate.map((p) => (
+                          <tr key={`${p.parcela_id}-neconfirmat`} style={{ borderBottom: '1px solid #f5ead0', background: '#fffaf0' }}>
+                            <td style={{ padding: '0.4rem' }}>
+                              {p.parcela_nume}{' '}
+                              <span
+                                style={{
+                                  fontSize: '0.7rem',
+                                  color: '#8a5a00',
+                                  border: '1px solid #e0c48a',
+                                  borderRadius: '999px',
+                                  padding: '0.05rem 0.5rem',
+                                  marginLeft: '0.3rem',
+                                }}
+                              >
+                                neconfirmat
+                              </span>
+                            </td>
+                            <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.ore_total}h</td>
+                            <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.litri_total ?? '—'}</td>
+                            <td style={{ padding: '0.4rem', textAlign: 'right' }}>{p.numar_sesiuni}</td>
+                          </tr>
+                        ))}
+                        <tr style={{ borderTop: '1px solid #e0c48a', fontWeight: 700, color: '#8a5a00' }}>
+                          <td style={{ padding: '0.4rem' }}>Total neconfirmat (estimat):</td>
+                          <td style={{ padding: '0.4rem', textAlign: 'right' }}>
+                            {Math.round(neconfirmate.reduce((s, p) => s + p.ore_total, 0) * 10) / 10}h
+                          </td>
+                          <td style={{ padding: '0.4rem', textAlign: 'right' }}>
+                            {u.calibrat ? Math.round(neconfirmate.reduce((s, p) => s + (p.litri_total ?? 0), 0) * 10) / 10 : '—'}
+                          </td>
+                          <td />
+                        </tr>
+                      </>
+                    )}
+                  </tbody>
+                </table>
+              );
+            })()}
 
             {expandatZilnic === u.utilaj_id && u.consum_zilnic.length > 0 && (
               <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px dashed #ccc' }}>
@@ -266,8 +321,8 @@ export default function CombustibilParceleScreen() {
 
       {faraActivitate.length > 0 && (
         <p style={{ color: '#888', fontSize: '0.85rem', marginTop: '1rem' }}>
-          Fără activitate confirmată pe nicio parcelă în interval: {faraActivitate.map((u) => u.nume).join(', ')}. (Vezi
-          /activitati-parcele — sesiunile detectate trebuie confirmate acolo înainte să apară aici.)
+          Fără nicio sesiune (confirmată sau detectată din GPS) pe nicio parcelă în interval:{' '}
+          {faraActivitate.map((u) => u.nume).join(', ')}.
         </p>
       )}
     </main>
