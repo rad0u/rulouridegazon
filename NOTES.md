@@ -1946,3 +1946,22 @@ pe toată lățimea paginii, cu înălțimea plafonată la 600px, ceea ce dădea
 aspect foarte lat și scund pe ecrane late. Coloana hărții (+ butoanele de
 sub ea) e acum limitată la 1000px lățime, centrată; înălțimea a crescut de
 la `clamp(320px, 60vh, 600px)` la `clamp(420px, 78vh, 820px)`.
+
+## 2026-09-28 — Pagina de alegere ferme: grilă de carduri F1-F5
+
+Radu: "pe pagina de alegere ferme vreau sa faci o reprezentare grafica
+frumoasa, cu butoane pentru cele 5 ferme: F1 — Medgidia / F2 — Holboca-Iași
+/ F3 — Bobicești-Olt / F4 — Sânpetru-Timiș / F5 — Săbăreni-Giurgiu" —
+lista simplă cu buline din /ferme (FermeList.tsx) a devenit o grilă de
+carduri mari, fiecare cu insignă numerotată (F1-F5), numele fermei și
+județul, link direct spre harta fermei.
+
+Etichetele F1-F5 + denumire + județ sunt cele date de Radu (hardcodate în
+`ETICHETE_FERME`, potrivite după `nume`-le curent din DB) — diferă puțin
+de `nume`/`locatie` din tabela `ferme` (ex. DB "Timișoara" -> afișat
+"Sânpetru, Timiș"; DB "Bobicești (Craiova)" -> afișat "Bobicești, Olt").
+Nu s-au schimbat rândurile din DB, doar eticheta de afișare. Pentru
+Medgidia (singura fără județ în mesajul lui Radu) am adăugat "Constanța"
+pentru consistență vizuală cu celelalte carduri — de verificat cu Radu.
+O fermă nouă, neregăsită în listă, tot apare în grilă (fără insignă F#,
+doar cu numele ei din DB), ca nimic să nu dispară din navigare.
