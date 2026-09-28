@@ -1937,3 +1937,12 @@ e admin_ferma cu ferma_id setat, deci ateriza direct pe tarlaua fermei lui
 pornirea aplicației, la login și la auth callback — un singur punct comun)
 a fost simplificat: orice rol de admin (central sau de fermă) ajunge acum
 pe /dashboard; doar șoferii merg în continuare direct pe /curse.
+
+## 2026-09-28 — Harta fermei: mai multă înălțime, mai puțină lățime
+
+Radu (cu screenshot): "as vrea mai mult spatiu pe verticala si ceva mai
+putin pe orizontala" — harta din /ferme/[fermaId] (FarmMap.tsx) era întinsă
+pe toată lățimea paginii, cu înălțimea plafonată la 600px, ceea ce dădea un
+aspect foarte lat și scund pe ecrane late. Coloana hărții (+ butoanele de
+sub ea) e acum limitată la 1000px lățime, centrată; înălțimea a crescut de
+la `clamp(320px, 60vh, 600px)` la `clamp(420px, 78vh, 820px)`.

@@ -484,8 +484,13 @@ export default function FarmMap({
   const parceleFaraContur = parcele.filter((p) => polygonLatLngs(p).length < 3);
 
   return (
-    <div>
-      <div style={{ position: 'relative', height: 'clamp(320px, 60vh, 600px)', width: '100%' }}>
+    // 2026-09-28 (Radu): "as vrea mai mult spatiu pe verticala si ceva mai
+    // putin pe orizontala" — harta (+ butoanele de sub ea) era întinsă pe
+    // toată lățimea paginii, ceea ce o făcea foarte lată și scundă pe
+    // ecrane late. Acum coloana e limitată la 1000px, centrată, iar
+    // înălțimea hărții a crescut proporțional.
+    <div style={{ maxWidth: '1000px', margin: '0 auto' }}>
+      <div style={{ position: 'relative', height: 'clamp(420px, 78vh, 820px)', width: '100%' }}>
         <div
           style={{
             position: 'absolute',
