@@ -2356,3 +2356,43 @@ Radu a cerut: "la Flota auto - editeaza - vreau sa pot edita si Masina" — pano
 **Verificat:** `npx tsc --noEmit` curat după modificări.
 
 Modificat doar `app/masini/MasiniScreen.tsx` — fără schimbări de schemă sau edge function.
+
+## 2026-09-30 — Ștergere utilizatori la /utilizatori
+
+Radu: "la Meniu - Utilizatori vreau sa am posibilitatea sa sterg pe care
+vreau din ei".
+
+Adăugat buton "Șterge" pe fiecare rând din tabelul de conturi (confirmare pe
+2 click-uri: "Șterge" → "Sigur?" → execută), care apelează o funcție nouă,
+`admin-delete-user` (Edge Function, doar admin_central, deployată v1).
+
+Ce face funcția, în ordine:
+1. Verifică apelantul e admin_central (ca la admin-create-user).
+2. Refuză să șteargă propriul cont al apelantului (ar bloca accesul din
+   propria sesiune).
+3. Refuză să șteargă singurul admin_central rămas (ar bloca administrarea
+   pentru toată lumea).
+4. Decuplează (SET NULL) referințele către acest utilizator din toate
+   tabelele care au foreign key spre utilizatori(id) — masini.sofer_implicit_id,
+   curse.sofer_id, bonuri_combustibil_masini.introdus_de,
+   substante_intrari.introdus_de, materii_prime_intrari.introdus_de,
+   operatiuni.user_id, jurnal_activitate.utilizator_id — ca ștergerea să nu
+   fie blocată de foreign key-uri (toate coloanele sunt nullable, fără ON
+   DELETE, deci un DELETE direct ar fi eșuat cu eroare de FK dacă
+   utilizatorul avea vreo cursă/bon/operațiune legată de el).
+5. Șterge rândul din public.utilizatori (triggerul existent jurnal_utilizatori
+   loghează automat ștergerea în jurnal_activitate).
+6. Șterge contul din Supabase Auth (auth.admin.deleteUser) — dacă acest pas
+   eșuează, tot răspunde cu succes, pentru că fără rândul din utilizatori
+   contul oricum nu mai are niciun acces în aplicație (toate verificările de
+   rol citesc din utilizatori).
+
+Important: ștergerea unui utilizator NU șterge istoricul lui (curse, bonuri
+de combustibil, intrări de stoc, operațiuni) — doar decuplează referința.
+jurnal_activitate păstrează oricum utilizator_nume/utilizator_rol ca text
+separat, deci rămâne lizibil în audit chiar și după ștergerea contului.
+
+Verificat: schema DB (foreign key-uri, RLS pe utilizatori — DELETE nu are
+nicio policy pentru clienți obișnuiți, doar service role poate șterge, ceea
+ce funcția face corect), deploy edge function verificat byte-for-byte
+(ezbr_sha256), `npx tsc --noEmit` curat pe frontend.

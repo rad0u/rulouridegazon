@@ -40,6 +40,15 @@ export default function UtilizatoriManager() {
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
+  // v2, 2026-09-30 (Radu) -- "vreau sa am posibilitatea sa sterg pe care
+  // vreau din ei": ștergere cont, cu confirmare pe rând (primul click =
+  // "Sigur?", al doilea = execută), ca un cont să nu se șteargă din greșeală
+  // cu un singur click. deleteConfirmId = id-ul rândului aflat în starea
+  // "Sigur?".
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+
   useEffect(() => {
     void loadFerme();
     void loadUtilizatori();
@@ -111,6 +120,40 @@ export default function UtilizatoriManager() {
 
     setSuccess(`Cont creat: ${data?.email ?? form.email}`);
     setForm(initialForm);
+    await loadUtilizatori();
+  }
+
+  async function handleDelete(u: Utilizator) {
+    if (deleteConfirmId !== u.id) {
+      setDeleteConfirmId(u.id);
+      setDeleteError(null);
+      return;
+    }
+
+    setDeletingId(u.id);
+    setDeleteError(null);
+
+    const { data, error: invokeError } = await supabase.functions.invoke('admin-delete-user', {
+      body: { id: u.id },
+    });
+
+    setDeletingId(null);
+    setDeleteConfirmId(null);
+
+    if (invokeError) {
+      const message =
+        (invokeError as { context?: { error?: string } })?.context?.error ?? invokeError.message;
+      setDeleteError(message);
+      return;
+    }
+
+    if (data?.error) {
+      setDeleteError(data.error);
+      return;
+    }
+
+    setSuccess(data?.warning ? `Cont șters: ${data?.email ?? u.email}. ${data.warning}` : `Cont șters: ${data?.email ?? u.email}.`);
+    setError(null);
     await loadUtilizatori();
   }
 
@@ -206,15 +249,17 @@ export default function UtilizatoriManager() {
 
       <section style={{ marginTop: '2rem' }}>
         <h2>Conturi existente</h2>
+        {deleteError && <div style={{ color: '#b00020', marginBottom: '0.75rem' }}>{deleteError}</div>}
         {loadingList ? (
           <p>Se încarcă...</p>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', maxWidth: '640px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', maxWidth: '760px' }}>
             <thead>
               <tr>
                 <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: '0.5rem' }}>Email</th>
                 <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: '0.5rem' }}>Rol</th>
                 <th style={{ textAlign: 'left', borderBottom: '1px solid #ddd', padding: '0.5rem' }}>Fermă</th>
+                <th style={{ textAlign: 'right', borderBottom: '1px solid #ddd', padding: '0.5rem' }}></th>
               </tr>
             </thead>
             <tbody>
@@ -230,6 +275,21 @@ export default function UtilizatoriManager() {
                   </td>
                   <td style={{ padding: '0.5rem', borderBottom: '1px solid #f0f0f0' }}>
                     {u.ferme?.nume ?? '—'}
+                  </td>
+                  <td style={{ padding: '0.5rem', borderBottom: '1px solid #f0f0f0', textAlign: 'right' }}>
+                    <button
+                      type="button"
+                      disabled={deletingId === u.id}
+                      onClick={() => void handleDelete(u)}
+                      onBlur={() => setDeleteConfirmId((prev) => (prev === u.id ? null : prev))}
+                      style={
+                        deleteConfirmId === u.id
+                          ? { background: '#b00020', color: '#fff', border: 'none', padding: '0.4rem 0.7rem', borderRadius: '6px' }
+                          : { background: 'transparent', color: '#b00020', border: '1px solid #b00020', padding: '0.4rem 0.7rem', borderRadius: '6px' }
+                      }
+                    >
+                      {deletingId === u.id ? 'Șterg...' : deleteConfirmId === u.id ? 'Sigur?' : 'Șterge'}
+                    </button>
                   </td>
                 </tr>
               ))}
