@@ -2127,3 +2127,16 @@ urmată imediat de o citire eronată a sondei care se corectează repede) —
 merită verificat dacă apar alte cifre suspect de mari în rapoartele deja
 consultate (cost de producție, combustibil pe parcele etc.), mai ales pentru
 perioade cu conexiune GPS instabilă.
+
+## 2026-09-30 — Lansare: adminii fermelor încep să folosească aplicația din 1 octombrie 2026
+
+Radu: aplicația trece de la testare (doar Radu) la folosire reală de către
+adminii de fermă începând de mâine, 1 octombrie 2026. Pentru început, la
+3 ferme: Săbăreni, Bobicești, Medgidia.
+
+Context relevant pentru sesiuni viitoare: până acum nicio sesiune GPS
+detectată nu era încă confirmată de vreun admin de fermă în
+/activitati-parcele — fix-ul de consum fantomă (78,6L, vezi entry-ul de mai
+sus) a apucat să fie deployat ÎNAINTE de a exista date reale confirmate de
+adminii de fermă, deci nu există risc de date istorice greșite generate de
+admini pe baza bug-ului vechi.
