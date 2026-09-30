@@ -82,7 +82,7 @@ Deno.serve(async (req) => {
 
   const { data: masina, error: masinaError } = await adminClient
     .from('masini')
-    .select('id, nume, numar_inmatriculare, marca_model, sofer_implicit_id, ferma_id, utilizatori(nume), ferme(nume)')
+    .select('id, nume, numar_inmatriculare, marca_model, sofer_implicit_nume, ferma_id, ferme(nume)')
     .eq('id', masinaId)
     .maybeSingle();
 
@@ -105,6 +105,11 @@ Deno.serve(async (req) => {
   // index_start = suma GPS cumulată chiar ÎNAINTE de prima cursă din lună;
   // index_stop = suma GPS cumulată după ULTIMA cursă din lună (== rulaj la
   // finalul buclei, pentru că toateCurseleKm merge până la pana_la exclusiv).
+  //
+  // v4, 2026-09-30 (Radu): "nu mai creem conturi sofer. editam direct in
+  // flota auto" -- sofer_implicit_nume vine acum direct din
+  // masini.sofer_implicit_nume (text liber), nu mai e derivat prin join pe
+  // utilizatori(nume).
   const { data: toateCurseleKm, error: toateCurseleError } = await adminClient
     .from('curse')
     .select('id, data_ora_start, km')
@@ -177,7 +182,7 @@ Deno.serve(async (req) => {
       nume: masina.nume,
       numar_inmatriculare: masina.numar_inmatriculare,
       marca_model: masina.marca_model,
-      sofer_implicit_nume: (masina as any).utilizatori?.nume ?? null,
+      sofer_implicit_nume: masina.sofer_implicit_nume ?? null,
       ferma_nume: (masina as any).ferme?.nume ?? null,
     },
     an,

@@ -11,7 +11,6 @@ const MasiniMapView = dynamic(() => import('../../components/MasiniMapView'), {
   loading: () => <p>Se încarcă harta...</p>,
 });
 
-type Sofer = { id: string; nume: string };
 type Ferma = { id: string; nume: string };
 
 // 2026-09-28 (Radu): "La Utilaje ai facut procedura de adaugate din Traccar
@@ -46,7 +45,10 @@ const initialForm = {
   numar_inmatriculare: '',
   marca_model: '',
   traccar_device_id: '',
-  sofer_implicit_id: '',
+  // v3, 2026-09-30 (Radu): "nu mai creem conturi sofer. editam direct in
+  // flota auto" -- nu mai e un id ales dintr-un dropdown de conturi, ci un
+  // nume liber introdus direct aici.
+  sofer_implicit_nume: '',
   ferma_id: '',
   viteza_limita_kmh: '',
 };
@@ -75,7 +77,6 @@ export default function MasiniScreen() {
 
 function MasiniAdminCentral() {
   const [masini, setMasini] = useState<MasinaPozitie[]>([]);
-  const [soferi, setSoferi] = useState<Sofer[]>([]);
   const [ferme, setFerme] = useState<Ferma[]>([]);
   const [geofences, setGeofences] = useState<GeofenceHarta[]>([]);
   const [loading, setLoading] = useState(false);
@@ -100,7 +101,7 @@ function MasiniAdminCentral() {
     numar_inmatriculare: string;
     marca_model: string;
     traccar_device_id: string;
-    sofer_implicit_id: string;
+    sofer_implicit_nume: string;
     ferma_id: string;
     viteza_limita_kmh: string;
     activ: boolean;
@@ -109,14 +110,12 @@ function MasiniAdminCentral() {
   const [editError, setEditError] = useState<string | null>(null);
   const [editLoading, setEditLoading] = useState(false);
 
-  async function incarcaSoferiSiGeofences() {
-    const [soferiRes, fermeRes, geofenceRes] = await Promise.all([
-      supabase.from('utilizatori').select('id, nume').eq('rol', 'sofer').order('nume'),
+  async function incarcaFermeSiGeofences() {
+    const [fermeRes, geofenceRes] = await Promise.all([
       supabase.from('ferme').select('id, nume').order('nume'),
       supabase.from('geofences').select('id, nume, poligon').eq('activ', true),
     ]);
 
-    setSoferi((soferiRes.data as Sofer[]) ?? []);
     setFerme((fermeRes.data as Ferma[]) ?? []);
 
     if (geofenceRes.data) {
@@ -168,11 +167,11 @@ function MasiniAdminCentral() {
     // ce utilizatorul apasă explicit "Reîncarcă" (buton legat de pozițiile
     // GPS din Traccar, un apel de rețea separat) — până atunci `ferme`
     // rămânea [] și dropdown-ul arăta gol, cu doar "— pool central —".
-    // Fermele (ca și șoferii/geofence-urile) sunt un query ieftin din
-    // Supabase, independent de Traccar — se încarcă acum direct la montare,
-    // ca formularul de adăugare să fie utilizabil imediat ce se deschide
+    // Fermele (ca și geofence-urile) sunt un query ieftin din Supabase,
+    // independent de Traccar — se încarcă acum direct la montare, ca
+    // formularul de adăugare să fie utilizabil imediat ce se deschide
     // pagina, fără să depindă de un click pe "Reîncarcă".
-    void incarcaSoferiSiGeofences();
+    void incarcaFermeSiGeofences();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -182,7 +181,7 @@ function MasiniAdminCentral() {
 
     const [{ data, error: invokeError }] = await Promise.all([
       supabase.functions.invoke('get-masini-positions'),
-      incarcaSoferiSiGeofences(),
+      incarcaFermeSiGeofences(),
     ]);
 
     setLoading(false);
@@ -222,7 +221,7 @@ function MasiniAdminCentral() {
       numar_inmatriculare: form.numar_inmatriculare.trim() || null,
       marca_model: form.marca_model.trim() || null,
       traccar_device_id: form.traccar_device_id.trim() || null,
-      sofer_implicit_id: form.sofer_implicit_id || null,
+      sofer_implicit_nume: form.sofer_implicit_nume.trim() || null,
       ferma_id: form.ferma_id || null,
       viteza_limita_kmh: form.viteza_limita_kmh ? Number(form.viteza_limita_kmh) : null,
     });
@@ -258,7 +257,7 @@ function MasiniAdminCentral() {
 
     const { data, error: fetchError } = await supabase
       .from('masini')
-      .select('nume, numar_inmatriculare, marca_model, traccar_device_id, sofer_implicit_id, ferma_id, viteza_limita_kmh, activ')
+      .select('nume, numar_inmatriculare, marca_model, traccar_device_id, sofer_implicit_nume, ferma_id, viteza_limita_kmh, activ')
       .eq('id', masinaId)
       .maybeSingle();
 
@@ -274,7 +273,7 @@ function MasiniAdminCentral() {
       numar_inmatriculare: data.numar_inmatriculare ?? '',
       marca_model: data.marca_model ?? '',
       traccar_device_id: data.traccar_device_id ?? '',
-      sofer_implicit_id: data.sofer_implicit_id ?? '',
+      sofer_implicit_nume: data.sofer_implicit_nume ?? '',
       ferma_id: data.ferma_id ?? '',
       viteza_limita_kmh: data.viteza_limita_kmh !== null ? String(data.viteza_limita_kmh) : '',
       activ: data.activ,
@@ -297,7 +296,7 @@ function MasiniAdminCentral() {
         numar_inmatriculare: editForm.numar_inmatriculare.trim() || null,
         marca_model: editForm.marca_model.trim() || null,
         traccar_device_id: editForm.traccar_device_id.trim() || null,
-        sofer_implicit_id: editForm.sofer_implicit_id || null,
+        sofer_implicit_nume: editForm.sofer_implicit_nume.trim() || null,
         ferma_id: editForm.ferma_id || null,
         viteza_limita_kmh: editForm.viteza_limita_kmh ? Number(editForm.viteza_limita_kmh) : null,
         activ: editForm.activ,
@@ -486,18 +485,15 @@ function MasiniAdminCentral() {
                             </label>
                             <label>
                               Șofer implicit
-                              <select
-                                value={editForm.sofer_implicit_id}
-                                onChange={(e) => setEditForm({ ...editForm, sofer_implicit_id: e.target.value })}
+                              {/* v3, 2026-09-30 (Radu): "nu mai creem conturi
+                                  sofer. editam direct in flota auto" -- nume
+                                  liber, nu mai e legat de un cont. */}
+                              <input
+                                type="text"
+                                value={editForm.sofer_implicit_nume}
+                                onChange={(e) => setEditForm({ ...editForm, sofer_implicit_nume: e.target.value })}
                                 style={{ display: 'block', padding: '0.5rem', marginTop: '0.25rem' }}
-                              >
-                                <option value="">— fără —</option>
-                                {soferi.map((s) => (
-                                  <option key={s.id} value={s.id}>
-                                    {s.nume}
-                                  </option>
-                                ))}
-                              </select>
+                              />
                             </label>
                             <label>
                               Limită viteză (km/h)
@@ -621,18 +617,15 @@ function MasiniAdminCentral() {
             </label>
             <label style={{ display: 'block', marginBottom: '0.6rem' }}>
               Șofer implicit
-              <select
-                value={form.sofer_implicit_id}
-                onChange={(e) => updateForm('sofer_implicit_id', e.target.value)}
+              {/* v3, 2026-09-30 (Radu): "nu mai creem conturi sofer. editam
+                  direct in flota auto" -- nume liber, introdus direct aici,
+                  nu mai e legat de un cont din utilizatori. */}
+              <input
+                type="text"
+                value={form.sofer_implicit_nume}
+                onChange={(e) => updateForm('sofer_implicit_nume', e.target.value)}
                 style={{ display: 'block', width: '100%', marginTop: '0.3rem', padding: '0.55rem' }}
-              >
-                <option value="">— fără —</option>
-                {soferi.map((s) => (
-                  <option key={s.id} value={s.id}>
-                    {s.nume}
-                  </option>
-                ))}
-              </select>
+              />
             </label>
             <label style={{ display: 'block', marginBottom: '0.6rem' }}>
               Limită viteză (km/h, opțional — pentru alerte)
@@ -651,17 +644,6 @@ function MasiniAdminCentral() {
             </button>
           </fieldset>
         </form>
-        {/* v2, 2026-09-30 (Radu): "la sofer implicit lasa camp editabil" --
-            câmpul era mereu gol pentru că nu se putea crea niciun cont cu
-            rol Șofer (bug de schemă, fixat acum -- vezi
-            schema-utilizatori-rol-sofer.sql). Mesajul de mai jos nu mai
-            spune "nu e nevoie de ele", ci îndrumă spre /utilizatori. */}
-        {soferi.length === 0 && (
-          <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem' }}>
-            Nu există încă niciun cont cu rol Șofer. Dacă vrei să poți alege un șofer implicit,
-            creează un cont din Meniu → Utilizatori (rol „Șofer”).
-          </p>
-        )}
       </section>
     </main>
   );
@@ -713,7 +695,7 @@ function MasiniAdminFerma() {
 
     const { data: masiniData, error: masiniErr } = await supabase
       .from('masini')
-      .select('id, nume, numar_inmatriculare, marca_model, utilizatori(nume)')
+      .select('id, nume, numar_inmatriculare, marca_model, sofer_implicit_nume')
       .eq('activ', true)
       .order('nume');
 
@@ -728,7 +710,7 @@ function MasiniAdminFerma() {
       nume: m.nume,
       numar_inmatriculare: m.numar_inmatriculare,
       marca_model: m.marca_model,
-      sofer_nume: m.utilizatori?.nume ?? null,
+      sofer_nume: m.sofer_implicit_nume ?? null,
     }));
     setMasini(masiniList);
 

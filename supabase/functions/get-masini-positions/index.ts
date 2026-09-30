@@ -11,6 +11,10 @@
 // marca_model în răspuns, ca tabelul din /flota-auto să poată afișa
 // coloana "Tip mașină" (înainte nu era trimis deloc de aici).
 //
+// v3, 2026-09-30 (Radu): "nu mai creem conturi sofer. editam direct in
+// flota auto" -- sofer_nume vine acum din masini.sofer_implicit_nume (text
+// liber), nu mai e derivat prin join pe utilizatori(nume).
+//
 // DEPLOYAT deja direct în Supabase (verify_jwt: true) — copie sursă de adevăr.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -97,7 +101,7 @@ Deno.serve(async (req) => {
   const { data: masini, error: masiniError } = await adminClient
     .from('masini')
     .select(
-      'id, nume, numar_inmatriculare, marca_model, traccar_device_id, sofer_implicit_id, viteza_limita_kmh, ferma_id, utilizatori(nume), ferme(nume)',
+      'id, nume, numar_inmatriculare, marca_model, traccar_device_id, sofer_implicit_id, sofer_implicit_nume, viteza_limita_kmh, ferma_id, ferme(nume)',
     )
     .eq('activ', true);
 
@@ -187,7 +191,10 @@ Deno.serve(async (req) => {
       nume: m.nume,
       numar_inmatriculare: m.numar_inmatriculare,
       marca_model: m.marca_model,
-      sofer_nume: m.utilizatori?.nume ?? null,
+      // v3, 2026-09-30 (Radu): "nu mai creem conturi sofer. editam direct in
+      // flota auto" -- nume liber (masini.sofer_implicit_nume), nu mai e
+      // legat de un cont din utilizatori.
+      sofer_nume: m.sofer_implicit_nume ?? null,
       ferma_id: m.ferma_id,
       ferma_nume: m.ferme?.nume ?? null,
       viteza_limita_kmh: m.viteza_limita_kmh,

@@ -2447,3 +2447,32 @@ Actualizat și mesajul din formularul de adăugare mașină (care spunea, greși
 
 Verificat: constrângerea nouă confirmată direct în pg_constraint, `npx tsc
 --noEmit` curat.
+
+## 2026-09-30 — Corecție: Șofer implicit e text liber, nu cont de utilizator
+
+Radu, corectând mesajul anterior din aceeași zi: "nu mai creem conturi
+sofer. editam direct in flota auto".
+
+Revenire pe fix-ul anterior (rolul Șofer creabil în /utilizatori) ca
+mecanism pentru "Șofer implicit" -- Radu nu vrea să creeze conturi pentru
+șoferi, vrea doar să scrie numele direct în formularul mașinii. Schimbat:
+
+- `masini.sofer_implicit_id` (uuid, FK către utilizatori) NU mai e folosit
+  din interfață -- rămâne în schemă neșters (sync-traccar-masini îl mai
+  citește la deschiderea unei curse noi, dar va fi mereu NULL de-acum).
+- Coloană nouă `masini.sofer_implicit_nume` (text liber) -- ce se
+  completează acum din formularul de adăugare/editare mașină de la
+  /flota-auto (câmp text simplu, nu mai e dropdown).
+- Actualizate sursele care afișau șoferul implicit ca să citească direct
+  această coloană, nu prin join pe utilizatori(nume):
+  get-masini-positions (harta+tabelul admin_central), query-ul mașinilor
+  fermei din MasiniAdminFerma, get-foaie-parcurs (header-ul "Nume șofer" de
+  pe foaia de parcurs printată).
+- Constrângerea CHECK pe utilizatori.rol care acum permite și 'sofer'
+  (fix-ul anterior din aceeași zi) a rămas neschimbată -- nu strică nimic
+  să rămână permisă, chiar dacă acest câmp specific n-o mai folosește;
+  rolul Șofer tot există ca opțiune independentă în /utilizatori.
+
+Verificat: deploy edge functions byte-for-byte (ezbr_sha256) pentru
+get-masini-positions (v6) și get-foaie-parcurs (v4), `npx tsc --noEmit`
+curat.
