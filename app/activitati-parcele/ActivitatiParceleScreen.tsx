@@ -148,8 +148,14 @@ function formatLitri(litri: number | null): string {
   return litri === null ? '—' : `${litri.toLocaleString('ro-RO', { maximumFractionDigits: 1 })} L`;
 }
 
+// 2026-09-30 (Radu): sub 1h, rotunjirea la „cel mai apropiat întreg” dădea
+// 0 (ex. 0,4h → 0), ceea ce arăta ca și cum n-ar fi lucrat deloc pe acea
+// parcelă. Orice fracțiune de oră sub 1h se numără acum ca 1h întreagă;
+// de la 1h în sus rămâne rotunjirea „la cel mai apropiat întreg” de dinainte.
 function oreLucruImplicit(ore: number): string {
-  return String(Math.min(8, Math.max(0, Math.round(ore))));
+  if (ore <= 0) return '0';
+  if (ore < 1) return '1';
+  return String(Math.min(8, Math.round(ore)));
 }
 
 function formGol(ore: number): FormSesiune {

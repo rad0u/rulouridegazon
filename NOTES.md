@@ -2067,3 +2067,16 @@ schimba ușor de la o interogare la alta până la confirmarea efectivă în
 
 Fișiere: `supabase/functions/get-combustibil-parcele/index.ts` (v2,
 redeploy), `app/combustibil-parcele/CombustibilParceleScreen.tsx`.
+
+## 2026-09-30 — Ore de lucru sub 1h rotunjite la 0
+
+Radu a observat că la confirmarea unei activități detectate pe parcele
+(/activitati-parcele), câmpul „Ore de lucru" se precompletează cu totalul
+detectat rotunjit la cel mai apropiat întreg (`Math.round`) — ceea ce
+însemna că o sesiune de, ex., 0,4h apărea ca 0h, dând impresia că nu s-a
+lucrat deloc pe acea parcelă.
+
+Fix: sub 1h, orice fracțiune de oră lucrată se rotunjește acum în sus la
+1h întreagă; de la 1h în sus rămâne rotunjirea „la cel mai apropiat întreg"
+de dinainte (plafonat tot la 8h). Vezi `oreLucruImplicit()` în
+`app/activitati-parcele/ActivitatiParceleScreen.tsx`.
