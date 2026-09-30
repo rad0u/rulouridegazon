@@ -2324,3 +2324,23 @@ Radu a raportat două probleme la /flota-auto, pe baza unei foi de parcurs expor
 **Notă importantă:** fix-ul previne fragmentarea curselor NOI de-acum încolo. Cursele deja salvate (fragmentate, fără adresă) din perioada 24.09-30.09 rămân în tabelul `curse` — de curățat separat, pe toată flota, dacă Radu decide asta (necesită confirmare, sunt date de producție).
 
 **Neconfirmat încă:** dacă blocarea la Nominatim a fost temporară (se reface singură pe măsură ce volumul de cereri scade la normal) sau necesită timp/acțiune suplimentară — de verificat dacă adresele reapar pe curse noi în zilele următoare.
+
+## 2026-09-30 — Foaie de parcurs redesenată în formatul AROBS + Scop deplasare auto-completat
+
+Radu a atașat un raport real de la firma care monitoriza flota înainte (AROBS Track GPS, mai 2026) și a cerut ca foaia de parcurs a aplicației să arate la fel, cu "Scop deplasare" completat automat (nu manual, per cursă).
+
+**Modificat `get-foaie-parcurs/index.ts` (v3):**
+- Scopul deplasării nu mai necesită completare manuală: dacă `curse.scop` e gol, se afișează automat "Deplasare în interes de serviciu" (dacă a fost totuși setat manual din /curse, valoarea reală e păstrată).
+- Adăugate câmpuri noi în răspuns: `index_start` / `index_stop` (echivalentul AROBS de index km auto, calculat din suma GPS a curselor — NU un odometru real, la fel ca `km_cumulat` existent), `timp_total_deplasare_secunde` (suma duratelor curselor din lună), `masina.ferma_nume` (join nou pe `ferme` — "Grup vehicule" la AROBS).
+
+**Modificat `FoiParcursScreen.tsx` (v3) — foaia detaliată per mașină:**
+- Bloc de antet nou, ca la AROBS: Perioada, Data generării, Număr de înmatriculare, Nume vehicul, Model, Grup vehicule (fermă), Șofer implicit, Total distanță, Timp total deplasare, Index GPS start/stop.
+- Coloane tabel: Nr. crt., Dată plecare (dată+oră într-o celulă, ca la AROBS), Locație pornire, Dată sosire, Locație sosire, Distanța parcursă (km), Scopul deplasării, Index km sosire (km), Timp deplasare (hh:mm:ss).
+- Rând TOTAL la final (prima plecare → ultima sosire din lună, sumă km, index stop, sumă timp), ca la AROBS.
+- Scoase din raportul printat: coloana Șofer per cursă (șoferul implicit e acum doar în antet) și indicatorul de validare/nevalidată (nu mai blochează/avertizează la printare, din moment ce scopul nu mai necesită completare manuală). Ambele rămân disponibile în /curse pentru cine vrea să urmărească detaliul intern.
+
+Rezumatul flotei (pagina de listă cu toate mașinile) NU a fost modificat — rămâne cum era.
+
+**Verificat:** `npx tsc --noEmit` curat (fără erori de tip) după modificări; `index_start`/`index_stop` verificate cu SQL direct pe Duster Roxana septembrie 2026 (0 → 252.25, coincide cu suma GPS reală a curselor lunii). Deployat `get-foaie-parcurs` v3, verificat byte-for-byte.
+
+**Important:** fix-ul de fragmentare a curselor (mai sus, "Curse mașini fragmentate") previne fragmentarea de-acum încolo, dar cursele deja înregistrate din septembrie (24.09-30.09, ~120 curse fragmentate per mașină la Duster Roxana, similar la restul flotei) rămân fragmentate în tabelul `curse` — dacă se printează foaia de parcurs pentru septembrie acum, tot va avea multe rânduri scurte, fără adresă. Pentru un raport curat ca eșantionul AROBS, fie se așteaptă luna octombrie (curse noi, deja corecte), fie se curăță manual cursele fragmentate din septembrie (ofertă făcută lui Radu, neconfirmată încă).
