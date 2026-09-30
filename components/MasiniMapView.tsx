@@ -22,6 +22,10 @@ export type MasinaPozitie = {
   masina_id: string;
   nume: string;
   numar_inmatriculare: string | null;
+  // 2026-09-30 (Radu): "Numar auto - Tip masina - Sofer" -- marca_model
+  // adăugat ca să poată apărea coloana "Tip mașină" în tabelul de la
+  // /flota-auto (get-masini-positions actualizat să-l trimită).
+  marca_model: string | null;
   sofer_nume: string | null;
   ferma_nume: string | null;
   viteza_limita_kmh: number | null;

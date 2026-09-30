@@ -373,11 +373,17 @@ function MasiniAdminCentral() {
         <div style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
             <thead>
+              {/* v2, 2026-09-30 (Radu): "vreau sa fie asa: Numar auto - Tip
+                  masina - Sofer" -- ordinea de identificare a mașinii pe
+                  rând a fost schimbată să înceapă cu astea trei (Tip mașină
+                  = marca_model, nou afișat aici -- înainte nu apărea deloc
+                  în acest tabel). Fermă/Status/Viteză/Ultima poziție rămân
+                  după, neschimbate -- utile pentru dispecerizare live. */}
               <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-                <th style={{ padding: '0.4rem' }}>Mașină</th>
-                <th style={{ padding: '0.4rem' }}>Nr. înmatriculare</th>
+                <th style={{ padding: '0.4rem' }}>Număr auto</th>
+                <th style={{ padding: '0.4rem' }}>Tip mașină</th>
+                <th style={{ padding: '0.4rem' }}>Șofer</th>
                 <th style={{ padding: '0.4rem' }}>Fermă</th>
-                <th style={{ padding: '0.4rem' }}>Șofer implicit</th>
                 <th style={{ padding: '0.4rem' }}>Status</th>
                 <th style={{ padding: '0.4rem' }}>Viteză</th>
                 <th style={{ padding: '0.4rem' }}>Ultima poziție</th>
@@ -400,10 +406,10 @@ function MasiniAdminCentral() {
                       onClick={() => void toggleEditare(m.masina_id)}
                       style={{ borderBottom: '1px solid #f0f0f0', background: extinsa ? '#eef6ff' : undefined, cursor: 'pointer' }}
                     >
-                      <td style={{ padding: '0.4rem' }}>{m.nume}</td>
-                      <td style={{ padding: '0.4rem' }}>{m.numar_inmatriculare ?? '—'}</td>
-                      <td style={{ padding: '0.4rem' }}>{m.ferma_nume ?? 'pool central'}</td>
+                      <td style={{ padding: '0.4rem' }}>{m.numar_inmatriculare ?? m.nume}</td>
+                      <td style={{ padding: '0.4rem' }}>{m.marca_model ?? '—'}</td>
                       <td style={{ padding: '0.4rem' }}>{m.sofer_nume ?? '—'}</td>
+                      <td style={{ padding: '0.4rem' }}>{m.ferma_nume ?? 'pool central'}</td>
                       <td style={{ padding: '0.4rem' }}>
                         {m.status === 'online' ? 'online' : 'offline'}
                         {m.cursa_activa && <span style={{ color: '#2e7d32', fontWeight: 600 }}> · în cursă</span>}
@@ -804,25 +810,25 @@ function MasiniAdminFerma() {
         <section style={{ overflowX: 'auto' }}>
           <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem', maxWidth: '760px' }}>
             <thead>
+              {/* v2, 2026-09-30 (Radu): "vreau sa fie asa: Numar auto - Tip
+                  masina - Sofer" */}
               <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
-                <th style={{ padding: '0.4rem' }}>Mașină</th>
-                <th style={{ padding: '0.4rem' }}>Nr. înmatriculare</th>
-                <th style={{ padding: '0.4rem' }}>Model</th>
-                <th style={{ padding: '0.4rem' }}>Șofer implicit</th>
+                <th style={{ padding: '0.4rem' }}>Număr auto</th>
+                <th style={{ padding: '0.4rem' }}>Tip mașină</th>
+                <th style={{ padding: '0.4rem' }}>Șofer</th>
               </tr>
             </thead>
             <tbody>
               {masini.length === 0 && (
                 <tr>
-                  <td colSpan={4} style={{ padding: '0.75rem', color: '#666' }}>
+                  <td colSpan={3} style={{ padding: '0.75rem', color: '#666' }}>
                     Nicio mașină alocată fermei tale încă — cere adminului general să aloce una din /masini.
                   </td>
                 </tr>
               )}
               {masini.map((m) => (
                 <tr key={m.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                  <td style={{ padding: '0.4rem' }}>{m.nume}</td>
-                  <td style={{ padding: '0.4rem' }}>{m.numar_inmatriculare ?? '—'}</td>
+                  <td style={{ padding: '0.4rem' }}>{m.numar_inmatriculare ?? m.nume}</td>
                   <td style={{ padding: '0.4rem' }}>{m.marca_model ?? '—'}</td>
                   <td style={{ padding: '0.4rem' }}>{m.sofer_nume ?? '—'}</td>
                 </tr>

@@ -7,6 +7,10 @@
 //
 // Secrete necesare: TRACCAR_URL, TRACCAR_USER, TRACCAR_PASSWORD.
 //
+// v2, 2026-09-30 (Radu): "Numar auto - Tip masina - Sofer" -- adaugă
+// marca_model în răspuns, ca tabelul din /flota-auto să poată afișa
+// coloana "Tip mașină" (înainte nu era trimis deloc de aici).
+//
 // DEPLOYAT deja direct în Supabase (verify_jwt: true) — copie sursă de adevăr.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
@@ -93,7 +97,7 @@ Deno.serve(async (req) => {
   const { data: masini, error: masiniError } = await adminClient
     .from('masini')
     .select(
-      'id, nume, numar_inmatriculare, traccar_device_id, sofer_implicit_id, viteza_limita_kmh, ferma_id, utilizatori(nume), ferme(nume)',
+      'id, nume, numar_inmatriculare, marca_model, traccar_device_id, sofer_implicit_id, viteza_limita_kmh, ferma_id, utilizatori(nume), ferme(nume)',
     )
     .eq('activ', true);
 
@@ -137,7 +141,7 @@ Deno.serve(async (req) => {
   const deviceByImei = new Map(devices.map((d) => [d.uniqueId, d]));
   const positionByDeviceId = new Map(positions.map((p) => [p.deviceId, p]));
 
-  // Fallback: GET /api/positions?all=true întoarce doar „ultima poziție"
+  // Fallback: GET /api/positions?all=true întoarce doar „ultima poziție“
   // conform pointer-ului intern al Traccar (device.positionId), care nu se
   // actualizează mereu la fel de fiabil ca istoricul real de poziții —
   // confirmat 2026-09-11 pe get-utilaje-positions (aceeași cauză aici, cod
@@ -182,6 +186,7 @@ Deno.serve(async (req) => {
       masina_id: m.id,
       nume: m.nume,
       numar_inmatriculare: m.numar_inmatriculare,
+      marca_model: m.marca_model,
       sofer_nume: m.utilizatori?.nume ?? null,
       ferma_id: m.ferma_id,
       ferma_nume: m.ferme?.nume ?? null,

@@ -2396,3 +2396,24 @@ Verificat: schema DB (foreign key-uri, RLS pe utilizatori — DELETE nu are
 nicio policy pentru clienți obișnuiți, doar service role poate șterge, ceea
 ce funcția face corect), deploy edge function verificat byte-for-byte
 (ezbr_sha256), `npx tsc --noEmit` curat pe frontend.
+
+## 2026-09-30 — Reordonare coloane listă /flota-auto
+
+Radu: "lista de la flota auto vreau sa fie asa: Numar auto - Tip masina -
+Sofer".
+
+Ambele tabele de la /flota-auto (vedere admin_central cu hartă + vedere
+admin_ferma, doar listă) au acum coloanele de identificare în această ordine:
+Număr auto (nr. înmatriculare, cu fallback pe eticheta mașinii dacă nu are
+număr introdus) - Tip mașină (marca_model) - Șofer. Coloana veche "Mașină"
+(eticheta liberă, ex. "Duster Roxana") a fost scoasă ca și coloană separată.
+
+La vederea admin_central: Fermă/Status/Viteză/Ultima poziție rămân după,
+neschimbate (nu au fost menționate, sunt utile pentru dispecerizare live).
+
+Notă tehnică: coloana "Tip mașină" nu exista deloc înainte în acest tabel --
+`get-masini-positions` (Edge Function) nu trimitea `marca_model`. Actualizată
+(v5) să-l trimită, plus tipul `MasinaPozitie` din MasiniMapView.tsx.
+
+Verificat: deploy edge function byte-for-byte (ezbr_sha256), `npx tsc
+--noEmit` curat.
