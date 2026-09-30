@@ -143,11 +143,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                 </Link>
               ) : (
                 <>
+                  {/* 2026-09-30 (Radu): "Acasa si Dashboard fac acelasi
+                      lucru" -- Acasă (/) doar redirecționează spre
+                      /dashboard (vezi lib/postLoginRedirect.ts), deci
+                      linkul separat spre Dashboard a fost scos din meniu;
+                      "Acasă" rămâne singurul punct de intrare. */}
                   <Link href="/" style={navLinkStyle} onClick={closeMenu}>
                     Acasă
-                  </Link>
-                  <Link href="/dashboard" style={navLinkStyle} onClick={closeMenu}>
-                    Dashboard
                   </Link>
                   <Link href="/ferme" style={navLinkStyle} onClick={closeMenu}>
                     Ferme
