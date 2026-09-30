@@ -5,7 +5,7 @@ deja, și de ce s-au ales anumite soluții. Scopul e ca informația să supravie
 chiar dacă o conversație cu Claude se pierde sau se rezumă. Se actualizează pe măsură
 ce apar decizii noi — nu e nevoie să reconstruim contextul din memorie de fiecare dată.
 
-Ultima actualizare: 2026-08-27.
+Ultima actualizare: 2026-09-30.
 
 ---
 
@@ -2140,3 +2140,61 @@ detectată nu era încă confirmată de vreun admin de fermă în
 sus) a apucat să fie deployat ÎNAINTE de a exista date reale confirmate de
 adminii de fermă, deci nu există risc de date istorice greșite generate de
 admini pe baza bug-ului vechi.
+
+## 2026-09-30 — Bug: realimentare atribuită integral unei sesiuni greșite (Belarus 820, 22,9L)
+
+Radu a semnalat un consum de 22,9L pe raportul de combustibil pe parcele
+pentru F1 - Belarus 820, sesiunea a doua din 29 sept. (15:17-15:35, 0,3h) —
+suspect de mare pentru o sesiune atât de scurtă ("verifica si consumul asta
+sa vedem daca e real").
+
+Cauza: distinctă de bug-ul de zgomot tranzitoriu de mai sus (fixat deja în
+toate 5 fișierele). Aici problema era în `sumaRealimentariInInterval`: o
+realimentare era atribuită unei sesiuni pe baza UNUI SINGUR moment —
+`data_ora`, timpul la care algoritmul de extreme CONFIRMĂ vârful curbei
+(când nivelul începe să coboare la loc). Dar acel moment de confirmare vine
+inevitabil la ceva timp DUPĂ ce alimentarea a început efectiv — dacă
+realimentarea fizică s-a produs mai ales înainte de/între două sesiuni GPS,
+tot litrajul ei putea fi atribuit integral sesiunii a cărei fereastră
+conținea, din întâmplare, doar acel moment final de confirmare.
+
+Caz real verificat (date brute din `combustibil_citiri`, utilaj Belarus
+820): o realimentare reală de ~23,5L, cu nivelul urcând de la 76,1L
+(11:43:23 UTC) la 99,5L (confirmat 12:17:41 UTC) — adică ea s-a produs în
+pauza dintre sesiunea 1 (14:45-15:02 local) și sesiunea 2 (15:17-15:35
+local), cu utilajul oprit. Fiindcă timpul de confirmare (12:17:41 UTC) cădea
+în prima secundă a sesiunii 2, algoritmul vechi atribuia toată alimentarea
+sesiunii 2 ca "22,9L consum" — deși acolo nivelul rămăsese practic constant.
+Nici sesiunea 1 nu arăta corect (0L, când de fapt acolo se întâmpla începutul
+alimentării). Verificat empiric cu un script Node.js care replică exact
+algoritmul din producție, rulat pe datele reale, înainte și după fix.
+
+Fix: fiecare eveniment de realimentare reține acum și `data_ora_inceput`
+(timpul extremei ANTERIOARE — ultimul moment înainte să înceapă urcarea),
+pe lângă `data_ora` existent (timpul confirmării). O realimentare se mai
+adună la o sesiune doar dacă ÎNTREG intervalul ei — atât începutul cât și
+confirmarea — încape în fereastra sesiunii (containment complet), nu doar
+dacă punctul de confirmare cade acolo. Cu regula nouă, pe cazul Belarus 820
+niciuna dintre cele două sesiuni nu mai "câștigă" alimentarea (corect: n-a
+fost consum real în niciuna), fără să afecteze o realimentare făcută cu
+adevărat în timpul unei sesiuni (unde atât începutul cât și sfârșitul cad în
+același interval).
+
+Aplicat DOAR în cele 3 fișiere unde `sumaRealimentariInInterval`/
+`consumSesiune` rulează pe ferestre de dimensiunea unei sesiuni GPS
+(sub-zi) — verificat prin grep că sunt singurele 3 din cele 5 fișiere cu
+funcții de combustibil care conțin aceste funcții:
+- `get-sesiuni-detectate` (ore + litri pe sesiune, /activitati-parcele)
+- `get-combustibil-parcele` (consum pe parcelă, confirmat + neconfirmat)
+- `get-cost-productie` (consum lunar per fermă + defalcare pe parcele)
+
+NU s-a atins `get-combustibil-report` și `get-rezervor-central-miscari` —
+nu au fost investigate în acest context, rămân de verificat separat dacă e
+nevoie. NU s-au atins nici bucket-urile pe ZI (`consumZilnic`/
+`realimentariPeZi` din get-combustibil-parcele) sau pe LUNĂ (`consumPeLuna`/
+`realimentariPeLuna` din get-cost-productie) — acelea folosesc în continuare
+doar `.data_ora` pentru grupare, o fereastră mult mai largă și cu risc mult
+mai mic; schimbarea lor n-a fost cerută și n-a fost făcută.
+
+Toate 3 deploy-uri confirmate pe Supabase (verificate byte-cu-byte cu
+conținutul intenționat).

@@ -184,7 +184,15 @@ interface CitireIndexata {
   index: number;
 }
 
+// 2026-09-30 (Radu): `data_ora` ramane momentul CONFIRMARII realimentarii
+// (varful curbei, cand nivelul incepe sa coboare la loc) -- dar acela poate
+// cadea la mult timp dupa ce alimentarea a inceput efectiv. `data_ora_inceput`
+// (timpul extremei ANTERIOARE, adica ultimul moment inainte sa inceapa
+// urcarea) marcheaza inceputul real al evenimentului, folosit mai jos ca sa
+// nu mai atribuim o realimentare unei sesiuni doar pentru ca s-a intamplat sa
+// se confirme in interiorul ei.
 interface Eveniment {
+  data_ora_inceput: string;
   data_ora: string;
   delta_litri: number;
 }
@@ -365,13 +373,25 @@ function nivelLaMoment(rows: CitireCombustibil[], momentIso: string): number | n
   return rezultat ? rezultat.nivel_litri : rows[0].nivel_litri;
 }
 
+// 2026-09-30 (Radu): o realimentare se aduna la o sesiune doar daca INTREGUL
+// ei interval (inceput + confirmare) incape in fereastra sesiunii -- nu doar
+// daca punctul de confirmare cade acolo. Fix pentru un caz real: F1 - Belarus
+// 820, 29 sept., o alimentare de ~23,5L inceputa in sesiunea 1 (14:45-15:02)
+// si terminata/confirmata chiar in prima secunda a sesiunii 2 (15:17-15:35) a
+// fost atribuita INTEGRAL sesiunii 2 (22,9L "consum" desi acolo nivelul
+// statuse practic constant) -- desi alimentarea se produsese in pauza dintre
+// cele doua sesiuni, cu utilajul oprit. Cu regula noua, niciuna dintre cele
+// doua sesiuni nu mai "castiga" alimentarea (corect: n-a fost consum real in
+// niciuna), fara sa afecteze o realimentare facuta cu adevarat in timpul unei
+// sesiuni (unde atat inceputul cat si sfarsitul cad in acelasi interval).
 function sumaRealimentariInInterval(realimentari: Eveniment[], startIso: string, endIso: string): number {
   const startMs = new Date(startIso).getTime();
   const endMs = new Date(endIso).getTime();
   let suma = 0;
   for (const e of realimentari) {
-    const ms = new Date(e.data_ora).getTime();
-    if (ms > startMs && ms <= endMs) suma += e.delta_litri;
+    const inceputMs = new Date(e.data_ora_inceput).getTime();
+    const sfarsitMs = new Date(e.data_ora).getTime();
+    if (inceputMs >= startMs && sfarsitMs <= endMs) suma += e.delta_litri;
   }
   return suma;
 }
@@ -605,7 +625,7 @@ Deno.serve(async (req) => {
         const curr = extreme[i].citire;
         const delta = Number(curr.nivel_litri) - Number(prev.nivel_litri);
         if (delta >= PRAG_MINIM_EVENIMENT_L) {
-          realimentari.push({ data_ora: curr.data_ora, delta_litri: delta });
+          realimentari.push({ data_ora_inceput: prev.data_ora, data_ora: curr.data_ora, delta_litri: delta });
         }
       }
     }
