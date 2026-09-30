@@ -272,6 +272,15 @@ function filtreazaCitiriPlauzibile(rows: Citire[], capacitate: number): Citire[]
 // fereastră, saltul e considerat real (posibilă realimentare sau scădere
 // reală) și devine noua ancoră — nu vrem să ascundem un eveniment real doar
 // pentru că nu a revenit la timp.
+// 2026-09-30 (Radu): dupa o pauza de telemetrie >FEREASTRA_REVENIRE_MINUTE,
+// o citire eronata a sondei (glitch, ex. 0L) care se corecteaza in cateva
+// SECUNDE tot scapa de filtru -- fereastra de "revenire" se masura de la
+// ancora (ultima citire buna), nu de la citirea suspecta insasi, deci era
+// deja expirata inainte sa apara glitch-ul. Exemplu real: F1 - JCB,
+// 28 sept., sesiune 11:18-11:53 -- un glitch de 0L dupa o pauza de 17 min,
+// corectat in 2 secunde, a fost interpretat ca "realimentare" de 77,4L si
+// adaugat gresit la consum (78,6L in loc de ~1,2L reale). Fix: fereastra se
+// masoara acum de la citirea suspecta (`r`), nu de la ancora.
 function eliminaFluctuatiiTranzitorii(rows: Citire[]): Citire[] {
   if (rows.length === 0) return [];
   const rezultat: Citire[] = [rows[0]];
@@ -291,7 +300,7 @@ function eliminaFluctuatiiTranzitorii(rows: Citire[]): Citire[] {
     let j = i;
     let gasitRevenire = -1;
     while (j < rows.length) {
-      const minute = (new Date(rows[j].data_ora).getTime() - new Date(ancora.data_ora).getTime()) / 60_000;
+      const minute = (new Date(rows[j].data_ora).getTime() - new Date(r.data_ora).getTime()) / 60_000;
       if (minute > FEREASTRA_REVENIRE_MINUTE) break;
       if (Math.abs(rows[j].nivel_litri - ancora.nivel_litri) < PRAG_MINIM_EVENIMENT_L) {
         gasitRevenire = j;

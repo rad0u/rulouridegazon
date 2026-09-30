@@ -2080,3 +2080,50 @@ Fix: sub 1h, orice fracțiune de oră lucrată se rotunjește acum în sus la
 1h întreagă; de la 1h în sus rămâne rotunjirea „la cel mai apropiat întreg"
 de dinainte (plafonat tot la 8h). Vezi `oreLucruImplicit()` în
 `app/activitati-parcele/ActivitatiParceleScreen.tsx`.
+
+## 2026-09-30 — Bug: consum fantomă de combustibil după o pauză de telemetrie (78,6L în loc de ~1,2L)
+
+Radu a semnalat, într-o sesiune de 0,6h a utilajului F1 - JCB pe 28 sept.
+(11:18-11:53), un consum afișat de 78,6L — evident absurd pentru o sesiune
+atât de scurtă.
+
+Cauza: `eliminaFluctuatiiTranzitorii` (filtrul de zgomot tranzitoriu pe
+citirile de combustibil, prezent identic în 5 fișiere) măsura fereastra de
+"revenire" de FEREASTRA_REVENIRE_MINUTE (15 min) de la citirea-ANCORĂ
+(ultima citire bună păstrată), nu de la citirea SUSPECTĂ (glitch-ul) însăși.
+Când telemetria are o pauză mai mare de 15 minute chiar înainte ca sonda să
+trimită o citire eronată (ex. 0L), fereastra calculată de la ancoră era deja
+"expirată" în momentul în care apărea glitch-ul — deci chiar dacă glitch-ul
+se corecta singur în câteva SECUNDE, filtrul nu-l mai prindea ca zgomot.
+
+Caz real verificat: F1 - JCB, 28 sept., o citire de 0L după o pauză de 17
+minute, corectată în 2 secunde — netratată ca zgomot, a fost interpretată de
+`extrageExtreme` ca un minim local fals, iar revenirea la nivelul normal
+(~77L) a fost citită de detecția de realimentări ca o "realimentare" de
+77,4L. Această realimentare fantomă a fost adăugată greșit la bilanțul de
+masă al sesiunii 11:18-11:53, umflând consumul real de ~1,2L la 78,6L
+afișate.
+
+Fix: fereastra de 15 minute se măsoară acum de la citirea suspectă (`r`),
+nu de la ancoră — verificat local, rulând algoritmul exact (înainte și după
+fix) pe citirile reale ale utilajului din acea zi: înainte reproducea
+78,6L identic cu ce arăta aplicația, după fix rezultă 1,2L (fără nicio
+realimentare falsă detectată), și un test separat confirmă că un glitch cu
+pauză scurtă înainte (sub 15 min) tot e filtrat corect ca zgomot.
+
+Aplicat identic (Radu a confirmat explicit pentru toate 5) în toate fișierele
+care au funcția `eliminaFluctuatiiTranzitorii` — bug-ul putea afecta orice
+raport care se bazează pe bilanțul de masă, nu doar activitățile pe parcele:
+- `get-sesiuni-detectate` (ore + litri pe sesiune, /activitati-parcele)
+- `get-combustibil-parcele` (consum pe parcelă, confirmat + neconfirmat)
+- `get-combustibil-report` (raportul principal de combustibil per utilaj)
+- `get-cost-productie` (consum lunar per fermă + defalcare pe parcele —
+  intră direct în costul de producție afișat)
+- `get-rezervor-central-miscari` (ieșiri zilnice din rezervorul central)
+
+IMPORTANT: bug-ul e vechi (nu introdus recent), deci poate fi afectat orice
+raport istoric unde a existat un tipar similar (pauză de telemetrie >15 min
+urmată imediat de o citire eronată a sondei care se corectează repede) —
+merită verificat dacă apar alte cifre suspect de mari în rapoartele deja
+consultate (cost de producție, combustibil pe parcele etc.), mai ales pentru
+perioade cu conexiune GPS instabilă.
