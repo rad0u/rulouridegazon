@@ -2344,3 +2344,15 @@ Rezumatul flotei (pagina de listă cu toate mașinile) NU a fost modificat — r
 **Verificat:** `npx tsc --noEmit` curat (fără erori de tip) după modificări; `index_start`/`index_stop` verificate cu SQL direct pe Duster Roxana septembrie 2026 (0 → 252.25, coincide cu suma GPS reală a curselor lunii). Deployat `get-foaie-parcurs` v3, verificat byte-for-byte.
 
 **Important:** fix-ul de fragmentare a curselor (mai sus, "Curse mașini fragmentate") previne fragmentarea de-acum încolo, dar cursele deja înregistrate din septembrie (24.09-30.09, ~120 curse fragmentate per mașină la Duster Roxana, similar la restul flotei) rămân fragmentate în tabelul `curse` — dacă se printează foaia de parcurs pentru septembrie acum, tot va avea multe rânduri scurte, fără adresă. Pentru un raport curat ca eșantionul AROBS, fie se așteaptă luna octombrie (curse noi, deja corecte), fie se curăță manual cursele fragmentate din septembrie (ofertă făcută lui Radu, neconfirmată încă).
+
+## 2026-09-30 — Editare mașină completă la /flota-auto (nume, nr. înmatriculare, marcă/model, IMEI)
+
+Radu a cerut: "la Flota auto - editeaza - vreau sa pot edita si Masina" — panoul de editare (rând expandabil) permitea doar Fermă/Șofer implicit/Limită viteză/Activă, nu și identitatea mașinii (nume, nr. înmatriculare, marcă/model, IMEI dispozitiv Traccar).
+
+**Bug găsit pe drum:** `toggleEditare` primea Șofer implicit și Activă din `MasinaPozitie` (datele din lista de poziții GPS), care NU are `sofer_implicit_id` (doar `sofer_nume`, un nume afișat) și nici `activ` — apelul vechi trimitea mereu `null`/`true` pentru ele, deci formularul de editare RESETA silențios Șofer implicit la "— fără —" și Activă la bifat, la fiecare deschidere, indiferent de valorile reale din bază.
+
+**Fix:** `toggleEditare` citește acum direct din `masini` (rândul complet: nume, numar_inmatriculare, marca_model, traccar_device_id, sofer_implicit_id, ferma_id, viteza_limita_kmh, activ) la deschiderea panoului, în loc să se bazeze pe datele parțiale din lista de poziții. Adăugate în formular: Nume/etichetă, Număr înmatriculare, Marcă/model, IMEI dispozitiv GPS — toate salvate în `salveazaEditare`. După salvare se reîncarcă și lista de device-uri Traccar nelegate (un IMEI schimbat/eliberat trebuie să reapară acolo).
+
+**Verificat:** `npx tsc --noEmit` curat după modificări.
+
+Modificat doar `app/masini/MasiniScreen.tsx` — fără schimbări de schemă sau edge function.

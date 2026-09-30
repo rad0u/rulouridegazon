@@ -91,9 +91,23 @@ function MasiniAdminCentral() {
   const [traccarError, setTraccarError] = useState<string | null>(null);
 
   const [masinaExtinsa, setMasinaExtinsa] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<{ sofer_implicit_id: string; ferma_id: string; viteza_limita_kmh: string; activ: boolean } | null>(null);
+  // 2026-09-30 (Radu): "vreau sa pot edita si Masina" -- editarea permitea
+  // doar Fermă/Șofer implicit/Limită viteză/Activă, nu și identitatea
+  // mașinii (nume, nr. înmatriculare, marcă/model, IMEI Traccar). Tipul
+  // `editForm` extins cu aceste câmpuri.
+  const [editForm, setEditForm] = useState<{
+    nume: string;
+    numar_inmatriculare: string;
+    marca_model: string;
+    traccar_device_id: string;
+    sofer_implicit_id: string;
+    ferma_id: string;
+    viteza_limita_kmh: string;
+    activ: boolean;
+  } | null>(null);
   const [editSaving, setEditSaving] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editLoading, setEditLoading] = useState(false);
 
   async function incarcaSoferiSiGeofences() {
     const [soferiRes, fermeRes, geofenceRes] = await Promise.all([
@@ -224,30 +238,65 @@ function MasiniAdminCentral() {
     await reincarca();
   }
 
-  function toggleEditare(m: MasinaPozitie, soferId: string | null, vitezaLimita: number | null, activ: boolean) {
-    if (masinaExtinsa === m.masina_id) {
+  // 2026-09-30 (Radu): toggleEditare folosea datele din lista de poziții
+  // (MasinaPozitie), care NU are sofer_implicit_id (doar sofer_nume, un
+  // nume afișat) nici `activ` -- apelul vechi trimitea mereu `null`/`true`
+  // pentru ele, deci formularul de editare reseta silențios Șofer
+  // implicit/Activă la deschidere. Acum citim rândul real din `masini`
+  // (inclusiv identitatea mașinii: nume, nr. înmatriculare, marcă/model,
+  // IMEI Traccar) direct din DB la deschiderea panoului de editare.
+  async function toggleEditare(masinaId: string) {
+    if (masinaExtinsa === masinaId) {
       setMasinaExtinsa(null);
       setEditForm(null);
       return;
     }
-    setMasinaExtinsa(m.masina_id);
+    setMasinaExtinsa(masinaId);
+    setEditForm(null);
     setEditError(null);
+    setEditLoading(true);
+
+    const { data, error: fetchError } = await supabase
+      .from('masini')
+      .select('nume, numar_inmatriculare, marca_model, traccar_device_id, sofer_implicit_id, ferma_id, viteza_limita_kmh, activ')
+      .eq('id', masinaId)
+      .maybeSingle();
+
+    setEditLoading(false);
+
+    if (fetchError || !data) {
+      setEditError(fetchError?.message ?? 'Mașină negăsită.');
+      return;
+    }
+
     setEditForm({
-      sofer_implicit_id: soferId ?? '',
-      ferma_id: (m as any).ferma_id ?? '',
-      viteza_limita_kmh: vitezaLimita !== null ? String(vitezaLimita) : '',
-      activ,
+      nume: data.nume ?? '',
+      numar_inmatriculare: data.numar_inmatriculare ?? '',
+      marca_model: data.marca_model ?? '',
+      traccar_device_id: data.traccar_device_id ?? '',
+      sofer_implicit_id: data.sofer_implicit_id ?? '',
+      ferma_id: data.ferma_id ?? '',
+      viteza_limita_kmh: data.viteza_limita_kmh !== null ? String(data.viteza_limita_kmh) : '',
+      activ: data.activ,
     });
   }
 
   async function salveazaEditare(masinaId: string) {
     if (!editForm) return;
+    if (!editForm.nume.trim()) {
+      setEditError('Completează numele mașinii.');
+      return;
+    }
     setEditSaving(true);
     setEditError(null);
 
     const { error: updateError } = await supabase
       .from('masini')
       .update({
+        nume: editForm.nume.trim(),
+        numar_inmatriculare: editForm.numar_inmatriculare.trim() || null,
+        marca_model: editForm.marca_model.trim() || null,
+        traccar_device_id: editForm.traccar_device_id.trim() || null,
         sofer_implicit_id: editForm.sofer_implicit_id || null,
         ferma_id: editForm.ferma_id || null,
         viteza_limita_kmh: editForm.viteza_limita_kmh ? Number(editForm.viteza_limita_kmh) : null,
@@ -264,6 +313,7 @@ function MasiniAdminCentral() {
 
     setMasinaExtinsa(null);
     setEditForm(null);
+    void incarcaTraccarDevices();
     await reincarca();
   }
 
@@ -347,7 +397,7 @@ function MasiniAdminCentral() {
                 return (
                   <Fragment key={m.masina_id}>
                     <tr
-                      onClick={() => toggleEditare(m, null, m.viteza_limita_kmh, true)}
+                      onClick={() => void toggleEditare(m.masina_id)}
                       style={{ borderBottom: '1px solid #f0f0f0', background: extinsa ? '#eef6ff' : undefined, cursor: 'pointer' }}
                     >
                       <td style={{ padding: '0.4rem' }}>{m.nume}</td>
@@ -366,10 +416,53 @@ function MasiniAdminCentral() {
                         {extinsa ? 'Ascunde ▲' : 'Editează ▼'}
                       </td>
                     </tr>
+                    {extinsa && editLoading && (
+                      <tr>
+                        <td colSpan={8} style={{ padding: '0.75rem', background: '#fafafa', color: '#666' }}>
+                          Se încarcă...
+                        </td>
+                      </tr>
+                    )}
                     {extinsa && editForm && (
                       <tr>
                         <td colSpan={8} style={{ padding: '0.75rem', background: '#fafafa' }}>
                           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}>
+                            <label>
+                              Nume/etichetă
+                              <input
+                                type="text"
+                                value={editForm.nume}
+                                onChange={(e) => setEditForm({ ...editForm, nume: e.target.value })}
+                                style={{ display: 'block', padding: '0.5rem', marginTop: '0.25rem', width: '200px' }}
+                              />
+                            </label>
+                            <label>
+                              Număr înmatriculare
+                              <input
+                                type="text"
+                                value={editForm.numar_inmatriculare}
+                                onChange={(e) => setEditForm({ ...editForm, numar_inmatriculare: e.target.value })}
+                                style={{ display: 'block', padding: '0.5rem', marginTop: '0.25rem', width: '150px' }}
+                              />
+                            </label>
+                            <label>
+                              Marcă/model
+                              <input
+                                type="text"
+                                value={editForm.marca_model}
+                                onChange={(e) => setEditForm({ ...editForm, marca_model: e.target.value })}
+                                style={{ display: 'block', padding: '0.5rem', marginTop: '0.25rem', width: '160px' }}
+                              />
+                            </label>
+                            <label>
+                              IMEI dispozitiv GPS
+                              <input
+                                type="text"
+                                value={editForm.traccar_device_id}
+                                onChange={(e) => setEditForm({ ...editForm, traccar_device_id: e.target.value })}
+                                style={{ display: 'block', padding: '0.5rem', marginTop: '0.25rem', width: '170px' }}
+                              />
+                            </label>
                             <label>
                               Fermă
                               <select
