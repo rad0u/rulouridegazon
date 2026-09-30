@@ -149,6 +149,16 @@ function MasiniAdminCentral() {
 
   useEffect(() => {
     void incarcaTraccarDevices();
+    // 2026-09-30 (Radu): lista de ferme (pentru dropdown-ul "Fermă" din
+    // "Adaugă mașină nouă") se încărca DOAR din reincarca(), adică doar după
+    // ce utilizatorul apasă explicit "Reîncarcă" (buton legat de pozițiile
+    // GPS din Traccar, un apel de rețea separat) — până atunci `ferme`
+    // rămânea [] și dropdown-ul arăta gol, cu doar "— pool central —".
+    // Fermele (ca și șoferii/geofence-urile) sunt un query ieftin din
+    // Supabase, independent de Traccar — se încarcă acum direct la montare,
+    // ca formularul de adăugare să fie utilizabil imediat ce se deschide
+    // pagina, fără să depindă de un click pe "Reîncarcă".
+    void incarcaSoferiSiGeofences();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

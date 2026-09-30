@@ -2284,3 +2284,23 @@ Acțiuni:
 Fișier: `app/rezervor-central/RezervorCentralScreen.tsx`. Nu necesită
 redeploy de edge function (e doar frontend) — merge live la următorul push
 + deploy Vercel.
+
+## 2026-09-30 — Bug: dropdown „Fermă” gol la adăugarea unei mașini noi (/flota-auto)
+
+Radu a semnalat că, la „Adaugă mașină nouă” pe /flota-auto, dropdown-ul
+„Fermă” arăta doar „— pool central —”, fără nicio fermă în listă.
+
+Cauza: lista de ferme (`ferme`, folosită de acel dropdown) se încărca doar
+din `incarcaSoferiSiGeofences()`, apelată DOAR din `reincarca()` — adică
+doar după ce utilizatorul apasă explicit butonul „Reîncarcă” (care e legat
+de pozițiile GPS din Traccar, un apel de rețea separat și mai lent). Până
+la acel click, `ferme` rămânea `[]` la montarea paginii, deci formularul de
+adăugare arăta dropdown-ul gol dacă nu apăsai întâi „Reîncarcă”.
+
+Fix: fermele/șoferii/geofence-urile (query-uri ieftine din Supabase,
+independente de Traccar) se încarcă acum direct la montarea paginii, în
+același `useEffect` care pornește și încărcarea device-urilor Traccar —
+formularul e utilizabil imediat ce se deschide pagina.
+
+Fișier: `app/masini/MasiniScreen.tsx`. Nu necesită redeploy de edge
+function (e doar frontend) — merge live la următorul push + deploy Vercel.
