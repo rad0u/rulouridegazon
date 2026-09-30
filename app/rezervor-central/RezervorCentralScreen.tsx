@@ -140,6 +140,24 @@ export default function RezervorCentralScreen() {
     }
   }
 
+  // 2026-09-30 (Radu): recalibrare pentru o fermă DEJA configurată — până
+  // acum "Configurează" apărea doar la prima configurare (f.configurat ===
+  // false); nu exista niciun mod din aplicație de a corecta nivelul curent
+  // ulterior (ex. după o eroare de calcul reparată între timp, sau pur și
+  // simplu o măsurătoare reală care nu mai coincide cu ce arată aplicația).
+  // Deschide același formular, dar pre-completat cu valorile curente, ca să
+  // fie clar că e o AJUSTARE, nu o configurare de la zero.
+  function deschideRecalibrare(f: FermaRezervor) {
+    if (configFerma === f.ferma_id) {
+      setConfigFerma(null);
+      return;
+    }
+    setConfigFerma(f.ferma_id);
+    setConfigCapacitate(f.capacitate_litri != null ? String(f.capacitate_litri) : '');
+    setConfigNivelInitial(f.nivel_curent_litri != null ? String(f.nivel_curent_litri) : '');
+    setConfigError(null);
+  }
+
   function toggleMiscari(fermaId: string) {
     if (expandat === fermaId) {
       setExpandat(null);
@@ -312,7 +330,7 @@ export default function RezervorCentralScreen() {
                           ? `${f.ultima_alimentare.cantitate_litri} L @ ${Number(f.ultima_alimentare.pret_litru).toFixed(2)} lei/L — ${formatData(f.ultima_alimentare.data_ora)}`
                           : '—'}
                       </td>
-                      <td style={{ padding: '0.4rem' }}>
+                      <td style={{ padding: '0.4rem', display: 'flex', gap: '0.4rem', flexWrap: 'wrap' }}>
                         {!f.configurat ? (
                           <button
                             onClick={() => setConfigFerma(configFerma === f.ferma_id ? null : f.ferma_id)}
@@ -321,12 +339,21 @@ export default function RezervorCentralScreen() {
                             Configurează
                           </button>
                         ) : (
-                          <button
-                            onClick={() => toggleMiscari(f.ferma_id)}
-                            style={{ padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}
-                          >
-                            {deschis ? 'Ascunde' : 'Mișcări'}
-                          </button>
+                          <>
+                            <button
+                              onClick={() => toggleMiscari(f.ferma_id)}
+                              style={{ padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}
+                            >
+                              {deschis ? 'Ascunde' : 'Mișcări'}
+                            </button>
+                            <button
+                              onClick={() => deschideRecalibrare(f)}
+                              title="Corectează nivelul curent la o măsurătoare reală (resetează punctul de pornire al calculului la acum)"
+                              style={{ padding: '0.3rem 0.6rem', borderRadius: '6px', border: '1px solid #ccc', background: '#fff', cursor: 'pointer', fontSize: '0.8rem' }}
+                            >
+                              Recalibrează
+                            </button>
+                          </>
                         )}
                       </td>
                     </tr>
@@ -334,6 +361,13 @@ export default function RezervorCentralScreen() {
                     {configFerma === f.ferma_id && (
                       <tr>
                         <td colSpan={6} style={{ padding: '0.6rem', background: '#fafafa' }}>
+                          {f.configurat && (
+                            <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 0.5rem' }}>
+                              Recalibrare: introdu nivelul măsurat AZI, real, în rezervor. Calculul repornește
+                              de la această valoare, de acum — istoricul de alimentări/consum de dinainte nu
+                              se mai folosește la nivelul curent afișat.
+                            </p>
+                          )}
                           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
                             <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
                               Capacitate rezervor (L)

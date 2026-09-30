@@ -2242,3 +2242,45 @@ declarată a rezervorului central Săbăreni e 6000L, dar nivelul inițial
 cu mult peste capacitate, chiar înainte de orice consum. Merită verificat cu
 Radu dacă rezervorul are de fapt o capacitate mai mare, dacă alimentarea de
 7248L e o eroare de introducere, sau dacă ferma are mai multe rezervoare.
+
+## 2026-09-30 — Recalibrare Săbăreni + buton nou „Recalibrează” pe /rezervor-central
+
+Continuare directă a fix-ului de mai sus. După ce fix-ul a fost aplicat,
+Radu a raportat că "Nivel curent" pentru Săbăreni arăta acum 10808L (180%,
+peste capacitatea de 6000L) — nu −7117L ca înainte, dar tot greșit. Motivul:
+alimentarea de 7248L din 24.09 nu fusese o alimentare reală, ci o corecție
+manuală ("am trecut o valoare care sa-mi regleze nivelul la cel real"),
+dimensionată să compenseze exact bug-ul vechi (consum fals, umflat, de
+~19305L). Odată reparat calculul, acea corecție a rămas cu mult prea mare
+(consumul real fiind de doar ~1573L) — o supra-corecție, aceeași cauză
+văzută dintr-o parte opusă.
+
+Acțiuni:
+1. Recalibrare punctuală (SQL direct, cu aprobarea lui Radu): pe baza
+   valorii reale măsurate de el (2360L), s-a actualizat direct în tabela
+   `ferme` pentru Săbăreni: `rezervor_nivel_initial_litri = 2360`,
+   `rezervor_nivel_initial_data = acum (2026-09-30 11:26 UTC)`. Nivelul
+   curent repornește curat de la această valoare — alimentarea "fictivă" de
+   7248L din 24.09 rămâne în istoric (tabela `rezervor_alimentari`), dar nu
+   mai afectează nivelul curent afișat (fiind dinainte de noua dată de
+   referință). Radu a fost întrebat dacă vrea și ștergerea ei (pentru prețul
+   mediu al motorinei, care încă o include pe fereastra veche) — rămâne
+   opțional, nefăcut încă.
+2. Gap de UI descoperit pe parcurs: butonul „Configurează” din
+   `app/rezervor-central/RezervorCentralScreen.tsx` apărea DOAR pentru o
+   fermă neconfigurată încă (`f.configurat === false`) — nu exista niciun
+   mod din aplicație de a recalibra o fermă deja configurată; orice corecție
+   ulterioară necesita intervenție manuală în baza de date. Adăugat buton
+   nou „Recalibrează” (vizibil doar pentru ferme deja configurate, lângă
+   „Mișcări”), care deschide același formular de configurare, dar
+   pre-completat cu valorile curente (capacitate + nivel curent afișat) și
+   cu un mesaj explicit că repornește calculul de la valoarea introdusă,
+   de acum — nu afectează istoricul de mișcări zilnice, doar punctul de
+   pornire al bilanțului cumulat. Funcția de salvare (`salveazaConfigurare`)
+   era deja generică (un simplu UPDATE pe `ferme`), deci n-a necesitat nicio
+   modificare — doar calea din UI ca s-o poți accesa și după prima
+   configurare.
+
+Fișier: `app/rezervor-central/RezervorCentralScreen.tsx`. Nu necesită
+redeploy de edge function (e doar frontend) — merge live la următorul push
++ deploy Vercel.
