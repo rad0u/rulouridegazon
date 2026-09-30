@@ -2198,3 +2198,47 @@ mai mic; schimbarea lor n-a fost cerută și n-a fost făcută.
 
 Toate 3 deploy-uri confirmate pe Supabase (verificate byte-cu-byte cu
 conținutul intenționat).
+
+## 2026-09-30 — Bug: "Nivel curent" rezervor central −7117L (Săbăreni)
+
+Radu a semnalat că, la ferma Săbăreni, "Nivel curent" din /rezervor-central
+arăta −7117L, deși ferma pornise cu 4940L (22 sept.) și primise o alimentare
+de 7248L pe 24 sept. — deci ar fi trebuit să fie clar pozitiv. Important:
+tabelul de mișcări zilnice (aceeași pagină, extins pe fermă) arăta corect —
+bug-ul era într-o funcție DIFERITĂ, `get-rezervor-central` (starea curentă
+cumulată), nu în `get-rezervor-central-miscari` (defalcarea pe zile).
+
+Cauza: `get-rezervor-central` calcula `total_consumat_litri` ca sumă BRUTĂ a
+tuturor scăderilor consecutive dintre citiri (`if (delta < 0) totalConsumat
++= Math.abs(delta)`), aplicând doar filtrul de plauzibilitate pe capacitate —
+FĂRĂ filtrul de zgomot tranzitoriu (`eliminaFluctuatiiTranzitorii`) și FĂRĂ
+bilanț de masă. Toate celelalte fișiere de combustibil (inclusiv
+`get-rezervor-central-miscari`, care calculează exact aceeași cifră dar pe
+zile) folosesc de multă vreme abordarea corectă. Cu citiri la fiecare câteva
+secunde, orice mic zgomot de senzor care coboară și revine era numărat ca
+"consum" fără să se scadă revenirea — o dublă numărare masivă, niciodată
+prinsă până acum fiindcă acest fișier n-a fost atins la fixurile anterioare
+de zgomot tranzitoriu (78,6L JCB) sau de atribuire realimentări (Belarus 820).
+
+Verificat direct pe date reale (SQL, ferma Săbăreni, de la 22 sept.): suma
+brută a scăderilor era 19305L — de peste 12 ori mai mult decât cei ~1573L
+calculați corect (cu filtru + bilanț de masă) de `get-rezervor-central-miscari`
+pentru aceeași fermă și perioadă. 4940 + 7248 − 19305 ≈ −7117, exact cifra
+raportată. Verificat separat și algoritmul de fix, rulat pe datele reale ale
+celor mai active 2 utilaje ale fermei (63% din citiri): reduce consumul
+calculat de la 6424,5L (vechi) la 908,6L (nou) — confirmă reducerea masivă.
+
+Fix: `get-rezervor-central` folosește acum aceeași abordare de bilanț de
+masă ca `consumPeLuna`/`consumZilnicLitri` din celelalte fișiere — dar
+aplicată dintr-o dată pe TOT intervalul [nivel_initial_data, acum], nu pe
+găleți de zi/lună (aici ne interesează doar un total cumulat): consum_utilaj
+= (prima citire − ultima citire) + suma realimentărilor detectate (salturi
+≥15L) în tot intervalul, pe date trecute prin `eliminaFluctuatiiTranzitorii`.
+Deployat și verificat byte-cu-byte pe Supabase (v7).
+
+OBSERVAȚIE SEPARATĂ (nu e bug de cod, e de verificat manual): capacitatea
+declarată a rezervorului central Săbăreni e 6000L, dar nivelul inițial
+(4940L) + singura alimentare înregistrată (7248L) însumează deja 12188L —
+cu mult peste capacitate, chiar înainte de orice consum. Merită verificat cu
+Radu dacă rezervorul are de fapt o capacitate mai mare, dacă alimentarea de
+7248L e o eroare de introducere, sau dacă ferma are mai multe rezervoare.
