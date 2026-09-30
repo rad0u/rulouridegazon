@@ -35,6 +35,14 @@
 // remorcare etc.) înainte de a decide dacă mai are nevoie de ajustări sau
 // rămâne definitiv așa.
 //
+// Închidere observație, Radu 2026-09-30: a apărut întrebarea despre segmente
+// cu consum ~0L (ex. F1 - JCB, 28 sept., mai multe segmente de 0,3-0,6h cu
+// 0 L) — explicate ca ralanti/repoziționare (contact=true sau mișcare reală,
+// fără scădere măsurabilă de nivel), NU ca eroare de detecție a sesiunii.
+// Decizie: rămâne definitiv așa — ralanti-ul contează în continuare ca
+// prezență/timp lucrat pe parcelă, fără nicio ajustare a algoritmului sau a
+// modului de calcul al orelor implicite.
+//
 // CONTACT/MIȘCARE STRICT PE SESIUNE (decizia lui Radu, v1): dacă utilajul nu
 // mai e „în funcțiune" (nici contact, nici mișcare) la un moment dat în
 // mijlocul unei prezențe în parcelă, sesiunea se ÎNCHEIE exact acolo — o
