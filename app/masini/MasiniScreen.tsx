@@ -651,10 +651,15 @@ function MasiniAdminCentral() {
             </button>
           </fieldset>
         </form>
+        {/* v2, 2026-09-30 (Radu): "la sofer implicit lasa camp editabil" --
+            câmpul era mereu gol pentru că nu se putea crea niciun cont cu
+            rol Șofer (bug de schemă, fixat acum -- vezi
+            schema-utilizatori-rol-sofer.sql). Mesajul de mai jos nu mai
+            spune "nu e nevoie de ele", ci îndrumă spre /utilizatori. */}
         {soferi.length === 0 && (
           <p style={{ fontSize: '0.85rem', color: '#666', marginTop: '0.5rem' }}>
-            Nu există conturi cu rol Șofer — nu e nevoie de ele. Lasă câmpul gol: scopul curselor
-            (foaia de parcurs) se completează direct de administratorul fermei, din /curse.
+            Nu există încă niciun cont cu rol Șofer. Dacă vrei să poți alege un șofer implicit,
+            creează un cont din Meniu → Utilizatori (rol „Șofer”).
           </p>
         )}
       </section>

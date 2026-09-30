@@ -2417,3 +2417,33 @@ Notă tehnică: coloana "Tip mașină" nu exista deloc înainte în acest tabel 
 
 Verificat: deploy edge function byte-for-byte (ezbr_sha256), `npx tsc
 --noEmit` curat.
+
+## 2026-09-30 — Fix: rolul Șofer nu putea fi creat niciodată (câmp "Șofer implicit")
+
+Radu: "la sofer implicit lasa camp editabil".
+
+Investigat de ce câmpul "Șofer implicit" de la /flota-auto e mereu gol (fără
+nicio opțiune de ales, dincolo de "— fără —"): rolul "sofer" e folosit peste
+tot în aplicație (admin-create-user, /utilizatori are opțiunea "Șofer",
+/curse are "Cursele mele" pentru el, masini.sofer_implicit_id și
+curse.sofer_id sunt gândite să refere un cont cu acest rol) -- dar
+constrângerea CHECK de pe utilizatori.rol (rămasă din varianta inițială a
+tabelului, dinainte de modulul Flotă auto) permitea DOAR admin_central/
+admin_ferma. Orice încercare de a crea un cont cu rol Șofer eșua efectiv la
+nivel de bază de date (constraint violation în triggerul
+sync_utilizatori_from_auth, care rulează în aceeași tranzacție cu
+auth.admin.createUser -- deci pica toată crearea contului, nu doar profilul).
+Verificat: 0 conturi cu rol sofer existente în tot istoricul aplicației.
+
+Fix: migrație SQL (utilizatori_permite_rol_sofer) care extinde constrângerea
+să includă și 'sofer' -- copie sursă în
+supabase/schema-utilizatori-rol-sofer.sql. Acum se pot crea conturi Șofer
+din /utilizatori, iar câmpul "Șofer implicit" de la /flota-auto se
+populează cu ele și devine cu adevărat editabil/util.
+
+Actualizat și mesajul din formularul de adăugare mașină (care spunea, greșit,
+"nu e nevoie de conturi Șofer, lasă câmpul gol") să îndrume spre
+/utilizatori în loc.
+
+Verificat: constrângerea nouă confirmată direct în pg_constraint, `npx tsc
+--noEmit` curat.
