@@ -2304,3 +2304,23 @@ formularul e utilizabil imediat ce se deschide pagina.
 
 Fișier: `app/masini/MasiniScreen.tsx`. Nu necesită redeploy de edge
 function (e doar frontend) — merge live la următorul push + deploy Vercel.
+
+## 2026-09-30 — Curse mașini fragmentate ("intrare la fiecare semafor") + adrese lipsă pe foaia de parcurs
+
+Radu a raportat două probleme la /flota-auto, pe baza unei foi de parcurs exportate din aplicație (Duster Roxana, GR06AEU):
+1. Traseul are câte o "cursă" nouă de fiecare dată când roata se oprește (ex. la semafor), în loc de o singură cursă continuă cu plecare/sosire.
+2. Foaia de parcurs a avut adrese complete (stradă, localitate) la plecare/sosire până pe 24.09, apoi doar "—" (fără adresă).
+
+**Root cause (1):** `sync-traccar-masini/index.ts` detectează curse strict pe semnalul `ignition` (contact) primit de la Traccar, fără nicio toleranță: bucla închidea cursa la ORICE citire cu `contact !== true`. Verificat empiric pe pozițiile GPS reale ale mașinii Duster Roxana (query direct pe `masini_pozitii`): semnalul de contact e nesigur — flanează fals ~1 minut chiar în mijlocul unei deplasări continue (ex. 24.09 20:29:48-20:31:02, 74 secunde, cu GPS-ul mișcându-se constant înainte și după) ȘI flanează adevărat câteva minute cât mașina stă parcată. Fără toleranță, o cursă reală de 15-20 minute devenea 10-20 "curse" separate de 2-6 minute — confirmat cu SQL: Duster Roxana avea 120+ curse înregistrate într-o săptămână, față de ~20-30 curse reale plauzibile.
+
+**Root cause (2), legătură cu (1):** fiecare cursă nouă (chiar și falsă) declanșează 1-2 cereri de geocodare inversă către Nominatim (OpenStreetMap). Fragmentarea din (1) a multiplicat brusc volumul de cereri chiar în jurul datei de 24.09 — verificat SQL: pe toată flota (nu doar la o mașină), procentul de curse fără adresă sare de la 0% pe 23.09 la aproape 100% începând cu 25.09. Concluzie: fragmentarea curselor (1) a dus foarte probabil la limitarea/blocarea cererilor către Nominatim, ceea ce explică adresele lipsă de la (2) pe toată flota, nu doar la o mașină.
+
+**Fix:** adăugată funcția `netezesteContact()` în `sync-traccar-masini/index.ts` — un filtru de debounce simetric aplicat pe lanțul de citiri ÎNAINTE de detectarea curselor: o schimbare de stare a contactului (true<->false) contează doar dacă persistă cel puțin `TOLERANTA_CONTACT_MINUTE` (3 minute); altfel e tratată ca zgomot și rămâne starea veche. Funcționează în ambele sensuri (blip-uri scurte de "oprit" cât mașina chiar merge ȘI blip-uri scurte de "pornit" cât mașina e parcată). Nu modifică datele brute din `masini_pozitii` — doar lanțul folosit local la detectarea curselor.
+
+**Verificare empirică** (simulare Node.js, replicând algoritmul de detectare pe poziții GPS reale ale Duster Roxana, 24.09-30.09): 44 curse (simulare batch a codului vechi, fără toleranță) -> 21 curse cu fix-ul aplicat, cu durate (15-45 min) și distanțe (3-23 km) plauzibile pentru curse reale de condus.
+
+**Deployat:** `sync-traccar-masini` (edge function), versiunea 4, verificat byte-for-byte (ezbr_sha256 aea7372f...).
+
+**Notă importantă:** fix-ul previne fragmentarea curselor NOI de-acum încolo. Cursele deja salvate (fragmentate, fără adresă) din perioada 24.09-30.09 rămân în tabelul `curse` — de curățat separat, pe toată flota, dacă Radu decide asta (necesită confirmare, sunt date de producție).
+
+**Neconfirmat încă:** dacă blocarea la Nominatim a fost temporară (se reface singură pe măsură ce volumul de cereri scade la normal) sau necesită timp/acțiune suplimentară — de verificat dacă adresele reapar pe curse noi în zilele următoare.

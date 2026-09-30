@@ -60,6 +60,74 @@ const MIN_KM = 0.05;
 // (front crescător oricum elimină spam-ul continuu; asta e o plasă suplimentară).
 const COOLDOWN_ALERTA_VITEZA_MINUTE = 15;
 
+// v3, 2026-09-30 (Radu): "traseul are câte o intrare de fiecare dată când
+// se oprește roata (semafor)" + "foaia de parcurs a înregistrat adrese doar
+// până în 24.09". Verificat empiric pe Duster Roxana (GR06AEU): semnalul
+// `ignition` de la Traccar e nesigur (la fel ca semnalul de "contact" la
+// utilaje, vezi NOTES.md "Semnalul de contact e nesigur") — flanează fals
+// pentru câteva zeci de secunde chiar cât mașina rulează neîntrerupt (ex.
+// 24.09 20:29:48-20:31:02, 74s, în mijlocul unei deplasări continue) ȘI
+// flanează adevărat pentru câteva minute cât mașina stă parcată (contact
+// instabil/accesorii). Bucla de detectare de mai jos (fără toleranță)
+// închidea o cursă la FIECARE asemenea blip și deschidea alta imediat ce
+// semnalul revenea — o cursă reală de 15-20 minute devenea 10-20 "curse" de
+// 2-6 minute fiecare (confirmat: 120+ curse/săptămână pentru o singură
+// mașină, în loc de ~20-30 reale). Volumul ăsta de curse false a multiplicat
+// și cererile de geocodare inversă (fiecare cursă nouă = 1-2 cereri către
+// Nominatim), ceea ce foarte probabil a dus la limitarea/blocarea cererilor
+// de către Nominatim începând cu 24.09 — de-aici și adresele lipsă de atunci
+// încoace, pe toată flota, nu doar la o mașină.
+// Fix: netezesteContact() aplică un filtru de debounce simetric pe lanțul de
+// citiri ÎNAINTE de detectarea curselor — o schimbare de stare a
+// contactului contează doar dacă persistă cel puțin TOLERANTA_CONTACT_MINUTE;
+// altfel e tratată ca zgomot și rămâne starea veche. Nu modifică datele brute
+// din masini_pozitii (doar lanțul folosit local la detectare), deci istoricul
+// de poziții rămâne fidel semnalului real.
+// Verificat empiric (simulare Node.js pe poziții reale Duster Roxana,
+// 24.09-30.09): 44 curse (simulare batch a codului vechi) -> 21 curse, cu
+// durate și distanțe plauzibile (15-45 min, 3-23 km) pentru curse reale.
+// Notă: fix-ul previne fragmentarea curselor NOI de-acum încolo; cursele deja
+// salvate (fragmentate, fără adresă) din 24.09-30.09 rămân în tabel — de
+// curățat separat dacă e cazul.
+const TOLERANTA_CONTACT_MINUTE = 3;
+function netezesteContact(rows: Citire[]): Citire[] {
+  const out = rows.map((r) => ({ ...r }));
+  let stabil: boolean | null = null;
+  for (const r of out) {
+    if (r.contact !== null) {
+      stabil = r.contact;
+      break;
+    }
+  }
+  if (stabil === null) return out;
+
+  let i = 0;
+  while (i < out.length) {
+    const v = out[i].contact;
+    if (v === stabil || v === null) {
+      out[i].contact = stabil;
+      i++;
+      continue;
+    }
+    // v !== stabil -- posibilă tranziție; caută unde revine la `stabil`.
+    let j = i;
+    while (j < out.length && out[j].contact !== stabil) j++;
+    const durataMinute =
+      j < out.length ? (new Date(out[j].data_ora).getTime() - new Date(out[i].data_ora).getTime()) / 60000 : Infinity;
+    if (durataMinute >= TOLERANTA_CONTACT_MINUTE) {
+      // Persistă suficient -- tranziție reală.
+      const nouaStare = v;
+      for (let k = i; k < j; k++) out[k].contact = nouaStare;
+      stabil = nouaStare;
+    } else {
+      // Blip trecător -- zgomot, rămâne starea veche.
+      for (let k = i; k < j; k++) out[k].contact = stabil;
+    }
+    i = j;
+  }
+  return out;
+}
+
 const EARTH_RADIUS_M = 6371000;
 function distantaMetri(aLat: number, aLon: number, bLat: number, bLon: number): number {
   const φ1 = (aLat * Math.PI) / 180;
@@ -285,7 +353,9 @@ Deno.serve(async () => {
 
     // Lanțul cronologic folosit pentru detectarea curselor + tranzițiile de
     // geofence: ultima poziție deja salvată (dacă există) + cele noi.
-    const chain: Citire[] = ultima ? [ultima, ...noi] : noi;
+    // v3: trecut prin netezesteContact() -- vezi nota v3 de mai sus -- ca să
+    // eliminăm blip-urile scurte de contact înainte de a detecta curse.
+    const chain: Citire[] = netezesteContact(ultima ? [ultima, ...noi] : noi);
     if (chain.length < 2) continue;
 
     // --- Detectare curse ---
