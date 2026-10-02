@@ -222,10 +222,22 @@ function grupeazaSesiuni(sesiuni: Sesiune[]): GrupSesiuni[] {
   for (const grup of grupuri) {
     grup.sesiuni.sort((a, b) => (a.inceput < b.inceput ? -1 : 1));
   }
-  // Cel mai recent grup primul (după ziua + ora primei sesiuni).
+  // v6, 2026-10-02 (Radu): "trebuie sa sortam afisarea dupa utilaj si apoi
+  // dupa numarul parcelei, pentru a fi mai usor de urmarit" -- înainte se
+  // sorta după cel mai recent grup primul (zi + ora primei sesiuni); acum
+  // utilaj (alfabetic) → parcelă (`numeric: true`, ca "Parcelă 2" să iasă
+  // înaintea lui "Parcelă 10" — unele ferme au parcele numite direct "1".."10")
+  // → zi (cronologic), ca tiebreaker pentru aceeași pereche utilaj/parcelă
+  // apărută în zile diferite.
   grupuri.sort((a, b) => {
-    if (a.ziua !== b.ziua) return a.ziua < b.ziua ? 1 : -1;
-    return a.sesiuni[0].inceput < b.sesiuni[0].inceput ? 1 : -1;
+    const cmpUtilaj = a.utilaj_nume.localeCompare(b.utilaj_nume, 'ro', { sensitivity: 'base' });
+    if (cmpUtilaj !== 0) return cmpUtilaj;
+    const cmpParcela = a.parcela_nume.localeCompare(b.parcela_nume, 'ro', {
+      numeric: true,
+      sensitivity: 'base',
+    });
+    if (cmpParcela !== 0) return cmpParcela;
+    return a.ziua < b.ziua ? -1 : a.ziua > b.ziua ? 1 : 0;
   });
   return grupuri;
 }

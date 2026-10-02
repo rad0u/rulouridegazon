@@ -2476,3 +2476,19 @@ mecanism pentru "Șofer implicit" -- Radu nu vrea să creeze conturi pentru
 Verificat: deploy edge functions byte-for-byte (ezbr_sha256) pentru
 get-masini-positions (v6) și get-foaie-parcurs (v4), `npx tsc --noEmit`
 curat.
+
+## 2026-10-02 — Sortare Activități detectate pe parcele: utilaj → parcelă
+
+Radu: "la Activitati detectate pe parcele trebuie sa sortam afisarea dupa
+utilaj si apoi dupa numarul parcelei, pentru a fi mai usor de urmarit".
+
+Grupurile afișate la /activitati-parcele (fiecare = utilaj + parcelă + zi,
+vezi nota v4 din cap) se sortau înainte după cel mai recent grup primul (zi
++ ora primei sesiuni). Acum sortarea e: utilaj (alfabetic) → parcelă
+(`localeCompare` cu `numeric: true`, ca "Parcelă 2"/"2" să iasă înaintea lui
+"Parcelă 10"/"10" -- verificat în DB, o fermă are parcele numite direct
+"1".."10", unde o sortare simplă de text ar fi pus "10" înaintea lui "2") →
+zi (cronologic), ca tiebreaker când aceeași pereche utilaj/parcelă apare în
+zile diferite.
+
+Verificat: `npx tsc --noEmit` curat.
