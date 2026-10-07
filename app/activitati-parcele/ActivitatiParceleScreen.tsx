@@ -70,6 +70,17 @@ import {
 // operatiuni_substante SAU operatiuni_materii_prime, atașat tot doar
 // primului rând din grup.
 
+// v7, 2026-10-07 (Radu): "dupa completarea perioadei raportarii, vreau sa pot
+// tipari raportul la imprimanta A4, astfel incat operatorul sa se poata duce
+// in teren pentru a culege datele necesare (tip operatiune, si consumabile)"
+// -- buton "Tipărește fișa de teren (A4)": generează o fișă printabilă cu
+// grupurile (utilaj → parcelă → zi) încă neconfirmate din perioada încărcată,
+// în aceeași ordine ca pe ecran, fiecare cu orele detectate și câmpuri goale
+// de completat de mână (tip lucrare bifabil, consumabile + cantitate; pentru
+// utilajele de recoltare, suprafața recoltată în mp). Datele completate pe
+// hârtie se introduc apoi în formularele de pe ecran. Fișa e un bloc ascuns pe
+// ecran, vizibil doar la tipărire (@media print) -- vezi <style> din randare.
+
 type Sesiune = {
   utilaj_id: string;
   utilaj_nume: string;
@@ -257,6 +268,7 @@ export default function ActivitatiParceleScreen() {
 
   const [substanteFerma, setSubstanteFerma] = useState<Substanta[]>([]);
   const [materiiPrimeFerma, setMateriiPrimeFerma] = useState<MateriePrima[]>([]);
+  const [numeFermaActiva, setNumeFermaActiva] = useState<string | null>(null);
   const [forms, setForms] = useState<Record<string, FormSesiune>>({});
   const [confirmate, setConfirmate] = useState<Set<string>>(new Set());
 
@@ -312,6 +324,19 @@ export default function ActivitatiParceleScreen() {
         .gt('stoc_curent', 0)
         .order('nume');
       setMateriiPrimeFerma((data as MateriePrima[]) ?? []);
+    })();
+  }, [fermaActiva]);
+
+  // Numele fermei, pentru antetul fișei de teren (valabil și pentru
+  // admin_ferma, care nu are lista `fermeOptiuni` încărcată).
+  useEffect(() => {
+    if (!fermaActiva) {
+      setNumeFermaActiva(null);
+      return;
+    }
+    void (async () => {
+      const { data } = await supabase.from('ferme').select('nume').eq('id', fermaActiva).maybeSingle();
+      setNumeFermaActiva((data?.nume as string) ?? null);
     })();
   }, [fermaActiva]);
 
@@ -612,6 +637,7 @@ export default function ActivitatiParceleScreen() {
 
   return (
     <main
+      className="activitati-ecran"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -621,6 +647,30 @@ export default function ActivitatiParceleScreen() {
         gap: '0.75rem',
       }}
     >
+      <style>{`
+        .fisa-teren { display: none; }
+        @media print {
+          @page { size: A4 portrait; margin: 10mm; }
+          body { background: #fff !important; }
+          header { display: none !important; }
+          body div:has(> header) { display: block !important; min-height: 0 !important; }
+          main { display: block !important; min-height: 0 !important; padding: 0 !important; }
+          .activitati-ecran > *:not(.fisa-teren) { display: none !important; }
+          .fisa-teren { display: block !important; color: #000; font-size: 10pt; }
+          .fisa-teren h2 { margin: 0; font-size: 15pt; text-align: center; }
+          .fisa-teren .antet { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 16px; margin: 6px 0 8px; font-size: 9.5pt; }
+          .fisa-teren table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          .fisa-teren th, .fisa-teren td { border: 1px solid #000; padding: 4px 6px; vertical-align: top; text-align: left; }
+          .fisa-teren th { background: #eee !important; font-size: 9pt; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .fisa-teren thead { display: table-header-group; }
+          .fisa-teren tr { break-inside: avoid; page-break-inside: avoid; }
+          .fisa-teren td { height: 27mm; }
+          .fisa-teren .mic { font-size: 8.5pt; color: #333; }
+          .fisa-teren .cb { display: inline-block; width: 3.4mm; height: 3.4mm; border: 0.35mm solid #000; margin-right: 1.5mm; vertical-align: -0.5mm; }
+          .fisa-teren .opt { display: block; margin-bottom: 2.2mm; font-size: 9pt; }
+          .fisa-teren .linie { border-bottom: 0.3mm solid #000; height: 7mm; font-size: 8pt; color: #555; }
+        }
+      `}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h1 style={{ margin: 0 }}>Activități detectate pe parcele</h1>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
@@ -670,6 +720,20 @@ export default function ActivitatiParceleScreen() {
             }}
           >
             {loading ? 'Se încarcă...' : 'Reîncarcă'}
+          </button>
+          <button
+            onClick={() => window.print()}
+            disabled={loading || !raport || grupuriDeAfisat.length === 0}
+            title="Tipărește pe A4 o fișă cu activitățile din perioada încărcată, de completat de mână în teren (tip lucrare, consumabile)."
+            style={{
+              padding: '0.6rem 1.2rem',
+              borderRadius: '6px',
+              border: '1px solid #ccc',
+              background: '#f5f5f5',
+              cursor: loading || !raport || grupuriDeAfisat.length === 0 ? 'default' : 'pointer',
+            }}
+          >
+            Tipărește fișa de teren (A4)
           </button>
         </div>
       </div>
@@ -901,6 +965,76 @@ export default function ActivitatiParceleScreen() {
           );
         })}
       </div>
+
+      {/* Fișa de teren (doar la tipărire) — vezi nota v7 de sus. */}
+      <section className="fisa-teren">
+        <h2>FIȘĂ DE TEREN — Activități pe parcele</h2>
+        <div className="antet">
+          <div><strong>Fermă:</strong> {numeFermaActiva ?? '—'}</div>
+          <div>
+            <strong>Perioada:</strong>{' '}
+            {raport ? `${formatZiuaLocala(raport.de_la)} – ${formatZiuaLocala(raport.pana_la)}` : '—'}
+          </div>
+          <div><strong>Operator:</strong> ______________________________</div>
+          <div><strong>Data completării:</strong> ____________________</div>
+          <div className="mic" style={{ gridColumn: '1 / -1' }}>
+            Generată la {new Date().toLocaleString('ro-RO')}. Bifează tipul lucrării și notează consumabilele
+            folosite (denumire + cantitate + unitate de măsură) pentru fiecare rând.
+          </div>
+        </div>
+        <table>
+          <colgroup>
+            <col style={{ width: '6%' }} />
+            <col style={{ width: '30%' }} />
+            <col style={{ width: '24%' }} />
+            <col style={{ width: '40%' }} />
+          </colgroup>
+          <thead>
+            <tr>
+              <th>Nr.</th>
+              <th>Utilaj · Parcelă · Zi</th>
+              <th>Tip lucrare</th>
+              <th>Consumabile (denumire · cantitate · UM)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {grupuriDeAfisat.map((grup, i) => (
+              <tr key={grup.cheie}>
+                <td>{i + 1}</td>
+                <td>
+                  <strong>{grup.utilaj_nume}</strong>
+                  <br />
+                  Parcela <strong>{grup.parcela_nume}</strong>
+                  <br />
+                  {formatZiuaLocala(grup.ziua)} · {grup.oreTotal}h
+                  <div className="mic">
+                    {grup.sesiuni.map((sesiune) => `${formatOra(sesiune.inceput)}–${formatOra(sesiune.sfarsit)}`).join(', ')}
+                  </div>
+                </td>
+                {grup.utilaj_recoltare ? (
+                  <td colSpan={2}>
+                    <strong>Recoltare</strong> — suprafață recoltată: ______________ mp
+                  </td>
+                ) : (
+                  <>
+                    <td>
+                      <span className="opt"><span className="cb" />Lucrare obișnuită</span>
+                      <span className="opt"><span className="cb" />Fertilizare solidă</span>
+                      <span className="opt"><span className="cb" />Tratamente foliare</span>
+                      <span className="opt"><span className="cb" />Însămânțare</span>
+                    </td>
+                    <td>
+                      <div className="linie">1.</div>
+                      <div className="linie">2.</div>
+                      <div className="linie">3.</div>
+                    </td>
+                  </>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
     </main>
   );
 }

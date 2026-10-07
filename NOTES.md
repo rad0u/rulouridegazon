@@ -2500,3 +2500,11 @@ Radu: „harta utilajelor vad ca se centreaza pe Bobicesti. pot seta unde sa se 
 - Acum: buton „Salvează vizualizarea curentă ca implicită" pe hartă — se mută/zoom-ează harta, se apasă, iar centrul + zoom-ul se salvează în tabela nouă `setari_aplicatie` (cheia `harta_utilaje_vizualizare`, JSON `{lat, lon, zoom}`), valabil pentru toți administratorii. Fără valoare salvată, comportamentul vechi rămâne.
 - `app/utilaje/UtilajeScreen.tsx` citește setarea la „Reîncarcă", înainte de montarea hărții (MapContainer folosește center/zoom doar la montare).
 - Tabela nouă: `supabase/schema-setari-aplicatie.sql` (RLS: doar admin_central citește/scrie). `apply_migration` a dat timeout de 2 ori, așa că DDL-ul a fost aplicat pe rând cu `execute_sql`; nu apare în istoricul de migrații.
+
+## 2026-10-07 — Fișă de teren printabilă (A4) la Activități detectate pe parcele
+
+Radu: „dupa completarea perioadei raportarii, vreau sa pot tipari raportul la imprimanta A4, astfel incat operatorul sa se poata duce in teren pentru a culege datele necesare (tip operatiune, si consumabile)".
+- `app/activitati-parcele/ActivitatiParceleScreen.tsx`: buton nou „Tipărește fișa de teren (A4)" (activ doar după încărcarea unei perioade cu cel puțin o activitate neconfirmată). Fișa e un bloc `.fisa-teren`, ascuns pe ecran și vizibil doar la tipărire (`@media print`, `@page A4 portrait`, antetul/meniul aplicației ascunse).
+- Conținut: antet (fermă, perioadă, Operator, Data completării) + tabel cu câte un rând per grup utilaj → parcelă → zi (aceeași ordine ca pe ecran): orele detectate și intervalele orare, bife pentru tip lucrare (Lucrare obișnuită / Fertilizare solidă / Tratamente foliare / Însămânțare) și 3 linii goale pentru consumabile (denumire · cantitate · UM). Utilajele de recoltare au în loc câmp „suprafață recoltată (mp)".
+- Se tipăresc doar grupurile încă neconfirmate din perioada încărcată (aceleași ca pe ecran). Verificat într-un PDF de test: ~8 rânduri pe pagină A4, antetul tabelului se repetă pe paginile următoare, rândurile nu se taie între pagini.
+- Datele completate de mână se introduc apoi în formularele de pe ecran (fără schimbări în baza de date).
