@@ -669,6 +669,11 @@ export default function ActivitatiParceleScreen() {
           .fisa-teren .cb { display: inline-block; width: 3.4mm; height: 3.4mm; border: 0.35mm solid #000; margin-right: 1.5mm; vertical-align: -0.5mm; }
           .fisa-teren .opt { display: block; margin-bottom: 2.2mm; font-size: 9pt; }
           .fisa-teren .linie { border-bottom: 0.3mm solid #000; height: 7mm; font-size: 8pt; color: #555; }
+          .fisa-teren .anexa { margin-top: 6mm; break-inside: avoid-page; page-break-inside: avoid; }
+          .fisa-teren .anexa h3 { margin: 0 0 2mm; font-size: 10pt; }
+          .fisa-teren .anexa .coloane { columns: 3; column-gap: 6mm; font-size: 8pt; line-height: 1.35; }
+          .fisa-teren .anexa .item { break-inside: avoid; margin: 0; }
+          .fisa-teren .anexa .grup-titlu { font-weight: bold; margin: 2mm 0 0.5mm; break-after: avoid; font-size: 8pt; }
         }
       `}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
@@ -994,7 +999,7 @@ export default function ActivitatiParceleScreen() {
               <th>Nr.</th>
               <th>Utilaj · Parcelă · Zi</th>
               <th>Tip lucrare</th>
-              <th>Consumabile (denumire · cantitate · UM)</th>
+              <th>Consumabile (cod din anexă sau denumire · cantitate)</th>
             </tr>
           </thead>
           <tbody>
@@ -1024,7 +1029,7 @@ export default function ActivitatiParceleScreen() {
                       <span className="opt"><span className="cb" />Însămânțare</span>
                     </td>
                     <td>
-                      <div className="linie">1.</div>
+                      <div className="linie">1. cod / denumire · cantitate</div>
                       <div className="linie">2.</div>
                       <div className="linie">3.</div>
                     </td>
@@ -1034,6 +1039,29 @@ export default function ActivitatiParceleScreen() {
             ))}
           </tbody>
         </table>
+
+        {/* Anexă: consumabilele disponibile pe fermă (stoc > 0), pe coloane
+            mici ca să încapă și o listă lungă — operatorul scrie în tabel
+            doar codul (S = substanță, M = materie primă) + cantitatea. */}
+        {(substanteFerma.length > 0 || materiiPrimeFerma.length > 0) && (
+          <div className="anexa">
+            <h3>Anexă — consumabile disponibile pe fermă (cod · denumire · UM)</h3>
+            <div className="coloane">
+              {substanteFerma.length > 0 && <p className="grup-titlu">Substanțe (S)</p>}
+              {substanteFerma.map((sub, i) => (
+                <p className="item" key={sub.id}>
+                  <strong>S{i + 1}</strong> · {sub.nume} ({sub.unitate_masura})
+                </p>
+              ))}
+              {materiiPrimeFerma.length > 0 && <p className="grup-titlu">Materii prime (M)</p>}
+              {materiiPrimeFerma.map((mp, i) => (
+                <p className="item" key={mp.id}>
+                  <strong>M{i + 1}</strong> · {mp.nume} ({mp.unitate_masura})
+                </p>
+              ))}
+            </div>
+          </div>
+        )}
       </section>
     </main>
   );
