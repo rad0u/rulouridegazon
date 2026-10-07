@@ -269,6 +269,12 @@ export default function ActivitatiParceleScreen() {
   const [substanteFerma, setSubstanteFerma] = useState<Substanta[]>([]);
   const [materiiPrimeFerma, setMateriiPrimeFerma] = useState<MateriePrima[]>([]);
   const [numeFermaActiva, setNumeFermaActiva] = useState<string | null>(null);
+  // Doar pentru anexa fișei de teren: consumabilele cu stoc DIFERIT de 0 (deci
+  // și cele cu stoc negativ -- consum introdus peste stocul înregistrat, de
+  // ex. dacă cineva a uitat să alimenteze stocul), spre deosebire de listele
+  // din formular (`substanteFerma`/`materiiPrimeFerma`, stoc > 0).
+  const [substantePrint, setSubstantePrint] = useState<Substanta[]>([]);
+  const [materiiPrimePrint, setMateriiPrimePrint] = useState<MateriePrima[]>([]);
   const [forms, setForms] = useState<Record<string, FormSesiune>>({});
   const [confirmate, setConfirmate] = useState<Set<string>>(new Set());
 
@@ -324,6 +330,32 @@ export default function ActivitatiParceleScreen() {
         .gt('stoc_curent', 0)
         .order('nume');
       setMateriiPrimeFerma((data as MateriePrima[]) ?? []);
+    })();
+  }, [fermaActiva]);
+
+  useEffect(() => {
+    if (!fermaActiva) {
+      setSubstantePrint([]);
+      setMateriiPrimePrint([]);
+      return;
+    }
+    void (async () => {
+      const [{ data: sub }, { data: mp }] = await Promise.all([
+        supabase
+          .from('substante')
+          .select('id,nume,unitate_masura,stoc_curent')
+          .eq('ferma_id', fermaActiva)
+          .neq('stoc_curent', 0)
+          .order('nume'),
+        supabase
+          .from('materii_prime')
+          .select('id,nume,unitate_masura,stoc_curent')
+          .eq('ferma_id', fermaActiva)
+          .neq('stoc_curent', 0)
+          .order('nume'),
+      ]);
+      setSubstantePrint((sub as Substanta[]) ?? []);
+      setMateriiPrimePrint((mp as MateriePrima[]) ?? []);
     })();
   }, [fermaActiva]);
 
@@ -1040,21 +1072,21 @@ export default function ActivitatiParceleScreen() {
           </tbody>
         </table>
 
-        {/* Anexă: consumabilele disponibile pe fermă (stoc > 0), pe coloane
+        {/* Anexă: consumabilele disponibile pe fermă (stoc diferit de 0), pe coloane
             mici ca să încapă și o listă lungă — operatorul scrie în tabel
             doar codul (S = substanță, M = materie primă) + cantitatea. */}
-        {(substanteFerma.length > 0 || materiiPrimeFerma.length > 0) && (
+        {(substantePrint.length > 0 || materiiPrimePrint.length > 0) && (
           <div className="anexa">
             <h3>Anexă — consumabile disponibile pe fermă (cod · denumire · UM)</h3>
             <div className="coloane">
-              {substanteFerma.length > 0 && <p className="grup-titlu">Substanțe (S)</p>}
-              {substanteFerma.map((sub, i) => (
+              {substantePrint.length > 0 && <p className="grup-titlu">Substanțe (S)</p>}
+              {substantePrint.map((sub, i) => (
                 <p className="item" key={sub.id}>
                   <strong>S{i + 1}</strong> · {sub.nume} ({sub.unitate_masura})
                 </p>
               ))}
-              {materiiPrimeFerma.length > 0 && <p className="grup-titlu">Materii prime (M)</p>}
-              {materiiPrimeFerma.map((mp, i) => (
+              {materiiPrimePrint.length > 0 && <p className="grup-titlu">Materii prime (M)</p>}
+              {materiiPrimePrint.map((mp, i) => (
                 <p className="item" key={mp.id}>
                   <strong>M{i + 1}</strong> · {mp.nume} ({mp.unitate_masura})
                 </p>
