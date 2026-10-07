@@ -2492,3 +2492,11 @@ zi (cronologic), ca tiebreaker când aceeași pereche utilaj/parcelă apare în
 zile diferite.
 
 Verificat: `npx tsc --noEmit` curat.
+
+## 2026-10-07 — Centru și zoom implicit pe harta de utilaje
+
+Radu: „harta utilajelor vad ca se centreaza pe Bobicesti. pot seta unde sa se centreze si nivelul de zoom?"
+- Înainte: harta (`components/UtilajeMapView.tsx`) se centra pe primul utilaj cu poziție (zoom 16), de aici Bobicești.
+- Acum: buton „Salvează vizualizarea curentă ca implicită" pe hartă — se mută/zoom-ează harta, se apasă, iar centrul + zoom-ul se salvează în tabela nouă `setari_aplicatie` (cheia `harta_utilaje_vizualizare`, JSON `{lat, lon, zoom}`), valabil pentru toți administratorii. Fără valoare salvată, comportamentul vechi rămâne.
+- `app/utilaje/UtilajeScreen.tsx` citește setarea la „Reîncarcă", înainte de montarea hărții (MapContainer folosește center/zoom doar la montare).
+- Tabela nouă: `supabase/schema-setari-aplicatie.sql` (RLS: doar admin_central citește/scrie). `apply_migration` a dat timeout de 2 ori, așa că DDL-ul a fost aplicat pe rând cu `execute_sql`; nu apare în istoricul de migrații.

@@ -3,7 +3,7 @@
 import { Fragment, useState } from 'react';
 import dynamic from 'next/dynamic';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
-import type { UtilajPozitie, FermaHarta } from '../../components/UtilajeMapView';
+import type { UtilajPozitie, FermaHarta, VizualizareHarta } from '../../components/UtilajeMapView';
 import type { Parcela } from '../../lib/parcelaTypes';
 
 type ZiIstoric = {
@@ -84,6 +84,38 @@ export default function UtilajeScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
+  const [vizualizareHarta, setVizualizareHarta] = useState<VizualizareHarta | null>(null);
+
+  // 2026-10-07 (Radu): centrul + zoom-ul implicit al hărții de utilaje, salvat
+  // din buton (setari_aplicatie, cheia 'harta_utilaje_vizualizare'). Se citește
+  // înainte să apară harta, fiindcă MapContainer folosește center/zoom doar la
+  // montare.
+  async function incarcaVizualizareHarta() {
+    const { data } = await supabase
+      .from('setari_aplicatie')
+      .select('valoare')
+      .eq('cheie', 'harta_utilaje_vizualizare')
+      .maybeSingle();
+    const v = data?.valoare as Partial<VizualizareHarta> | undefined;
+    if (v && typeof v.lat === 'number' && typeof v.lon === 'number' && typeof v.zoom === 'number') {
+      setVizualizareHarta({ lat: v.lat, lon: v.lon, zoom: v.zoom });
+    } else {
+      setVizualizareHarta(null);
+    }
+  }
+
+  async function salveazaVizualizareHarta(v: VizualizareHarta): Promise<string | null> {
+    const { error: saveError } = await supabase
+      .from('setari_aplicatie')
+      .upsert(
+        { cheie: 'harta_utilaje_vizualizare', valoare: v, actualizat_la: new Date().toISOString() },
+        { onConflict: 'cheie' },
+      );
+    if (saveError) return saveError.message;
+    // Nu actualizăm `vizualizareHarta` aici: harta e deja pe poziția salvată,
+    // iar schimbarea props nu mută un MapContainer deja montat.
+    return null;
+  }
 
   // Hărțile fermelor (imaginea suprapusă calibrată) + parcelele lor —
   // aceleași date ca pe /ferme/[fermaId], afișate aici pe aceeași hartă
@@ -414,6 +446,7 @@ export default function UtilajeScreen() {
     const [{ data, error: invokeError }] = await Promise.all([
       supabase.functions.invoke('get-utilaje-positions'),
       incarcaHartaFerme(),
+      incarcaVizualizareHarta(),
     ]);
 
     setLoading(false);
@@ -645,7 +678,13 @@ export default function UtilajeScreen() {
               border: '1px solid #ddd',
             }}
           >
-            <UtilajeMapView utilaje={utilaje} ferme={ferme} parcele={parcele} />
+            <UtilajeMapView
+              utilaje={utilaje}
+              ferme={ferme}
+              parcele={parcele}
+              vizualizareImplicita={vizualizareHarta}
+              onSalveazaVizualizare={salveazaVizualizareHarta}
+            />
           </div>
 
           <div style={{ overflowX: 'auto' }}>

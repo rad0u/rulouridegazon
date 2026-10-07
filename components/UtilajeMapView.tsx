@@ -1,9 +1,9 @@
 'use client';
 
-import { Fragment, useState } from 'react';
+import { Fragment, useRef, useState } from 'react';
 import 'leaflet/dist/leaflet.css';
-import L from 'leaflet';
-import { MapContainer, TileLayer, Marker, Popup, Polygon } from 'react-leaflet';
+import L, { type Map as LeafletMap } from 'leaflet';
+import { MapContainer, TileLayer, Marker, Popup, Polygon, useMap } from 'react-leaflet';
 import { Parcela, PARCELA_COLORS, polygonLatLngs, centroidLatLng } from '../lib/parcelaTypes';
 import RotatedImageOverlay from './RotatedImageOverlay';
 
@@ -48,6 +48,16 @@ export type FermaHarta = {
   imagineColtSJ: [number, number] | null;
 };
 
+// Centrul și nivelul de zoom salvate de admin ca vizualizare implicită a
+// hărții (setari_aplicatie, cheia 'harta_utilaje_vizualizare').
+export type VizualizareHarta = { lat: number; lon: number; zoom: number };
+
+function MapRefCapture({ mapRef }: { mapRef: React.MutableRefObject<LeafletMap | null> }) {
+  const map = useMap();
+  mapRef.current = map;
+  return null;
+}
+
 function formatOra(data: string | null) {
   if (!data) return 'necunoscută';
   try {
@@ -83,19 +93,47 @@ export default function UtilajeMapView({
   utilaje,
   ferme,
   parcele,
+  vizualizareImplicita,
+  onSalveazaVizualizare,
 }: {
   utilaje: UtilajPozitie[];
   ferme: FermaHarta[];
   parcele: Parcela[];
+  vizualizareImplicita: VizualizareHarta | null;
+  // Întoarce un mesaj de eroare, sau null dacă s-a salvat cu succes.
+  onSalveazaVizualizare: (v: VizualizareHarta) => Promise<string | null>;
 }) {
   const cuPozitie = utilaje.filter((u) => u.lat !== null && u.lon !== null);
   const [strat, setStrat] = useState<'strada' | 'satelit'>('satelit');
 
-  // Centrăm pe primul utilaj cu poziție cunoscută, altfel pe centrul
-  // aproximativ al României.
-  const centru: [number, number] =
-    cuPozitie.length > 0 ? [cuPozitie[0].lat as number, cuPozitie[0].lon as number] : [45.9, 24.97];
-  const zoomInitial = cuPozitie.length > 0 ? 16 : 7;
+  const mapRef = useRef<LeafletMap | null>(null);
+  const [salvareMsg, setSalvareMsg] = useState<{ text: string; eroare: boolean } | null>(null);
+  const [salvare, setSalvare] = useState(false);
+
+  // 2026-10-07 (Radu): "pot seta unde sa se centreze si nivelul de zoom?" —
+  // dacă adminul a salvat o vizualizare implicită, o folosim pe aceea; altfel
+  // (cum era înainte) centrăm pe primul utilaj cu poziție cunoscută, iar în
+  // lipsa oricărei poziții pe centrul aproximativ al României.
+  const centru: [number, number] = vizualizareImplicita
+    ? [vizualizareImplicita.lat, vizualizareImplicita.lon]
+    : cuPozitie.length > 0
+      ? [cuPozitie[0].lat as number, cuPozitie[0].lon as number]
+      : [45.9, 24.97];
+  const zoomInitial = vizualizareImplicita ? vizualizareImplicita.zoom : cuPozitie.length > 0 ? 16 : 7;
+
+  async function salveazaVizualizarea() {
+    const map = mapRef.current;
+    if (!map) return;
+    setSalvare(true);
+    setSalvareMsg(null);
+    const c = map.getCenter();
+    const eroare = await onSalveazaVizualizare({ lat: c.lat, lon: c.lng, zoom: map.getZoom() });
+    setSalvare(false);
+    setSalvareMsg(
+      eroare ? { text: `Eroare: ${eroare}`, eroare: true } : { text: 'Vizualizare salvată.', eroare: false },
+    );
+    if (!eroare) setTimeout(() => setSalvareMsg(null), 3000);
+  }
 
   return (
     <div style={{ position: 'relative', height: '100%', width: '100%' }}>
@@ -140,7 +178,52 @@ export default function UtilajeMapView({
         </button>
       </div>
 
+      <div
+        style={{
+          position: 'absolute',
+          top: '50px',
+          right: '10px',
+          zIndex: 1000,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'flex-end',
+          gap: '4px',
+        }}
+      >
+        <button
+          onClick={salveazaVizualizarea}
+          disabled={salvare}
+          title="Mută și zoom-ează harta unde vrei, apoi apasă: aceasta devine vizualizarea implicită pentru toți administratorii."
+          style={{
+            padding: '0.4rem 0.75rem',
+            borderRadius: '6px',
+            border: '1px solid #ccc',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.2)',
+            background: '#fff',
+            color: '#333',
+            fontSize: '0.8rem',
+            cursor: salvare ? 'default' : 'pointer',
+          }}
+        >
+          {salvare ? 'Se salvează...' : 'Salvează vizualizarea curentă ca implicită'}
+        </button>
+        {salvareMsg && (
+          <span
+            style={{
+              fontSize: '0.8rem',
+              padding: '0.2rem 0.5rem',
+              borderRadius: '4px',
+              background: salvareMsg.eroare ? '#fdecea' : '#e8f5e9',
+              color: salvareMsg.eroare ? '#b00020' : '#2e7d32',
+            }}
+          >
+            {salvareMsg.text}
+          </span>
+        )}
+      </div>
+
       <MapContainer center={centru} zoom={zoomInitial} style={{ height: '100%', width: '100%' }}>
+        <MapRefCapture mapRef={mapRef} />
         {strat === 'strada' ? (
           <TileLayer
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
