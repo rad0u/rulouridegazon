@@ -169,6 +169,13 @@ function oreLucruImplicit(ore: number): string {
   return String(Math.min(8, Math.round(ore)));
 }
 
+// Stoc 0, negativ sau necompletat = probabil gestiunea n-a fost alimentată.
+function stocProblema(stoc: number | null): boolean {
+  return stoc === null || stoc <= 0;
+}
+
+const AVERTIZARE_STOC = 'Atenție la stoc!';
+
 function formGol(ore: number): FormSesiune {
   return {
     tipLucrare: '',
@@ -266,17 +273,18 @@ export default function ActivitatiParceleScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [substanteFerma, setSubstanteFerma] = useState<Substanta[]>([]);
-  const [materiiPrimeFerma, setMateriiPrimeFerma] = useState<MateriePrima[]>([]);
   const [numeFermaActiva, setNumeFermaActiva] = useState<string | null>(null);
-  // Toate substanțele / materiile prime ale fermei, indiferent de stoc, în
-  // ordinea alfabetică din baza de date. Din poziția în această listă ies
-  // codurile scurte S1.. / M1.. -- aceleași pe fișa tipărită (anexă) și în
-  // listele de selecție de pe ecran, ca operatorul să regăsească ușor ce a
-  // notat pe hârtie. Anexa tipărită arată doar cele cu stoc DIFERIT de 0
-  // (deci și stoc negativ, ex. dacă cineva a uitat să alimenteze stocul),
-  // păstrându-și codurile din lista completă; formularul de pe ecran rămâne
-  // pe stoc > 0 (`substanteFerma`/`materiiPrimeFerma`).
+  // Toate substanțele / materiile prime ale fermei, indiferent de stoc (și cu
+  // stoc 0 sau negativ), în ordinea alfabetică din baza de date. Din poziția în
+  // această listă ies codurile scurte S1.. / M1.. -- aceleași pe fișa tipărită
+  // (anexă) și în listele de selecție de pe ecran, ca operatorul să regăsească
+  // ușor ce a notat pe hârtie.
+  // 2026-10-08 (Radu): "acum vreau sa apara si substantele cu stoc=0 sau stoc
+  // negativ [...] daca are stoc negativ sau zero sa apara scris cu rosu in
+  // dreptul substantei: Atentie la stoc!" -- ca să se vadă dacă cineva a uitat
+  // să alimenteze gestiunea. Nimic nu blochează consumul peste stoc (doar un
+  // trigger scade stocul, fără CHECK), deci o substanță cu stoc 0 poate fi
+  // aleasă, iar stocul ei devine negativ.
   const [substanteToate, setSubstanteToate] = useState<Substanta[]>([]);
   const [materiiPrimeToate, setMateriiPrimeToate] = useState<MateriePrima[]>([]);
   const [forms, setForms] = useState<Record<string, FormSesiune>>({});
@@ -311,31 +319,24 @@ export default function ActivitatiParceleScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fermaActiva]);
 
-  useEffect(() => {
-    if (!fermaActiva) return;
-    void (async () => {
-      const { data } = await supabase
+  async function incarcaConsumabile(fermaId: string) {
+    const [{ data: sub }, { data: mp }] = await Promise.all([
+      supabase
         .from('substante')
         .select('id,nume,unitate_masura,stoc_curent')
-        .eq('ferma_id', fermaActiva)
-        .gt('stoc_curent', 0)
-        .order('nume');
-      setSubstanteFerma((data as Substanta[]) ?? []);
-    })();
-  }, [fermaActiva]);
-
-  useEffect(() => {
-    if (!fermaActiva) return;
-    void (async () => {
-      const { data } = await supabase
+        .eq('ferma_id', fermaId)
+        .order('nume')
+        .order('id'),
+      supabase
         .from('materii_prime')
         .select('id,nume,unitate_masura,stoc_curent')
-        .eq('ferma_id', fermaActiva)
-        .gt('stoc_curent', 0)
-        .order('nume');
-      setMateriiPrimeFerma((data as MateriePrima[]) ?? []);
-    })();
-  }, [fermaActiva]);
+        .eq('ferma_id', fermaId)
+        .order('nume')
+        .order('id'),
+    ]);
+    setSubstanteToate((sub as Substanta[]) ?? []);
+    setMateriiPrimeToate((mp as MateriePrima[]) ?? []);
+  }
 
   useEffect(() => {
     if (!fermaActiva) {
@@ -343,24 +344,7 @@ export default function ActivitatiParceleScreen() {
       setMateriiPrimeToate([]);
       return;
     }
-    void (async () => {
-      const [{ data: sub }, { data: mp }] = await Promise.all([
-        supabase
-          .from('substante')
-          .select('id,nume,unitate_masura,stoc_curent')
-          .eq('ferma_id', fermaActiva)
-          .order('nume')
-          .order('id'),
-        supabase
-          .from('materii_prime')
-          .select('id,nume,unitate_masura,stoc_curent')
-          .eq('ferma_id', fermaActiva)
-          .order('nume')
-          .order('id'),
-      ]);
-      setSubstanteToate((sub as Substanta[]) ?? []);
-      setMateriiPrimeToate((mp as MateriePrima[]) ?? []);
-    })();
+    void incarcaConsumabile(fermaActiva);
   }, [fermaActiva]);
 
   // Numele fermei, pentru antetul fișei de teren (valabil și pentru
@@ -629,26 +613,9 @@ export default function ActivitatiParceleScreen() {
       return next;
     });
 
-    // Stocurile pot să se fi schimbat (dacă alte ecrane au consumat între
-    // timp) — reîncărcăm listele pentru consistență cu ParcelaPanel / Substanțe / Materii prime.
-    if (fermaActiva) {
-      const [{ data: substanteData }, { data: materiiPrimeData }] = await Promise.all([
-        supabase
-          .from('substante')
-          .select('id,nume,unitate_masura,stoc_curent')
-          .eq('ferma_id', fermaActiva)
-          .gt('stoc_curent', 0)
-          .order('nume'),
-        supabase
-          .from('materii_prime')
-          .select('id,nume,unitate_masura,stoc_curent')
-          .eq('ferma_id', fermaActiva)
-          .gt('stoc_curent', 0)
-          .order('nume'),
-      ]);
-      setSubstanteFerma((substanteData as Substanta[]) ?? []);
-      setMateriiPrimeFerma((materiiPrimeData as MateriePrima[]) ?? []);
-    }
+    // Stocurile s-au schimbat (consumul tocmai salvat + eventual alte ecrane) —
+    // reîncărcăm listele pentru consistență cu ParcelaPanel / Substanțe / Materii prime.
+    if (fermaActiva) await incarcaConsumabile(fermaActiva);
   }
 
   if (roleLoading) {
@@ -673,8 +640,6 @@ export default function ActivitatiParceleScreen() {
 
   const codSubstanta = new Map(substanteToate.map((x, i) => [x.id, `S${i + 1}`]));
   const codMateriePrima = new Map(materiiPrimeToate.map((x, i) => [x.id, `M${i + 1}`]));
-  const substanteAnexa = substanteToate.filter((x) => x.stoc_curent !== null && x.stoc_curent !== 0);
-  const materiiPrimeAnexa = materiiPrimeToate.filter((x) => x.stoc_curent !== null && x.stoc_curent !== 0);
 
   return (
     <main
@@ -714,6 +679,7 @@ export default function ActivitatiParceleScreen() {
           .fisa-teren .anexa h3 { margin: 0 0 2mm; font-size: 10pt; }
           .fisa-teren .anexa .coloane { columns: 3; column-gap: 6mm; font-size: 8pt; line-height: 1.35; }
           .fisa-teren .anexa .item { break-inside: avoid; margin: 0; }
+          .fisa-teren .anexa .avert { color: #c00000; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .fisa-teren .anexa .grup-titlu { font-weight: bold; margin: 2mm 0 0.5mm; break-after: avoid; font-size: 8pt; }
         }
       `}</style>
@@ -913,13 +879,23 @@ export default function ActivitatiParceleScreen() {
                         style={{ flex: '1 1 180px', padding: '0.5rem' }}
                       >
                         <option value="">Alege substanță</option>
-                        {substanteFerma.map((s) => (
-                          <option key={s.id} value={s.id}>
+                        {substanteToate.map((s) => (
+                          <option
+                            key={s.id}
+                            value={s.id}
+                            style={stocProblema(s.stoc_curent) ? { color: '#c00000', fontWeight: 700 } : undefined}
+                          >
                             {codSubstanta.get(s.id) ? `${codSubstanta.get(s.id)} · ` : ''}
                             {s.nume} ({s.unitate_masura}) — stoc {s.stoc_curent ?? 0}
+                            {stocProblema(s.stoc_curent) ? ` — ${AVERTIZARE_STOC}` : ''}
                           </option>
                         ))}
                       </select>
+                      {substanteToate.some((s) => s.id === linie.substanta_id && stocProblema(s.stoc_curent)) && (
+                        <span style={{ alignSelf: 'center', color: '#c00000', fontWeight: 700, fontSize: '0.85rem' }}>
+                          {AVERTIZARE_STOC}
+                        </span>
+                      )}
                       <input
                         type="number"
                         min="0"
@@ -960,13 +936,23 @@ export default function ActivitatiParceleScreen() {
                         style={{ flex: '1 1 180px', padding: '0.5rem' }}
                       >
                         <option value="">Alege materia primă</option>
-                        {materiiPrimeFerma.map((m) => (
-                          <option key={m.id} value={m.id}>
+                        {materiiPrimeToate.map((m) => (
+                          <option
+                            key={m.id}
+                            value={m.id}
+                            style={stocProblema(m.stoc_curent) ? { color: '#c00000', fontWeight: 700 } : undefined}
+                          >
                             {codMateriePrima.get(m.id) ? `${codMateriePrima.get(m.id)} · ` : ''}
                             {m.nume} ({m.unitate_masura}) — stoc {m.stoc_curent ?? 0}
+                            {stocProblema(m.stoc_curent) ? ` — ${AVERTIZARE_STOC}` : ''}
                           </option>
                         ))}
                       </select>
+                      {materiiPrimeToate.some((m) => m.id === linie.materie_prima_id && stocProblema(m.stoc_curent)) && (
+                        <span style={{ alignSelf: 'center', color: '#c00000', fontWeight: 700, fontSize: '0.85rem' }}>
+                          {AVERTIZARE_STOC}
+                        </span>
+                      )}
                       <input
                         type="number"
                         min="0"
@@ -1083,23 +1069,26 @@ export default function ActivitatiParceleScreen() {
           </tbody>
         </table>
 
-        {/* Anexă: consumabilele disponibile pe fermă (stoc diferit de 0), pe coloane
-            mici ca să încapă și o listă lungă — operatorul scrie în tabel
-            doar codul (S = substanță, M = materie primă) + cantitatea. */}
-        {(substanteAnexa.length > 0 || materiiPrimeAnexa.length > 0) && (
+        {/* Anexă: toate consumabilele fermei, pe coloane mici ca să încapă și o
+            listă lungă — operatorul scrie în tabel doar codul (S = substanță,
+            M = materie primă) + cantitatea. Cele cu stoc 0/negativ au, în
+            dreptul lor, "Atenție la stoc!" cu roșu (2026-10-08, Radu). */}
+        {(substanteToate.length > 0 || materiiPrimeToate.length > 0) && (
           <div className="anexa">
-            <h3>Anexă — consumabile disponibile pe fermă (cod · denumire · UM)</h3>
+            <h3>Anexă — consumabile ale fermei (cod · denumire · UM)</h3>
             <div className="coloane">
-              {substanteAnexa.length > 0 && <p className="grup-titlu">Substanțe (S)</p>}
-              {substanteAnexa.map((sub) => (
+              {substanteToate.length > 0 && <p className="grup-titlu">Substanțe (S)</p>}
+              {substanteToate.map((sub) => (
                 <p className="item" key={sub.id}>
                   <strong>{codSubstanta.get(sub.id)}</strong> · {sub.nume} ({sub.unitate_masura})
+                  {stocProblema(sub.stoc_curent) && <span className="avert"> {AVERTIZARE_STOC}</span>}
                 </p>
               ))}
-              {materiiPrimeAnexa.length > 0 && <p className="grup-titlu">Materii prime (M)</p>}
-              {materiiPrimeAnexa.map((mp) => (
+              {materiiPrimeToate.length > 0 && <p className="grup-titlu">Materii prime (M)</p>}
+              {materiiPrimeToate.map((mp) => (
                 <p className="item" key={mp.id}>
                   <strong>{codMateriePrima.get(mp.id)}</strong> · {mp.nume} ({mp.unitate_masura})
+                  {stocProblema(mp.stoc_curent) && <span className="avert"> {AVERTIZARE_STOC}</span>}
                 </p>
               ))}
             </div>
