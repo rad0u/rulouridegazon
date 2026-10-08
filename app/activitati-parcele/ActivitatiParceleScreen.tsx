@@ -269,12 +269,16 @@ export default function ActivitatiParceleScreen() {
   const [substanteFerma, setSubstanteFerma] = useState<Substanta[]>([]);
   const [materiiPrimeFerma, setMateriiPrimeFerma] = useState<MateriePrima[]>([]);
   const [numeFermaActiva, setNumeFermaActiva] = useState<string | null>(null);
-  // Doar pentru anexa fișei de teren: consumabilele cu stoc DIFERIT de 0 (deci
-  // și cele cu stoc negativ -- consum introdus peste stocul înregistrat, de
-  // ex. dacă cineva a uitat să alimenteze stocul), spre deosebire de listele
-  // din formular (`substanteFerma`/`materiiPrimeFerma`, stoc > 0).
-  const [substantePrint, setSubstantePrint] = useState<Substanta[]>([]);
-  const [materiiPrimePrint, setMateriiPrimePrint] = useState<MateriePrima[]>([]);
+  // Toate substanțele / materiile prime ale fermei, indiferent de stoc, în
+  // ordinea alfabetică din baza de date. Din poziția în această listă ies
+  // codurile scurte S1.. / M1.. -- aceleași pe fișa tipărită (anexă) și în
+  // listele de selecție de pe ecran, ca operatorul să regăsească ușor ce a
+  // notat pe hârtie. Anexa tipărită arată doar cele cu stoc DIFERIT de 0
+  // (deci și stoc negativ, ex. dacă cineva a uitat să alimenteze stocul),
+  // păstrându-și codurile din lista completă; formularul de pe ecran rămâne
+  // pe stoc > 0 (`substanteFerma`/`materiiPrimeFerma`).
+  const [substanteToate, setSubstanteToate] = useState<Substanta[]>([]);
+  const [materiiPrimeToate, setMateriiPrimeToate] = useState<MateriePrima[]>([]);
   const [forms, setForms] = useState<Record<string, FormSesiune>>({});
   const [confirmate, setConfirmate] = useState<Set<string>>(new Set());
 
@@ -335,8 +339,8 @@ export default function ActivitatiParceleScreen() {
 
   useEffect(() => {
     if (!fermaActiva) {
-      setSubstantePrint([]);
-      setMateriiPrimePrint([]);
+      setSubstanteToate([]);
+      setMateriiPrimeToate([]);
       return;
     }
     void (async () => {
@@ -345,17 +349,17 @@ export default function ActivitatiParceleScreen() {
           .from('substante')
           .select('id,nume,unitate_masura,stoc_curent')
           .eq('ferma_id', fermaActiva)
-          .neq('stoc_curent', 0)
-          .order('nume'),
+          .order('nume')
+          .order('id'),
         supabase
           .from('materii_prime')
           .select('id,nume,unitate_masura,stoc_curent')
           .eq('ferma_id', fermaActiva)
-          .neq('stoc_curent', 0)
-          .order('nume'),
+          .order('nume')
+          .order('id'),
       ]);
-      setSubstantePrint((sub as Substanta[]) ?? []);
-      setMateriiPrimePrint((mp as MateriePrima[]) ?? []);
+      setSubstanteToate((sub as Substanta[]) ?? []);
+      setMateriiPrimeToate((mp as MateriePrima[]) ?? []);
     })();
   }, [fermaActiva]);
 
@@ -667,6 +671,11 @@ export default function ActivitatiParceleScreen() {
   const sesiuniDeAfisat = (raport?.sesiuni ?? []).filter((s) => !confirmate.has(cheieSesiune(s)));
   const grupuriDeAfisat = grupeazaSesiuni(sesiuniDeAfisat);
 
+  const codSubstanta = new Map(substanteToate.map((x, i) => [x.id, `S${i + 1}`]));
+  const codMateriePrima = new Map(materiiPrimeToate.map((x, i) => [x.id, `M${i + 1}`]));
+  const substanteAnexa = substanteToate.filter((x) => x.stoc_curent !== null && x.stoc_curent !== 0);
+  const materiiPrimeAnexa = materiiPrimeToate.filter((x) => x.stoc_curent !== null && x.stoc_curent !== 0);
+
   return (
     <main
       className="activitati-ecran"
@@ -906,6 +915,7 @@ export default function ActivitatiParceleScreen() {
                         <option value="">Alege substanță</option>
                         {substanteFerma.map((s) => (
                           <option key={s.id} value={s.id}>
+                            {codSubstanta.get(s.id) ? `${codSubstanta.get(s.id)} · ` : ''}
                             {s.nume} ({s.unitate_masura}) — stoc {s.stoc_curent ?? 0}
                           </option>
                         ))}
@@ -952,6 +962,7 @@ export default function ActivitatiParceleScreen() {
                         <option value="">Alege materia primă</option>
                         {materiiPrimeFerma.map((m) => (
                           <option key={m.id} value={m.id}>
+                            {codMateriePrima.get(m.id) ? `${codMateriePrima.get(m.id)} · ` : ''}
                             {m.nume} ({m.unitate_masura}) — stoc {m.stoc_curent ?? 0}
                           </option>
                         ))}
@@ -1075,20 +1086,20 @@ export default function ActivitatiParceleScreen() {
         {/* Anexă: consumabilele disponibile pe fermă (stoc diferit de 0), pe coloane
             mici ca să încapă și o listă lungă — operatorul scrie în tabel
             doar codul (S = substanță, M = materie primă) + cantitatea. */}
-        {(substantePrint.length > 0 || materiiPrimePrint.length > 0) && (
+        {(substanteAnexa.length > 0 || materiiPrimeAnexa.length > 0) && (
           <div className="anexa">
             <h3>Anexă — consumabile disponibile pe fermă (cod · denumire · UM)</h3>
             <div className="coloane">
-              {substantePrint.length > 0 && <p className="grup-titlu">Substanțe (S)</p>}
-              {substantePrint.map((sub, i) => (
+              {substanteAnexa.length > 0 && <p className="grup-titlu">Substanțe (S)</p>}
+              {substanteAnexa.map((sub) => (
                 <p className="item" key={sub.id}>
-                  <strong>S{i + 1}</strong> · {sub.nume} ({sub.unitate_masura})
+                  <strong>{codSubstanta.get(sub.id)}</strong> · {sub.nume} ({sub.unitate_masura})
                 </p>
               ))}
-              {materiiPrimePrint.length > 0 && <p className="grup-titlu">Materii prime (M)</p>}
-              {materiiPrimePrint.map((mp, i) => (
+              {materiiPrimeAnexa.length > 0 && <p className="grup-titlu">Materii prime (M)</p>}
+              {materiiPrimeAnexa.map((mp) => (
                 <p className="item" key={mp.id}>
-                  <strong>M{i + 1}</strong> · {mp.nume} ({mp.unitate_masura})
+                  <strong>{codMateriePrima.get(mp.id)}</strong> · {mp.nume} ({mp.unitate_masura})
                 </p>
               ))}
             </div>
