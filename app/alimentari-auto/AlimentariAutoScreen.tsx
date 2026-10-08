@@ -17,6 +17,16 @@ import { useUserRole } from '../../lib/useUserRole';
 // Cantitatea introdusă aici e scăzută automat ca ieșire din rezervorul
 // central în raportul "Mișcări rezervor central"
 // (get-rezervor-central-miscari v2), alături de consumul utilajelor.
+//
+// v2, 2026-10-08 (Radu): "in anumite situatii, se alimenteaza camioane din
+// rezervorul central Sabareni, care nu apartin Fermei. Vreau sa avem
+// posibilitatea de alimentare auto din rezervor ferma, fara ca auto sa fie in
+// baza noastra de date" -- formularul permite acum "Auto extern": în loc să
+// alegi o mașină din flotă, introduci numărul auto (obligatoriu) + beneficiar
+// și șofer (opționale), ca text liber, și alegi ferma al cărei rezervor a fost
+// folosit. Se salvează în `alimentari_masini` cu `masina_id` NULL și
+// `ferma_id` + `auto_extern_*` (vezi supabase/schema-alimentari-auto-extern.sql)
+// și se scade din rezervorul central ca orice altă alimentare auto.
 
 type Masina = {
   id: string;
@@ -30,8 +40,14 @@ type Alimentare = {
   data_ora: string;
   cantitate_litri: number;
   note: string | null;
+  auto_extern_numar: string | null;
+  auto_extern_beneficiar: string | null;
+  auto_extern_sofer: string | null;
   masini: { nume: string; ferme: { nume: string } | null } | null;
+  ferme: { nume: string } | null;
 };
+
+type FermaOpt = { id: string; nume: string };
 
 function aziLocal(): string {
   const d = new Date();
@@ -54,6 +70,14 @@ export default function AlimentariAutoScreen() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
 
+  const [tipAuto, setTipAuto] = useState<'flota' | 'extern'>('flota');
+  const [fermeOptiuni, setFermeOptiuni] = useState<FermaOpt[]>([]);
+  const [fermaProprie, setFermaProprie] = useState<string | null>(null);
+  const [fermaExtern, setFermaExtern] = useState('');
+  const [externNumar, setExternNumar] = useState('');
+  const [externBeneficiar, setExternBeneficiar] = useState('');
+  const [externSofer, setExternSofer] = useState('');
+
   const [masinaSelectata, setMasinaSelectata] = useState('');
   const [data, setData] = useState(aziLocal());
   const [cantitate, setCantitate] = useState('');
@@ -68,13 +92,17 @@ export default function AlimentariAutoScreen() {
     setLoading(true);
     setLoadError(null);
 
-    const [masiniRes, recenteRes] = await Promise.all([
+    const [masiniRes, recenteRes, fermeRes] = await Promise.all([
       supabase.from('masini').select('id, nume, ferma_id, ferme(nume)').eq('activ', true).order('nume'),
       supabase
         .from('alimentari_masini')
-        .select('id, data_ora, cantitate_litri, note, masini(nume, ferme(nume))')
+        .select(
+          'id, data_ora, cantitate_litri, note, auto_extern_numar, auto_extern_beneficiar, auto_extern_sofer, masini(nume, ferme(nume)), ferme(nume)',
+        )
         .order('data_ora', { ascending: false })
         .limit(50),
+      // admin_central: toate fermele; admin_ferma: RLS întoarce doar ferma lui.
+      supabase.from('ferme').select('id, nume').order('nume'),
     ]);
 
     setLoading(false);
@@ -87,6 +115,18 @@ export default function AlimentariAutoScreen() {
     if (recenteRes.error) {
       setLoadError(recenteRes.error.message);
       return;
+    }
+
+    const fermeLista = (fermeRes.data as FermaOpt[]) ?? [];
+    setFermeOptiuni(fermeLista);
+    if (role === 'admin_ferma') {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const { data: prof } = await supabase.from('utilizatori').select('ferma_id').eq('id', user.id).single();
+        setFermaProprie((prof?.ferma_id as string) ?? null);
+      }
     }
 
     setMasini((masiniRes.data as unknown as Masina[]) ?? []);
@@ -104,9 +144,21 @@ export default function AlimentariAutoScreen() {
 
     const cant = Number(cantitate.replace(',', '.'));
 
-    if (!masinaSelectata) {
+    const fermaDeFolosit = role === 'admin_ferma' ? fermaProprie : fermaExtern;
+
+    if (tipAuto === 'flota' && !masinaSelectata) {
       setSaveError('Alege mașina.');
       return;
+    }
+    if (tipAuto === 'extern') {
+      if (!externNumar.trim()) {
+        setSaveError('Introdu numărul de înmatriculare al autovehiculului extern.');
+        return;
+      }
+      if (!fermaDeFolosit) {
+        setSaveError('Alege ferma din al cărei rezervor s-a alimentat.');
+        return;
+      }
     }
     if (!data) {
       setSaveError('Alege data.');
@@ -126,7 +178,11 @@ export default function AlimentariAutoScreen() {
     const dataOra = new Date(`${data}T12:00:00`).toISOString();
 
     const { error: insertError } = await supabase.from('alimentari_masini').insert({
-      masina_id: masinaSelectata,
+      masina_id: tipAuto === 'flota' ? masinaSelectata : null,
+      ferma_id: tipAuto === 'extern' ? fermaDeFolosit : null,
+      auto_extern_numar: tipAuto === 'extern' ? externNumar.trim().toUpperCase() : null,
+      auto_extern_beneficiar: tipAuto === 'extern' ? externBeneficiar.trim() || null : null,
+      auto_extern_sofer: tipAuto === 'extern' ? externSofer.trim() || null : null,
       data_ora: dataOra,
       cantitate_litri: cant,
       note: note.trim() || null,
@@ -143,6 +199,9 @@ export default function AlimentariAutoScreen() {
     setSaveOk(true);
     setCantitate('');
     setNote('');
+    setExternNumar('');
+    setExternBeneficiar('');
+    setExternSofer('');
     void incarca();
   }
 
@@ -192,30 +251,97 @@ export default function AlimentariAutoScreen() {
       </div>
 
       <p style={{ fontSize: '0.85rem', color: '#666', margin: 0 }}>
-        Pentru mașinile de pasageri care se alimentează direct din rezervorul central al fermei (nu la pompă) — nu
-        pentru utilaje. Cantitatea introdusă aici e scăzută automat din nivelul rezervorului central la raportul de
-        mișcări.
+        Pentru autovehiculele care se alimentează direct din rezervorul central al fermei (nu la pompă) — nu pentru
+        utilaje. Mașinile din flotă se aleg din listă; camioanele sau alte autovehicule care nu aparțin fermei se
+        înregistrează ca „Auto extern”, doar cu număr (și, opțional, beneficiar/șofer). Cantitatea introdusă aici e
+        scăzută automat din nivelul rezervorului central la raportul de mișcări.
       </p>
 
       <div style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
         <h2 style={{ fontSize: '1.05rem', margin: '0 0 0.75rem' }}>Înregistrează o alimentare</h2>
         <div style={{ display: 'flex', gap: '0.6rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
-            Mașină
-            <select
-              value={masinaSelectata}
-              onChange={(e) => setMasinaSelectata(e.target.value)}
-              style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '220px' }}
-            >
-              <option value="">Alege mașina</option>
-              {masini.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.nume}
-                  {role === 'admin_central' && m.ferme?.nume ? ` — ${m.ferme.nume}` : ''}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', flex: '1 1 100%' }}>
+            <span>Tip autovehicul</span>
+            <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', marginTop: '0.25rem' }}>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem' }}>
+                <input type="radio" name="tipAuto" checked={tipAuto === 'flota'} onChange={() => setTipAuto('flota')} />
+                Auto din flotă
+              </label>
+              <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.9rem' }}>
+                <input type="radio" name="tipAuto" checked={tipAuto === 'extern'} onChange={() => setTipAuto('extern')} />
+                Auto extern (nu e în baza de date)
+              </label>
+            </div>
+          </div>
+
+          {tipAuto === 'flota' ? (
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+              Mașină
+              <select
+                value={masinaSelectata}
+                onChange={(e) => setMasinaSelectata(e.target.value)}
+                style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '220px' }}
+              >
+                <option value="">Alege mașina</option>
+                {masini.map((m) => (
+                  <option key={m.id} value={m.id}>
+                    {m.nume}
+                    {role === 'admin_central' && m.ferme?.nume ? ` — ${m.ferme.nume}` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : (
+            <>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+                Număr auto *
+                <input
+                  type="text"
+                  value={externNumar}
+                  onChange={(e) => setExternNumar(e.target.value)}
+                  placeholder="ex. B 123 ABC"
+                  style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '150px' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+                Beneficiar / firmă
+                <input
+                  type="text"
+                  value={externBeneficiar}
+                  onChange={(e) => setExternBeneficiar(e.target.value)}
+                  placeholder="opțional"
+                  style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '180px' }}
+                />
+              </label>
+              <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+                Șofer
+                <input
+                  type="text"
+                  value={externSofer}
+                  onChange={(e) => setExternSofer(e.target.value)}
+                  placeholder="opțional"
+                  style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '150px' }}
+                />
+              </label>
+              {role === 'admin_central' && (
+                <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
+                  Rezervor fermă *
+                  <select
+                    value={fermaExtern}
+                    onChange={(e) => setFermaExtern(e.target.value)}
+                    style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '180px' }}
+                  >
+                    <option value="">Alege ferma</option>
+                    {fermeOptiuni.map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.nume}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </>
+          )}
 
           <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
             Data
@@ -298,9 +424,21 @@ export default function AlimentariAutoScreen() {
                 {recente.map((a) => (
                   <tr key={a.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                     <td style={{ padding: '0.4rem', whiteSpace: 'nowrap' }}>{formatData(a.data_ora)}</td>
-                    <td style={{ padding: '0.4rem' }}>{a.masini?.nume ?? '—'}</td>
+                    <td style={{ padding: '0.4rem' }}>
+                      {a.masini?.nume ?? (
+                        <>
+                          <strong>{a.auto_extern_numar ?? '—'}</strong>{' '}
+                          <span style={{ fontSize: '0.75rem', color: '#8a5a00' }}>extern</span>
+                          {(a.auto_extern_beneficiar || a.auto_extern_sofer) && (
+                            <div style={{ fontSize: '0.8rem', color: '#666' }}>
+                              {[a.auto_extern_beneficiar, a.auto_extern_sofer].filter(Boolean).join(' · ')}
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </td>
                     {role === 'admin_central' && (
-                      <td style={{ padding: '0.4rem' }}>{a.masini?.ferme?.nume ?? '—'}</td>
+                      <td style={{ padding: '0.4rem' }}>{a.masini?.ferme?.nume ?? a.ferme?.nume ?? '—'}</td>
                     )}
                     <td style={{ padding: '0.4rem', fontWeight: 600 }}>{a.cantitate_litri} L</td>
                     <td style={{ padding: '0.4rem', color: '#666' }}>{a.note ?? '—'}</td>

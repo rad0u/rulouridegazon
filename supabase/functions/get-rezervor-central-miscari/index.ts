@@ -30,6 +30,15 @@
 // `iesiri_utilaje_litri` / `iesiri_masini_litri`, plus lista itemizată
 // `alimentari_masini` pe fiecare zi (mașină + cantitate), în oglindă cu
 // `alimentari` (alimentările rezervorului central).
+//
+// v3, 2026-10-08 (Radu): "in anumite situatii, se alimenteaza camioane din
+// rezervorul central Sabareni, care nu apartin Fermei [...] alimentare auto
+// din rezervor ferma, fara ca auto sa fie in baza noastra de date" --
+// `alimentari_masini` are acum și rânduri fără `masina_id` (auto EXTERN:
+// `auto_extern_numar` / `auto_extern_beneficiar` / `auto_extern_sofer`) și o
+// coloană `ferma_id`. Alimentările se aleg acum după `ferma_id` (nu după
+// mașinile fermei), deci și cele externe intră ca IEȘIRI din rezervor; numele
+// afișat pentru ele e "<număr> — <beneficiar> (extern)".
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -474,35 +483,39 @@ Deno.serve(async (req) => {
   const iesiriMasiniPeZi = new Map<string, number>();
   const alimentariMasiniPeZiMap = new Map<string, AlimentareMasina[]>();
 
-  if (!masiniError && masiniMap.size > 0) {
-    const { data: alimentariMasiniRaw, error: alimentariMasiniError } = await adminClient
-      .from('alimentari_masini')
-      .select('id, data_ora, cantitate_litri, note, masina_id')
-      .in('masina_id', Array.from(masiniMap.keys()))
-      .gte('data_ora', de_la)
-      .lt('data_ora', pana_la)
-      .order('data_ora', { ascending: false });
+  // v3: după `ferma_id` (acoperă și mașinile fermei, și autovehiculele externe).
+  const { data: alimentariMasiniRaw, error: alimentariMasiniError } = await adminClient
+    .from('alimentari_masini')
+    .select('id, data_ora, cantitate_litri, note, masina_id, auto_extern_numar, auto_extern_beneficiar')
+    .eq('ferma_id', fermaId)
+    .gte('data_ora', de_la)
+    .lt('data_ora', pana_la)
+    .order('data_ora', { ascending: false });
 
-    if (!alimentariMasiniError) {
-      for (const a of (alimentariMasiniRaw ?? []) as {
-        id: string;
-        data_ora: string;
-        cantitate_litri: number;
-        note: string | null;
-        masina_id: string;
-      }[]) {
-        const zi = ziuaLocala(a.data_ora);
-        iesiriMasiniPeZi.set(zi, (iesiriMasiniPeZi.get(zi) ?? 0) + Number(a.cantitate_litri));
-        const lista = alimentariMasiniPeZiMap.get(zi) ?? [];
-        lista.push({
-          id: a.id,
-          data_ora: a.data_ora,
-          cantitate_litri: a.cantitate_litri,
-          note: a.note,
-          masina_nume: masiniMap.get(a.masina_id) ?? '—',
-        });
-        alimentariMasiniPeZiMap.set(zi, lista);
-      }
+  if (!masiniError && !alimentariMasiniError) {
+    for (const a of (alimentariMasiniRaw ?? []) as {
+      id: string;
+      data_ora: string;
+      cantitate_litri: number;
+      note: string | null;
+      masina_id: string | null;
+      auto_extern_numar: string | null;
+      auto_extern_beneficiar: string | null;
+    }[]) {
+      const zi = ziuaLocala(a.data_ora);
+      iesiriMasiniPeZi.set(zi, (iesiriMasiniPeZi.get(zi) ?? 0) + Number(a.cantitate_litri));
+      const lista = alimentariMasiniPeZiMap.get(zi) ?? [];
+      const nume = a.masina_id
+        ? (masiniMap.get(a.masina_id) ?? '—')
+        : `${a.auto_extern_numar ?? '—'}${a.auto_extern_beneficiar ? ` — ${a.auto_extern_beneficiar}` : ''} (extern)`;
+      lista.push({
+        id: a.id,
+        data_ora: a.data_ora,
+        cantitate_litri: a.cantitate_litri,
+        note: a.note,
+        masina_nume: nume,
+      });
+      alimentariMasiniPeZiMap.set(zi, lista);
     }
   }
 

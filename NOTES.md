@@ -2521,3 +2521,12 @@ Radu: „la substante adauga-mi si un buton Tipareste stoc, unde sa-mi faca un r
 - Raportul (A4 portrait, bloc ascuns pe ecran, vizibil doar la tipărire): pentru fiecare fermă o pagină — Cod (S1.., aceleași ca în Activități detectate pe parcele), Substanță, Stoc + UM, Preț mediu, Valoare, Obs. („Atenție la stoc!" roșu la stoc 0/negativ), cu total valoare per fermă; pentru admin general, la final o pagină „Total pe ferme". Admin fermă primește doar ferma proprie. Data/ora situației în antet.
 - Interogările de stoc au acum `.order('nume').order('id')` ca să se potrivească cu ordinea codurilor din Activități detectate.
 - Valoarea = stoc × preț mediu de intrare (substanțele fără preț au „—" și nu intră în total).
+
+## 2026-10-08 — Alimentări din rezervorul fermei pentru auto EXTERN
+
+Radu: „in anumite situatii, se alimenteaza camioane din rezervorul central Sabareni, care nu apartin Fermei. Vreau sa avem posibilitatea de alimentare auto din rezervor ferma, fara ca auto sa fie in baza noastra de date."
+- `/alimentari-auto` (`AlimentariAutoScreen.tsx`): comutator „Auto din flotă / Auto extern (nu e în baza de date)". La extern: Număr auto (obligatoriu, salvat cu majuscule), Beneficiar/firmă, Șofer (opționale, text liber) și, pentru admin general, ferma al cărei rezervor a fost folosit (admin fermă: ferma proprie). Lista „Ultimele alimentări" arată autovehiculele externe cu eticheta „extern" + beneficiar/șofer.
+- DB: `alimentari_masini.masina_id` opțional + `ferma_id`, `auto_extern_numar/beneficiar/sofer`, CHECK (mașină SAU extern complet), politici RLS pentru admin_ferma, trigger care completează `ferma_id` din mașină. Detalii: `supabase/schema-alimentari-auto-extern.sql`. (DDL aplicat cu `execute_sql` instrucțiune cu instrucțiune — `apply_migration` dă timeout.)
+- `get-rezervor-central-miscari` v3 (deploy v4 în Supabase): alimentările se aleg după `ferma_id`, deci și cele externe sunt IEȘIRI din rezervor în raportul de mișcări (afișate „<număr> — <beneficiar> (extern)").
+- Notă: `get-rezervor-central` (nivelul curent cumulat) NU scade alimentările auto (nici cele din flotă, nici cele externe) — doar raportul de mișcări pe zile le scade. Neschimbat aici.
+- Rând de test rămas în DB (`alimentari_masini`, id 87c3557d-bf6c-4a47-9741-331ff374d2e8, „TEST 00 XXX", 1 L, Săbăreni, note `test-sters`) — ștergerea prin MCP a dat timeout; de șters manual.
