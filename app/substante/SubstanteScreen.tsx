@@ -63,6 +63,151 @@ const butonStyle: React.CSSProperties = {
   cursor: 'pointer',
 };
 
+// 2026-10-08 (Radu): "la substante adauga-mi si un buton Tipareste stoc, unde
+// sa-mi faca un raport la zi a stocului de substante" -- raport A4 cu stocul
+// curent al tuturor substanțelor (inclusiv stoc 0/negativ, marcate cu roșu
+// „Atenție la stoc!"), grupat pe ferme (câte o pagină per fermă), cu valoarea
+// stocului și totaluri. Codurile S1.. sunt aceleași ca în Activități
+// detectate pe parcele (poziția în lista fermei, ordonată nume + id). Bloc
+// ascuns pe ecran, vizibil doar la tipărire (@media print).
+function RaportStocSubstante({ stocuri, momentul }: { stocuri: SubstantaStoc[]; momentul: Date }) {
+  const perFerma = new Map<string, { nume: string; randuri: SubstantaStoc[] }>();
+  for (const sub of stocuri) {
+    const cheie = sub.ferma_id ?? 'fara-ferma';
+    let grup = perFerma.get(cheie);
+    if (!grup) {
+      grup = { nume: sub.ferme?.nume ?? 'Fără fermă', randuri: [] };
+      perFerma.set(cheie, grup);
+    }
+    grup.randuri.push(sub);
+  }
+  const grupuri = Array.from(perFerma.values()).sort((a, b) => a.nume.localeCompare(b.nume, 'ro'));
+
+  const valoare = (r: SubstantaStoc) => (r.pret_unitar !== null ? r.pret_unitar * r.stoc_curent : null);
+  const totalGrup = (randuri: SubstantaStoc[]) =>
+    randuri.reduce((suma, r) => suma + (valoare(r) ?? 0), 0);
+  const moment = momentul.toLocaleString('ro-RO', { dateStyle: 'long', timeStyle: 'short' });
+
+  return (
+    <section className="raport-stoc">
+      {grupuri.map((grup, gi) => (
+        <div key={grup.nume} className="raport-pagina" style={gi > 0 ? { breakBefore: 'page' } : undefined}>
+          <h2>RAPORT STOC SUBSTANȚE</h2>
+          <div className="antet">
+            <div><strong>Fermă:</strong> {grup.nume}</div>
+            <div><strong>Situația la:</strong> {moment}</div>
+            <div className="mic" style={{ gridColumn: '1 / -1' }}>
+              SC Rulouri de Gazon SRL · {grup.randuri.length} substanțe · valorile sunt calculate la prețul mediu de
+              intrare.
+            </div>
+          </div>
+          <table>
+            <colgroup>
+              <col style={{ width: '7%' }} />
+              <col style={{ width: '33%' }} />
+              <col style={{ width: '13%' }} />
+              <col style={{ width: '14%' }} />
+              <col style={{ width: '17%' }} />
+              <col style={{ width: '16%' }} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th>Cod</th>
+                <th>Substanță</th>
+                <th>Stoc</th>
+                <th>Preț mediu</th>
+                <th>Valoare</th>
+                <th>Obs.</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grup.randuri.map((r, i) => {
+                const problema = r.stoc_curent === null || r.stoc_curent <= 0;
+                return (
+                  <tr key={r.id}>
+                    <td>S{i + 1}</td>
+                    <td>{r.nume}</td>
+                    <td className="dr">
+                      {r.stoc_curent} {r.unitate_masura}
+                    </td>
+                    <td className="dr">{r.pret_unitar !== null ? `${formatLei(r.pret_unitar)}/${r.unitate_masura}` : '—'}</td>
+                    <td className="dr">{formatLei(valoare(r))}</td>
+                    <td>{problema && <span className="avert">Atenție la stoc!</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={4} className="dr"><strong>Total valoare stoc — {grup.nume}</strong></td>
+                <td className="dr"><strong>{formatLei(totalGrup(grup.randuri))}</strong></td>
+                <td />
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      ))}
+      {grupuri.length > 1 && (
+        <div className="raport-pagina" style={{ breakBefore: 'page' }}>
+          <h2>RAPORT STOC SUBSTANȚE — Total pe ferme</h2>
+          <div className="antet">
+            <div><strong>Situația la:</strong> {moment}</div>
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>Fermă</th>
+                <th>Nr. substanțe</th>
+                <th>Valoare stoc</th>
+              </tr>
+            </thead>
+            <tbody>
+              {grupuri.map((grup) => (
+                <tr key={grup.nume}>
+                  <td>{grup.nume}</td>
+                  <td className="dr">{grup.randuri.length}</td>
+                  <td className="dr">{formatLei(totalGrup(grup.randuri))}</td>
+                </tr>
+              ))}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td><strong>TOTAL</strong></td>
+                <td className="dr"><strong>{grupuri.reduce((n, g) => n + g.randuri.length, 0)}</strong></td>
+                <td className="dr"><strong>{formatLei(grupuri.reduce((suma, g) => suma + totalGrup(g.randuri), 0))}</strong></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      )}
+    </section>
+  );
+}
+
+const STIL_RAPORT_STOC = `
+  .raport-stoc { display: none; }
+  @media print {
+    @page { size: A4 portrait; margin: 10mm; }
+    body { background: #fff !important; }
+    header { display: none !important; }
+    body div:has(> header) { display: block !important; min-height: 0 !important; }
+    main { display: block !important; min-height: 0 !important; padding: 0 !important; }
+    .substante-ecran > *:not(.raport-stoc) { display: none !important; }
+    .raport-stoc { display: block !important; color: #000; font-size: 10pt; }
+    .raport-stoc h2 { margin: 0; font-size: 15pt; text-align: center; }
+    .raport-stoc .antet { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 16px; margin: 6px 0 8px; font-size: 9.5pt; }
+    .raport-stoc .mic { font-size: 8.5pt; color: #333; }
+    .raport-stoc table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    .raport-stoc th, .raport-stoc td { border: 1px solid #000; padding: 3px 5px; vertical-align: top; text-align: left; font-size: 9pt; word-wrap: break-word; }
+    .raport-stoc th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .raport-stoc .dr { text-align: right; }
+    .raport-stoc thead { display: table-header-group; }
+    .raport-stoc tfoot { display: table-row-group; }
+    .raport-stoc tr { break-inside: avoid; page-break-inside: avoid; }
+    .raport-stoc .avert { color: #c00000; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  }
+`;
+
 export default function SubstanteScreen() {
   const { role, loading: roleLoading } = useUserRole();
 
@@ -130,6 +275,15 @@ function SubstanteAdminCentral() {
   const [editIntrareSaving, setEditIntrareSaving] = useState(false);
   const [editIntrareError, setEditIntrareError] = useState<string | null>(null);
 
+  const [momentRaport, setMomentRaport] = useState<Date>(() => new Date());
+
+  // Reîncarcă stocul chiar înainte de tipărire, ca raportul să fie „la zi".
+  async function tiparesteStoc() {
+    await incarca();
+    setMomentRaport(new Date());
+    setTimeout(() => window.print(), 150);
+  }
+
   async function incarca() {
     setLoading(true);
     setLoadError(null);
@@ -140,7 +294,8 @@ function SubstanteAdminCentral() {
       supabase
         .from('substante')
         .select('id, nume, unitate_masura, stoc_curent, pret_unitar, ferma_id, ferme(nume)')
-        .order('nume'),
+        .order('nume')
+        .order('id'),
       supabase
         .from('substante_intrari')
         .select(
@@ -336,6 +491,7 @@ function SubstanteAdminCentral() {
 
   return (
     <main
+      className="substante-ecran"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -345,11 +501,22 @@ function SubstanteAdminCentral() {
         gap: '1.25rem',
       }}
     >
+      <style>{STIL_RAPORT_STOC}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h1 style={{ margin: 0 }}>Substanțe</h1>
-        <button onClick={() => void incarca()} disabled={loading} style={{ ...butonStyle, background: loading ? '#eee' : '#f5f5f5' }}>
-          {loading ? 'Se încarcă...' : 'Reîncarcă'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button onClick={() => void incarca()} disabled={loading} style={{ ...butonStyle, background: loading ? '#eee' : '#f5f5f5' }}>
+            {loading ? 'Se încarcă...' : 'Reîncarcă'}
+          </button>
+          <button
+            onClick={() => void tiparesteStoc()}
+            disabled={loading}
+            title="Reîncarcă stocul și tipărește pe A4 un raport la zi al stocului de substanțe."
+            style={butonStyle}
+          >
+            Tipărește stoc
+          </button>
+        </div>
       </div>
 
       {loadError && (
@@ -733,6 +900,7 @@ function SubstanteAdminCentral() {
           </div>
         </div>
       )}
+      <RaportStocSubstante stocuri={stocuri} momentul={momentRaport} />
     </main>
   );
 }
@@ -744,6 +912,15 @@ function SubstanteAdminFerma() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [loadedOnce, setLoadedOnce] = useState(false);
 
+  const [momentRaport, setMomentRaport] = useState<Date>(() => new Date());
+
+  // Reîncarcă stocul chiar înainte de tipărire, ca raportul să fie „la zi".
+  async function tiparesteStoc() {
+    await incarca();
+    setMomentRaport(new Date());
+    setTimeout(() => window.print(), 150);
+  }
+
   async function incarca() {
     setLoading(true);
     setLoadError(null);
@@ -752,7 +929,8 @@ function SubstanteAdminFerma() {
       supabase
         .from('substante')
         .select('id, nume, unitate_masura, stoc_curent, pret_unitar, ferma_id, ferme(nume)')
-        .order('nume'),
+        .order('nume')
+        .order('id'),
       supabase
         .from('substante_intrari')
         .select('id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferme(nume)), utilizatori(nume)')
@@ -782,6 +960,7 @@ function SubstanteAdminFerma() {
 
   return (
     <main
+      className="substante-ecran"
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -791,11 +970,22 @@ function SubstanteAdminFerma() {
         gap: '1.25rem',
       }}
     >
+      <style>{STIL_RAPORT_STOC}</style>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem' }}>
         <h1 style={{ margin: 0 }}>Substanțe</h1>
-        <button onClick={() => void incarca()} disabled={loading} style={{ ...butonStyle, background: loading ? '#eee' : '#f5f5f5' }}>
-          {loading ? 'Se încarcă...' : 'Reîncarcă'}
-        </button>
+        <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <button onClick={() => void incarca()} disabled={loading} style={{ ...butonStyle, background: loading ? '#eee' : '#f5f5f5' }}>
+            {loading ? 'Se încarcă...' : 'Reîncarcă'}
+          </button>
+          <button
+            onClick={() => void tiparesteStoc()}
+            disabled={loading}
+            title="Reîncarcă stocul și tipărește pe A4 un raport la zi al stocului de substanțe."
+            style={butonStyle}
+          >
+            Tipărește stoc
+          </button>
+        </div>
       </div>
       <p style={{ color: '#666', marginTop: '-0.75rem' }}>
         Alimentarea gestiunii se face de către admin general. Aici vezi stocul curent și istoricul intrărilor pentru
@@ -877,6 +1067,7 @@ function SubstanteAdminFerma() {
           </tbody>
         </table>
       </section>
+      <RaportStocSubstante stocuri={stocuri} momentul={momentRaport} />
     </main>
   );
 }
