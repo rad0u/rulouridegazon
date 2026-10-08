@@ -885,6 +885,7 @@ export default function ActivitatiParceleScreen() {
                             value={s.id}
                             style={stocProblema(s.stoc_curent) ? { color: '#c00000', fontWeight: 700 } : undefined}
                           >
+                            {stocProblema(s.stoc_curent) ? '🔴 ' : ''}
                             {codSubstanta.get(s.id) ? `${codSubstanta.get(s.id)} · ` : ''}
                             {s.nume} ({s.unitate_masura}) — stoc {s.stoc_curent ?? 0}
                             {stocProblema(s.stoc_curent) ? ` — ${AVERTIZARE_STOC}` : ''}
@@ -942,6 +943,7 @@ export default function ActivitatiParceleScreen() {
                             value={m.id}
                             style={stocProblema(m.stoc_curent) ? { color: '#c00000', fontWeight: 700 } : undefined}
                           >
+                            {stocProblema(m.stoc_curent) ? '🔴 ' : ''}
                             {codMateriePrima.get(m.id) ? `${codMateriePrima.get(m.id)} · ` : ''}
                             {m.nume} ({m.unitate_masura}) — stoc {m.stoc_curent ?? 0}
                             {stocProblema(m.stoc_curent) ? ` — ${AVERTIZARE_STOC}` : ''}
