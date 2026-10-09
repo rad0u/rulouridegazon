@@ -2530,3 +2530,14 @@ Radu: „in anumite situatii, se alimenteaza camioane din rezervorul central Sab
 - `get-rezervor-central-miscari` v3 (deploy v4 în Supabase): alimentările se aleg după `ferma_id`, deci și cele externe sunt IEȘIRI din rezervor în raportul de mișcări (afișate „<număr> — <beneficiar> (extern)").
 - Notă: `get-rezervor-central` (nivelul curent cumulat) NU scade alimentările auto (nici cele din flotă, nici cele externe) — doar raportul de mișcări pe zile le scade. Neschimbat aici.
 - Rând de test rămas în DB (`alimentari_masini`, id 87c3557d-bf6c-4a47-9741-331ff374d2e8, „TEST 00 XXX", 1 L, Săbăreni, note `test-sters`) — ștergerea prin MCP a dat timeout; de șters manual.
+
+## 2026-10-09 — Import parcele din SW Maps (coordonate măsurate)
+
+Radu: „putem gasi o solutie pentru desenarea/definirea parcelelor din ferme, astfel incat sa export coordonatele din swmaps, cu care le masor si sa le importam in aplicatie [...] conform cu masuratorile si nu la ochi?"
+- Pe harta fermei (`FarmMap`, doar admin central / `editable`): buton „Importă parcele din SW Maps" (`components/ImportParceleSwMaps.tsx`). Alegi fișierul → tabel cu poligoanele găsite (nume, nr. puncte, suprafață calculată în mp/ha, avertismente) + previzualizare pe hartă (linie întreruptă portocalie, harta se încadrează automat).
+- Pentru fiecare poligon: Ignoră / Parcelă nouă (nume editabil) / Înlocuiește conturul unei parcele existente. Potrivirea automată după nume normalizat (`cheieNume`: „P1" = „Parcela 1" = „1" = „01"). Se avertizează la suprascrierea unui contur existent și la aceeași țintă aleasă de două ori. Opțional: actualizează și `suprafata_mp` din măsurătoare (arată și diferența % față de suprafața din DB).
+- Se salvează `poligon_harta` cu coordonatele din fișier la precizie completă (fără rotunjire/simplificare), ring închis `[lon, lat]`. Activitățile/istoricul parcelei rămân neatinse.
+- `lib/importParcele.ts` (funcții pure): formate KML, GeoJSON, GPX (traseu/rută/waypoint-uri), CSV (delimitator `,` `;` tab; coloane lat/lon detectate după antet; lat/lon inversate se corectează automat; coloană de nume → grupează punctele pe parcele). KMZ și Shapefile NU sunt acceptate (export KML/GeoJSON). Validări: ≥3 puncte distincte, în bbox România (altfel sugerează lat/lon inversate sau alt sistem de coordonate), detectare contur auto-intersectat.
+- `lib/geo.ts`: `ariePoligonMp`, `perimetruPoligonM` (proiecție locală + shoelace).
+- Atenție: hărțile satelit (Esri) pot fi decalate cu câțiva metri față de GNSS; poligonul importat e corect geografic, nu neapărat suprapus perfect pe imaginea satelit.
+- Testat în Node pe KML/GeoJSON/GPX/CSV sintetice (pătrat 100×100 m → 10.000 mp, 400 m perimetru). Nu s-a testat cu un export real SW Maps (format neconfirmat).

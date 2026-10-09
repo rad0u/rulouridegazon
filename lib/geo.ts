@@ -60,3 +60,32 @@ export function generateCirclePolygon(
   }
   return ring;
 }
+
+// Suprafața (mp) a unui poligon dat ca listă de [lat, lon] (nedeschis sau
+// închis — punctul repetat la final nu schimbă rezultatul). Proiecție plană
+// locală (echirectangulară în jurul centroidului) + formula "shoelace": la
+// scara unei parcele, eroarea față de calculul geodezic exact e sub 0,01%.
+export function ariePoligonMp(ring: [number, number][]): number {
+  if (ring.length < 3) return 0;
+  const lat0 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
+  const lon0 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
+  const mPerDeg = (EARTH_RADIUS_M * Math.PI) / 180;
+  const cosLat0 = Math.cos((lat0 * Math.PI) / 180);
+  const pts = ring.map(([lat, lon]) => [(lon - lon0) * mPerDeg * cosLat0, (lat - lat0) * mPerDeg]);
+  let suma = 0;
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    suma += x1 * y2 - x2 * y1;
+  }
+  return Math.abs(suma) / 2;
+}
+
+// Perimetrul (m) al poligonului (ring nedeschis; se închide automat).
+export function perimetruPoligonM(ring: [number, number][]): number {
+  let total = 0;
+  for (let i = 0; i < ring.length; i++) {
+    total += distantaMetri(ring[i], ring[(i + 1) % ring.length]);
+  }
+  return total;
+}

@@ -9,6 +9,7 @@ import { Parcela, PARCELA_COLORS, polygonLatLngs, centroidLatLng } from '../lib/
 import { distantaMetri, generateCirclePolygon, zoomForResolution } from '../lib/geo';
 import ParcelaPanel from './ParcelaPanel';
 import RotatedImageOverlay from './RotatedImageOverlay';
+import ImportParceleSwMaps, { type PreviewImport } from './ImportParceleSwMaps';
 
 // Zoom maxim implicit cât timp nu e nicio imagine suprapusă calibrată (sau
 // încă nu s-a calculat rezoluția ei).
@@ -147,6 +148,19 @@ export default function FarmMap({
   const [tipuriGazonError, setTipuriGazonError] = useState<string | null>(null);
 
   const mapRef = useRef<LeafletMap | null>(null);
+
+  // Previzualizare import (SW Maps): poligoane întrerupte pe hartă înainte de salvare.
+  const [previewImport, setPreviewImport] = useState<PreviewImport[] | null>(null);
+
+  function seteazaPreviewImport(p: PreviewImport[] | null) {
+    const prima = previewImport === null; // încadrăm harta doar la încărcarea fișierului
+    setPreviewImport(p);
+    const map = mapRef.current;
+    if (p && map && prima) {
+      const toate = p.flatMap((x) => x.ring);
+      if (toate.length >= 3) map.fitBounds(L.latLngBounds(toate), { padding: [30, 30], maxZoom: 19 });
+    }
+  }
 
   const centru: [number, number] =
     centruLat !== null && centruLon !== null ? [centruLat, centruLon] : CENTRU_ROMANIA;
@@ -621,6 +635,24 @@ export default function FarmMap({
             );
           })}
 
+          {previewImport &&
+            previewImport.map((x) => {
+              const culoare = x.valid ? '#e65100' : '#9e9e9e';
+              return (
+                <Fragment key={`prev-${x.cheie}`}>
+                  <Polygon
+                    positions={x.ring}
+                    pathOptions={{ color: culoare, weight: 3, dashArray: '8 6', fillColor: culoare, fillOpacity: x.valid ? 0.15 : 0.05 }}
+                    interactive={false}
+                  />
+                  {(() => {
+                    const c = centroidLatLng(x.ring);
+                    return c ? <Marker position={c} icon={parcelaLabelIcon(x.nume)} interactive={false} /> : null;
+                  })()}
+                </Fragment>
+              );
+            })}
+
           {drawMode === 'poligon' && drawingPoints.length > 0 && (
             <>
               <Polyline positions={drawingPoints} pathOptions={{ color: '#d21919', weight: 2 }} />
@@ -841,6 +873,17 @@ export default function FarmMap({
             </div>
           )}
         </div>
+      )}
+
+      {editable && !calibrating && !drawingParcelaId && (
+        <ImportParceleSwMaps
+          fermaId={fermaId}
+          parcele={parcele}
+          onPreview={seteazaPreviewImport}
+          onPolygonSaved={onPolygonSaved}
+          onParcelaUpdated={onParcelaUpdated}
+          onParcelaAdaugata={onParcelaAdaugata}
+        />
       )}
 
       {editable && !calibrating && !drawingParcelaId && (
