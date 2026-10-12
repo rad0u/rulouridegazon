@@ -3,6 +3,8 @@
 import { Fragment, useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { useUserRole } from '../../lib/useUserRole';
+import { inBaza, parseazaNumar } from '../../lib/unitati';
+import CantitateCuUm from '../../components/CantitateCuUm';
 
 type NomenclatorItem = { id: string; nume: string; unitate_masura: string };
 type Ferma = { id: string; nume: string };
@@ -236,6 +238,7 @@ const initialAlimentareForm = {
   ferma_id: '',
   nomenclator_id: '',
   cantitate: '',
+  cantitate_um: '',
   pret_intrare_unitar: '',
   data: aziLocal(),
   furnizor: '',
@@ -267,6 +270,7 @@ function SubstanteAdminCentral() {
   const [editIntrareForm, setEditIntrareForm] = useState<{
     ferma_id: string;
     cantitate: string;
+    cantitate_um: string;
     pret_intrare_unitar: string;
     data: string;
     furnizor: string;
@@ -370,7 +374,7 @@ function SubstanteAdminCentral() {
   }
 
   const substantaSelectata = nomenclator.find((n) => n.id === form.nomenclator_id) ?? null;
-  const cantitateNum = Number(form.cantitate);
+  const cantitateNum = inBaza(parseazaNumar(form.cantitate), form.cantitate_um, substantaSelectata?.unitate_masura ?? '');
   const pretNum = Number(form.pret_intrare_unitar);
   const costTotal =
     form.cantitate && form.pret_intrare_unitar && !Number.isNaN(cantitateNum) && !Number.isNaN(pretNum)
@@ -390,7 +394,7 @@ function SubstanteAdminCentral() {
       setSaveError('Alege substanța din nomenclator.');
       return;
     }
-    if (!form.cantitate || cantitateNum <= 0) {
+    if (!form.cantitate || Number.isNaN(cantitateNum) || cantitateNum <= 0) {
       setSaveError('Completează o cantitate pozitivă.');
       return;
     }
@@ -436,6 +440,7 @@ function SubstanteAdminCentral() {
     setEditIntrareForm({
       ferma_id: i.substante?.ferma_id ?? '',
       cantitate: String(i.cantitate),
+      cantitate_um: i.substante?.unitate_masura ?? '',
       pret_intrare_unitar: String(i.pret_intrare_unitar),
       data: i.data,
       furnizor: i.furnizor ?? '',
@@ -447,7 +452,8 @@ function SubstanteAdminCentral() {
     if (!editIntrareForm) return;
     setEditIntrareError(null);
 
-    const cant = Number(editIntrareForm.cantitate);
+    const bazaEdit = intrari.find((x) => x.id === intrareId)?.substante?.unitate_masura ?? '';
+    const cant = inBaza(parseazaNumar(editIntrareForm.cantitate), editIntrareForm.cantitate_um, bazaEdit);
     const pret = Number(editIntrareForm.pret_intrare_unitar);
 
     if (!editIntrareForm.ferma_id) {
@@ -550,7 +556,6 @@ function SubstanteAdminCentral() {
               <option value="kg">kg</option>
               <option value="l">l</option>
               <option value="buc">buc</option>
-              <option value="t">t</option>
             </select>
           </label>
           <button type="submit" disabled={nomenclatorSaving} style={butonStyle}>
@@ -601,12 +606,14 @@ function SubstanteAdminCentral() {
           </label>
           <label>
             Cantitate {substantaSelectata ? `(${substantaSelectata.unitate_masura})` : ''}
-            <input
-              type="number"
-              min="0"
-              step="0.01"
+            <CantitateCuUm
+              baza={substantaSelectata?.unitate_masura}
               value={form.cantitate}
-              onChange={(e) => updateForm('cantitate', e.target.value)}
+              um={form.cantitate_um}
+              onChange={(v, u) => {
+                setForm((prev) => ({ ...prev, cantitate: v, cantitate_um: u }));
+                setSaveOk(false);
+              }}
               style={inputStyle}
             />
           </label>
@@ -761,12 +768,11 @@ function SubstanteAdminCentral() {
                           </label>
                           <label>
                             Cantitate
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
+                            <CantitateCuUm
+                              baza={i.substante?.unitate_masura}
                               value={editIntrareForm.cantitate}
-                              onChange={(e) => setEditIntrareForm({ ...editIntrareForm, cantitate: e.target.value })}
+                              um={editIntrareForm.cantitate_um}
+                              onChange={(v, u) => setEditIntrareForm({ ...editIntrareForm, cantitate: v, cantitate_um: u })}
                               style={inputStyle}
                             />
                           </label>

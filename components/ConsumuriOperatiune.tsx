@@ -13,6 +13,8 @@
 
 import { useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
+import { formateazaCantitate, inBaza, parseazaNumar } from '../lib/unitati';
+import CantitateCuUm from './CantitateCuUm';
 
 export type LinieConsum = { id: string; nume: string; um: string; cantitate: number };
 
@@ -22,11 +24,12 @@ interface Props {
   onSaved: () => void | Promise<void>;
 }
 
-const fmt = (n: number) => String(Number(n.toFixed(4))).replace('.', ',');
+const fmt = formateazaCantitate;
 
 export default function ConsumuriOperatiune({ substante, materii, onSaved }: Props) {
   const [editare, setEditare] = useState(false);
   const [valori, setValori] = useState<Record<string, string>>({});
+  const [unitati, setUnitati] = useState<Record<string, string>>({});
   const [salvez, setSalvez] = useState(false);
   const [eroare, setEroare] = useState<string | null>(null);
   const [mesaj, setMesaj] = useState<string | null>(null);
@@ -35,8 +38,13 @@ export default function ConsumuriOperatiune({ substante, materii, onSaved }: Pro
 
   function porneste() {
     const v: Record<string, string> = {};
-    for (const l of [...substante, ...materii]) v[l.id] = String(l.cantitate);
+    const u: Record<string, string> = {};
+    for (const l of [...substante, ...materii]) {
+      v[l.id] = fmt(l.cantitate);
+      u[l.id] = l.um;
+    }
     setValori(v);
+    setUnitati(u);
     setEroare(null);
     setMesaj(null);
     setEditare(true);
@@ -49,8 +57,8 @@ export default function ConsumuriOperatiune({ substante, materii, onSaved }: Pro
       ...materii.map((l) => ({ tabel: 'operatiuni_materii_prime' as const, linie: l })),
     ];
     for (const { tabel, linie } of randuri) {
-      const brut = (valori[linie.id] ?? '').trim().replace(',', '.');
-      const noua = Number(brut);
+      const brut = (valori[linie.id] ?? '').trim();
+      const noua = inBaza(parseazaNumar(brut), unitati[linie.id] ?? linie.um, linie.um);
       if (brut === '' || !Number.isFinite(noua) || noua <= 0) {
         setEroare(`Cantitatea pentru „${linie.nume}” trebuie să fie un număr mai mare ca 0.`);
         return;
@@ -109,14 +117,16 @@ export default function ConsumuriOperatiune({ substante, materii, onSaved }: Pro
     <label key={l.id} style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', minWidth: '190px' }}>
       {l.nume}
       <span style={{ display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-        <input
-          type="text"
-          inputMode="decimal"
+        <CantitateCuUm
+          baza={l.um}
           value={valori[l.id] ?? ''}
-          onChange={(e) => setValori((prev) => ({ ...prev, [l.id]: e.target.value }))}
-          style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid #ccc', width: '110px' }}
+          um={unitati[l.id] ?? l.um}
+          onChange={(v, u) => {
+            setValori((prev) => ({ ...prev, [l.id]: v }));
+            setUnitati((prev) => ({ ...prev, [l.id]: u }));
+          }}
+          style={{ padding: '0.4rem', borderRadius: '6px', border: '1px solid #ccc', width: '100px' }}
         />
-        <span>{l.um}</span>
         <span style={{ color: '#888' }}>(era {fmt(l.cantitate)})</span>
       </span>
     </label>
@@ -125,8 +135,9 @@ export default function ConsumuriOperatiune({ substante, materii, onSaved }: Pro
   return (
     <div style={{ border: '1px solid #ccc', borderRadius: '8px', padding: '0.75rem', background: '#fafafa' }}>
       <p style={{ margin: '0 0 0.5rem', fontSize: '0.8rem', color: '#555' }}>
-        Introdu cantitatea corectă, în unitatea de măsură a stocului (cea afișată lângă câmp). Dacă stocul e în
-        bidoane și ai folosit 1 litru dintr-un bidon de 5 litri, scrie 0,2. Stocul se recalculează automat.
+        Introdu cantitatea corectă. Poți alege subunitatea (ml pentru litri, g pentru kilograme) — se convertește
+        automat în unitatea stocului. Ex.: ai folosit 1 litru dintr-un bidon de 5 litri → scrie 1 l (sau 1000 ml).
+        Dacă produsul e ținut în bucăți/bidoane, scrie 0,2 buc. Stocul se recalculează automat.
       </p>
       <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap' }}>
         {substante.map(camp)}

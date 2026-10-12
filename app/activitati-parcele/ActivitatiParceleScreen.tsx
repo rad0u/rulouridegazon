@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 import { useUserRole } from '../../lib/useUserRole';
 import ConsumuriInregistrate from '../../components/ConsumuriInregistrate';
+import CantitateCuUm from '../../components/CantitateCuUm';
+import { inBaza, parseazaNumar } from '../../lib/unitati';
 import {
   LABEL_OPERATIUNE,
   MateriePrima,
@@ -109,8 +111,13 @@ function acumTreiZileISO() {
   return new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
 }
 
-type SubstantaLinie = { substanta_id: string; cantitate: string };
-type MateriePrimaLinie = { materie_prima_id: string; cantitate: string };
+// Cantitatea tastată (cu subunități ml/g) convertită în unitatea de bază a produsului; NaN dacă e invalidă.
+function cantitateInBaza(text: string, um: string, baza: string | undefined): number {
+  return inBaza(parseazaNumar(text), um, baza ?? '');
+}
+
+type SubstantaLinie = { substanta_id: string; cantitate: string; um: string };
+type MateriePrimaLinie = { materie_prima_id: string; cantitate: string; um: string };
 
 type FormSesiune = {
   tipLucrare: TipOperatiune | '';
@@ -418,9 +425,9 @@ export default function ActivitatiParceleScreen() {
   function selecteazaTipLucrare(cheie: string, tip: TipOperatiune | '') {
     actualizeazaForm(cheie, {
       tipLucrare: tip,
-      substanteLinii: TIPURI_CU_SUBSTANTE.includes(tip as TipOperatiune) ? [{ substanta_id: '', cantitate: '' }] : [],
+      substanteLinii: TIPURI_CU_SUBSTANTE.includes(tip as TipOperatiune) ? [{ substanta_id: '', cantitate: '', um: '' }] : [],
       materiiPrimeLinii: TIPURI_CU_MATERII_PRIME.includes(tip as TipOperatiune)
-        ? [{ materie_prima_id: '', cantitate: '' }]
+        ? [{ materie_prima_id: '', cantitate: '', um: '' }]
         : [],
       error: null,
     });
@@ -429,7 +436,7 @@ export default function ActivitatiParceleScreen() {
   function adaugaSubstantaLinie(cheie: string) {
     setForms((prev) => ({
       ...prev,
-      [cheie]: { ...prev[cheie], substanteLinii: [...prev[cheie].substanteLinii, { substanta_id: '', cantitate: '' }] },
+      [cheie]: { ...prev[cheie], substanteLinii: [...prev[cheie].substanteLinii, { substanta_id: '', cantitate: '', um: '' }] },
     }));
   }
 
@@ -455,7 +462,7 @@ export default function ActivitatiParceleScreen() {
       ...prev,
       [cheie]: {
         ...prev[cheie],
-        materiiPrimeLinii: [...prev[cheie].materiiPrimeLinii, { materie_prima_id: '', cantitate: '' }],
+        materiiPrimeLinii: [...prev[cheie].materiiPrimeLinii, { materie_prima_id: '', cantitate: '', um: '' }],
       },
     }));
   }
@@ -517,7 +524,7 @@ export default function ActivitatiParceleScreen() {
         return;
       }
       for (const linie of liniiSubstanteValide) {
-        const cant = Number(linie.cantitate);
+        const cant = cantitateInBaza(linie.cantitate, linie.um, substanteToate.find((s) => s.id === linie.substanta_id)?.unitate_masura);
         if (Number.isNaN(cant) || cant <= 0) {
           actualizeazaForm(cheie, { error: 'Cantitatea trebuie să fie un număr pozitiv pentru fiecare substanță.' });
           return;
@@ -531,7 +538,7 @@ export default function ActivitatiParceleScreen() {
         return;
       }
       for (const linie of liniiMateriiPrimeValide) {
-        const cant = Number(linie.cantitate);
+        const cant = cantitateInBaza(linie.cantitate, linie.um, materiiPrimeToate.find((m) => m.id === linie.materie_prima_id)?.unitate_masura);
         if (Number.isNaN(cant) || cant <= 0) {
           actualizeazaForm(cheie, {
             error: 'Cantitatea trebuie să fie un număr pozitiv pentru fiecare materie primă.',
@@ -578,7 +585,7 @@ export default function ActivitatiParceleScreen() {
       const rows = liniiSubstanteValide.map((l) => ({
         operatiune_id: primaOperatiuneId,
         substanta_id: l.substanta_id,
-        cantitate: Number(l.cantitate),
+        cantitate: cantitateInBaza(l.cantitate, l.um, substanteToate.find((s) => s.id === l.substanta_id)?.unitate_masura),
       }));
       const { error: substErr } = await supabase.from('operatiuni_substante').insert(rows);
       if (substErr) {
@@ -595,7 +602,7 @@ export default function ActivitatiParceleScreen() {
       const rows = liniiMateriiPrimeValide.map((l) => ({
         operatiune_id: primaOperatiuneId,
         materie_prima_id: l.materie_prima_id,
-        cantitate: Number(l.cantitate),
+        cantitate: cantitateInBaza(l.cantitate, l.um, materiiPrimeToate.find((m) => m.id === l.materie_prima_id)?.unitate_masura),
       }));
       const { error: mpErr } = await supabase.from('operatiuni_materii_prime').insert(rows);
       if (mpErr) {
@@ -898,15 +905,19 @@ export default function ActivitatiParceleScreen() {
                           {AVERTIZARE_STOC}
                         </span>
                       )}
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Cantitate"
-                        value={linie.cantitate}
-                        onChange={(e) => actualizeazaSubstantaLinie(cheie, index, 'cantitate', e.target.value)}
-                        style={{ flex: '1 1 100px', padding: '0.5rem' }}
-                      />
+                      <span style={{ flex: '1 1 140px' }}>
+                        <CantitateCuUm
+                          baza={substanteToate.find((s) => s.id === linie.substanta_id)?.unitate_masura}
+                          placeholder="Cantitate"
+                          value={linie.cantitate}
+                          um={linie.um}
+                          onChange={(v, u) => {
+                            actualizeazaSubstantaLinie(cheie, index, 'cantitate', v);
+                            actualizeazaSubstantaLinie(cheie, index, 'um', u);
+                          }}
+                          style={{ padding: '0.5rem' }}
+                        />
+                      </span>
                       <button
                         type="button"
                         onClick={() => eliminaSubstantaLinie(cheie, index)}
@@ -956,15 +967,19 @@ export default function ActivitatiParceleScreen() {
                           {AVERTIZARE_STOC}
                         </span>
                       )}
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        placeholder="Cantitate"
-                        value={linie.cantitate}
-                        onChange={(e) => actualizeazaMateriePrimaLinie(cheie, index, 'cantitate', e.target.value)}
-                        style={{ flex: '1 1 100px', padding: '0.5rem' }}
-                      />
+                      <span style={{ flex: '1 1 140px' }}>
+                        <CantitateCuUm
+                          baza={materiiPrimeToate.find((m) => m.id === linie.materie_prima_id)?.unitate_masura}
+                          placeholder="Cantitate"
+                          value={linie.cantitate}
+                          um={linie.um}
+                          onChange={(v, u) => {
+                            actualizeazaMateriePrimaLinie(cheie, index, 'cantitate', v);
+                            actualizeazaMateriePrimaLinie(cheie, index, 'um', u);
+                          }}
+                          style={{ padding: '0.5rem' }}
+                        />
+                      </span>
                       <button
                         type="button"
                         onClick={() => eliminaMateriePrimaLinie(cheie, index)}
