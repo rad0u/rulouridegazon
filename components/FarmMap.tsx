@@ -879,6 +879,7 @@ export default function FarmMap({
         <ImportParceleSwMaps
           fermaId={fermaId}
           parcele={parcele}
+          centruFerma={centruLat !== null && centruLon !== null ? [centruLat, centruLon] : null}
           onPreview={seteazaPreviewImport}
           onPolygonSaved={onPolygonSaved}
           onParcelaUpdated={onParcelaUpdated}

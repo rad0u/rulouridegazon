@@ -8,7 +8,8 @@
 
 import { useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Parcela, polygonLatLngs } from '../lib/parcelaTypes';
+import { Parcela, polygonLatLngs, centroidLatLng } from '../lib/parcelaTypes';
+import { distantaMetri } from '../lib/geo';
 import { parseazaFisier, cheieNume, type CandidatPoligon } from '../lib/importParcele';
 
 export type PreviewImport = { cheie: string; nume: string; ring: [number, number][]; valid: boolean };
@@ -19,11 +20,16 @@ type Rand = {
   c: CandidatPoligon;
   actiune: Actiune;
   numeNou: string;
+  nota: string | null; // ex. nume duplicat în fermă, poligon departe de ferma curentă
 };
+
+// Peste această distanță față de centrul fermei, poligonul e suspect (fișier de la altă fermă?).
+const PRAG_DEPARTE_KM = 15;
 
 interface Props {
   fermaId: string;
   parcele: Parcela[];
+  centruFerma: [number, number] | null; // [lat, lon] — pentru verificarea „fișier de la altă fermă”
   onPreview: (p: PreviewImport[] | null) => void;
   onPolygonSaved: (parcelaId: string, poligon: Parcela['poligon_harta']) => void;
   onParcelaUpdated: (parcela: Parcela) => void;
@@ -32,20 +38,46 @@ interface Props {
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ro-RO');
 
-function actiuneImplicita(c: CandidatPoligon, parcele: Parcela[]): Actiune {
-  if (!c.valid) return 'ignora';
+function actiuneImplicita(
+  c: CandidatPoligon,
+  parcele: Parcela[],
+  centruFerma: [number, number] | null,
+): { actiune: Actiune; nota: string | null } {
+  if (!c.valid) return { actiune: 'ignora', nota: null };
+
+  // Poligon departe de centrul fermei -> probabil fișierul altei ferme: nu propunem nicio acțiune.
+  if (centruFerma) {
+    const centroid = centroidLatLng(c.ring);
+    if (centroid) {
+      const km = distantaMetri(centroid, centruFerma) / 1000;
+      if (km > PRAG_DEPARTE_KM) {
+        return {
+          actiune: 'ignora',
+          nota: `Poligonul e la ~${Math.round(km)} km de centrul acestei ferme — fișier de la altă fermă? (ignorat implicit)`,
+        };
+      }
+    }
+  }
+
   if (c.nume) {
     const k = cheieNume(c.nume);
-    const gasita = k ? parcele.find((p) => cheieNume(p.nume) === k) : undefined;
-    if (gasita) return gasita.id;
-    return 'nou';
+    const potrivite = k ? parcele.filter((p) => cheieNume(p.nume) === k) : [];
+    if (potrivite.length === 1) return { actiune: potrivite[0].id, nota: null };
+    if (potrivite.length > 1) {
+      return {
+        actiune: 'ignora',
+        nota: `În fermă există ${potrivite.length} parcele cu acest nume — alege manual care e înlocuită.`,
+      };
+    }
+    return { actiune: 'nou', nota: null };
   }
-  return 'ignora';
+  return { actiune: 'ignora', nota: null };
 }
 
 export default function ImportParceleSwMaps({
   fermaId,
   parcele,
+  centruFerma,
   onPreview,
   onPolygonSaved,
   onParcelaUpdated,
@@ -104,11 +136,10 @@ export default function ImportParceleSwMaps({
     try {
       const text = await f.text();
       const rez = parseazaFisier(f.name, text);
-      const r: Rand[] = rez.candidati.map((c) => ({
-        c,
-        actiune: actiuneImplicita(c, parcele),
-        numeNou: c.nume,
-      }));
+      const r: Rand[] = rez.candidati.map((c) => {
+        const { actiune, nota } = actiuneImplicita(c, parcele, centruFerma);
+        return { c, actiune, numeNou: c.nume, nota };
+      });
       setNumeFisier(f.name);
       setFormat(rez.format);
       setAvertismente(rez.avertismente);
@@ -258,6 +289,7 @@ export default function ImportParceleSwMaps({
                       <td style={{ padding: '0.3rem' }}>
                         {r.c.nume || <em style={{ color: '#888' }}>(fără nume)</em>}
                         <div style={{ color: '#888' }}>{r.c.ring.length} puncte</div>
+                        {r.nota && <div style={{ color: '#b00020' }}>{r.nota}</div>}
                         {r.c.avertismente.map((a, j) => (
                           <div key={j} style={{ color: r.c.valid ? '#8a5a00' : '#b00020' }}>
                             {a}
