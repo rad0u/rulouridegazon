@@ -423,3 +423,90 @@ export function cheieNume(nume: string): string {
   if (/^p\d/.test(s)) s = s.slice(1);
   return s.replace(/^0+(?=\d)/, '');
 }
+
+// ------------------------------------------------------------ arhive ZIP/KMZ
+
+function u16(b: Uint8Array, o: number): number {
+  return b[o] | (b[o + 1] << 8);
+}
+function u32(b: Uint8Array, o: number): number {
+  return (b[o] | (b[o + 1] << 8) | (b[o + 2] << 16) | (b[o + 3] << 24)) >>> 0;
+}
+
+async function dezarhiveazaIntrare(date: Uint8Array, metoda: number): Promise<string> {
+  if (metoda === 0) return new TextDecoder('utf-8').decode(date);
+  if (metoda !== 8) throw new Error(`metodă de compresie ${metoda} nesuportată`);
+  const flux = new Blob([date as unknown as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const buf = await new Response(flux).arrayBuffer();
+  return new TextDecoder('utf-8').decode(buf);
+}
+
+// Citește un .zip / .kmz (cum exportă SW Maps) și parsează fișierele de
+// coordonate din el (GeoJSON, KML, GPX; CSV doar dacă nu există alt format).
+// Dacă arhiva are mai multe fișiere utile, poligoanele lor se adună în aceeași listă.
+export async function parseazaArhiva(bytes: Uint8Array): Promise<RezultatParsare> {
+  // End Of Central Directory
+  let eocd = -1;
+  for (let i = bytes.length - 22; i >= Math.max(0, bytes.length - 22 - 65535); i--) {
+    if (u32(bytes, i) === 0x06054b50) {
+      eocd = i;
+      break;
+    }
+  }
+  if (eocd < 0) throw new Error('Arhivă ZIP invalidă (nu am găsit directorul central).');
+  const total = u16(bytes, eocd + 10);
+  let o = u32(bytes, eocd + 16);
+
+  type Intrare = { nume: string; metoda: number; compSize: number; offsetLocal: number };
+  const intrari: Intrare[] = [];
+  for (let k = 0; k < total; k++) {
+    if (u32(bytes, o) !== 0x02014b50) break;
+    const metoda = u16(bytes, o + 10);
+    const compSize = u32(bytes, o + 20);
+    const lungNume = u16(bytes, o + 28);
+    const lungExtra = u16(bytes, o + 30);
+    const lungComentariu = u16(bytes, o + 32);
+    const offsetLocal = u32(bytes, o + 42);
+    const nume = new TextDecoder('utf-8').decode(bytes.subarray(o + 46, o + 46 + lungNume));
+    intrari.push({ nume, metoda, compSize, offsetLocal });
+    o += 46 + lungNume + lungExtra + lungComentariu;
+  }
+
+  const utile = intrari.filter(
+    (e) => !e.nume.endsWith('/') && !e.nume.includes('__MACOSX') && !/(^|\/)\._/.test(e.nume),
+  );
+  const ext = (n: string) => (n.toLowerCase().match(/\.([a-z0-9]+)$/)?.[1] ?? '');
+  const geo = utile.filter((e) => ['geojson', 'json', 'kml', 'gpx'].includes(ext(e.nume)));
+  const alese = geo.length > 0 ? geo : utile.filter((e) => ext(e.nume) === 'csv');
+  if (alese.length === 0) {
+    const gasite = utile.map((e) => e.nume).join(', ') || 'nimic';
+    throw new Error(
+      `În arhivă nu am găsit GeoJSON / KML / GPX / CSV (conține: ${gasite}). Exportă din SW Maps ca GeoJSON sau KML.`,
+    );
+  }
+
+  const candidati: CandidatPoligon[] = [];
+  const avertismente: string[] = [];
+  let format: RezultatParsare['format'] = 'GeoJSON';
+  const eroriFisiere: string[] = [];
+  for (let idx = 0; idx < alese.length; idx++) {
+    const e = alese[idx];
+    try {
+      if (u32(bytes, e.offsetLocal) !== 0x04034b50) throw new Error('antet local invalid');
+      const start = e.offsetLocal + 30 + u16(bytes, e.offsetLocal + 26) + u16(bytes, e.offsetLocal + 28);
+      const text = await dezarhiveazaIntrare(bytes.subarray(start, start + e.compSize), e.metoda);
+      const r = parseazaFisier(e.nume, text);
+      format = r.format;
+      avertismente.push(...r.avertismente);
+      for (const c of r.candidati) candidati.push({ ...c, cheie: `${idx}-${c.cheie}` });
+    } catch (err) {
+      eroriFisiere.push(`${e.nume}: ${err instanceof Error ? err.message : 'eroare'}`);
+    }
+  }
+  if (candidati.length === 0) {
+    throw new Error(`Nu am găsit poligoane în arhivă. ${eroriFisiere.join('; ')}`.trim());
+  }
+  if (alese.length > 1) avertismente.unshift(`Arhiva are ${alese.length} fișiere (${alese.map((e) => e.nume).join(', ')}); le-am citit pe toate.`);
+  avertismente.push(...eroriFisiere.map((m) => `Fișier sărit — ${m}`));
+  return { format, candidati, avertismente };
+}

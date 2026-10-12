@@ -10,7 +10,7 @@ import { useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Parcela, polygonLatLngs, centroidLatLng } from '../lib/parcelaTypes';
 import { distantaMetri } from '../lib/geo';
-import { parseazaFisier, cheieNume, type CandidatPoligon } from '../lib/importParcele';
+import { parseazaFisier, parseazaArhiva, cheieNume, type CandidatPoligon } from '../lib/importParcele';
 
 export type PreviewImport = { cheie: string; nume: string; ring: [number, number][]; valid: boolean };
 
@@ -137,8 +137,10 @@ export default function ImportParceleSwMaps({
     setEroare(null);
     setMesaj(null);
     try {
-      const text = await f.text();
-      const rez = parseazaFisier(f.name, text);
+      const eArhiva = /\.(zip|kmz)$/i.test(f.name);
+      const rez = eArhiva
+        ? await parseazaArhiva(new Uint8Array(await f.arrayBuffer()))
+        : parseazaFisier(f.name, await f.text());
       const r: Rand[] = rez.candidati.map((c) => {
         const { actiune, nota } = actiuneImplicita(c, parcele, centruFerma);
         return { c, actiune, numeNou: c.nume, implicita: actiune, nota };
@@ -267,10 +269,10 @@ export default function ImportParceleSwMaps({
       <p style={{ fontSize: '0.85rem', color: '#555', marginTop: 0 }}>
         În SW Maps exportă măsurătorile ca <strong>KML</strong> (sau GeoJSON / GPX / CSV), în sistem WGS84 (lat/lon), apoi
         alege fișierul. Numele din fișier se potrivesc automat cu parcelele existente (ex. „P1” = „Parcela 1” = „1”).
-        KMZ și Shapefile nu sunt acceptate direct.
+        Poți alege direct și arhiva .zip / .kmz exportată de SW Maps. Shapefile nu e acceptat.
       </p>
 
-      <input ref={inputRef} type="file" accept=".kml,.geojson,.json,.gpx,.csv,.txt" onChange={(e) => void alegeFisier(e)} />
+      <input ref={inputRef} type="file" accept=".zip,.kmz,.kml,.geojson,.json,.gpx,.csv,.txt" onChange={(e) => void alegeFisier(e)} />
 
       {eroare && <p style={{ color: '#b00020' }}>{eroare}</p>}
 
