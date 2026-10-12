@@ -202,37 +202,136 @@ function parseazaGpx(text: string): Brut[] {
 
 // -------------------------------------------------------------------- CSV ---
 
-function imparteLinieCsv(linie: string, delim: string): string[] {
-  const out: string[] = [];
-  let curent = '';
+// Parser CSV pe înregistrări (câmpurile între ghilimele pot conține delimitatori
+// și rânduri noi — SW Maps pune în "Remarks" câte un "\n").
+function parseazaInregistrariCsv(text: string, delim: string): string[][] {
+  const randuri: string[][] = [];
+  let camp = '';
+  let rand: string[] = [];
   let inChei = false;
-  for (let i = 0; i < linie.length; i++) {
-    const ch = linie[i];
-    if (ch === '"') {
-      if (inChei && linie[i + 1] === '"') {
-        curent += '"';
-        i++;
-      } else inChei = !inChei;
-    } else if (ch === delim && !inChei) {
-      out.push(curent);
-      curent = '';
-    } else curent += ch;
+  const inchideCamp = () => {
+    rand.push(camp.trim());
+    camp = '';
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inChei) {
+      if (ch === '"') {
+        if (text[i + 1] === '"') {
+          camp += '"';
+          i++;
+        } else inChei = false;
+      } else camp += ch;
+    } else if (ch === '"') {
+      inChei = true;
+    } else if (ch === delim) {
+      inchideCamp();
+    } else if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && text[i + 1] === '\n') i++;
+      inchideCamp();
+      if (rand.some((c) => c !== '')) randuri.push(rand);
+      rand = [];
+    } else camp += ch;
   }
-  out.push(curent);
-  return out.map((c) => c.trim());
+  inchideCamp();
+  if (rand.some((c) => c !== '')) randuri.push(rand);
+  return randuri;
+}
+
+// WKT ("POLYGON Z (lon lat alt, lon lat alt, ...)") cum îl scrie SW Maps în CSV.
+// Atenție: pe telefoane cu limba română numerele au VIRGULĂ zecimală, iar
+// punctele sunt tot separate prin virgulă, fără spațiu:
+//   POLYGON Z (25,8936 44,4854 135,005,25,8936 44,4854 134,909, ...)
+// Ultimul număr al unui punct apare lipit de primul al următorului ("135,005,25,8936").
+function coordonateWkt(inner: string, dim: number): [number, number][] | null {
+  const puncte: [number, number][] = [];
+  if (inner.includes('.')) {
+    // zecimale cu punct: puncte separate prin virgulă
+    for (const part of inner.split(',')) {
+      const t = part.trim().split(/\s+/);
+      if (t.length < 2) continue;
+      const lon = numar(t[0]);
+      const lat = numar(t[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lon)) puncte.push([lat, lon]);
+    }
+    return puncte;
+  }
+  // zecimale cu virgulă
+  const tokeni = inner.trim().split(/\s+/);
+  const coada: string[] = [];
+  const ultimul = dim - 1; // indexul ultimei coordonate dintr-un punct
+  let k = 0; // poziția în punct
+  let curent: string[] = [];
+  for (const tok of tokeni) {
+    if (k === ultimul) {
+      const m = tok.match(/^(-?\d+(?:,\d+)?),(-?\d+,\d+)$/);
+      if (m) {
+        curent.push(m[1]);
+        coada.push(...curent);
+        curent = [m[2]];
+        k = 1;
+        continue;
+      }
+    }
+    curent.push(tok);
+    k++;
+    if (k === dim) {
+      coada.push(...curent);
+      curent = [];
+      k = 0;
+    }
+  }
+  if (curent.length > 0) return null;
+  for (let i = 0; i + dim <= coada.length; i += dim) {
+    const lon = numar(coada[i]);
+    const lat = numar(coada[i + 1]);
+    if (Number.isFinite(lat) && Number.isFinite(lon)) puncte.push([lat, lon]);
+  }
+  return puncte;
+}
+
+function parseazaWkt(geom: string): { puncte: [number, number][]; sursa: string } | null {
+  const m = geom.trim().match(/^(POLYGON|LINESTRING)\s*(Z|M|ZM)?\s*\(+([^)]*)\)/i);
+  if (!m) return null;
+  const tip = m[1].toUpperCase();
+  const dim = 2 + (m[2] ? m[2].length : 0);
+  const puncte = coordonateWkt(m[3], dim);
+  if (!puncte) return null;
+  return { puncte, sursa: tip === 'POLYGON' ? 'Polygon' : 'Linie' };
 }
 
 function parseazaCsv(text: string): { brute: Brut[]; avertismente: string[] } {
   const avertismente: string[] = [];
-  const linii = text.replace(/^﻿/, '').split(/\r?\n/).filter((l) => l.trim() !== '');
-  if (linii.length < 2) throw new Error('Fișierul CSV pare gol.');
-
-  const antet = linii[0];
+  const clean = text.replace(/^﻿/, '');
+  const primaLinie = clean.split(/\r?\n/, 1)[0];
   const delim = [';', '\t', ','].reduce((best, d) =>
-    antet.split(d).length > antet.split(best).length ? d : best,
+    primaLinie.split(d).length > primaLinie.split(best).length ? d : best,
   );
-  const cap = imparteLinieCsv(antet, delim).map((h) => h.toLowerCase());
+  const tabel = parseazaInregistrariCsv(clean, delim);
+  if (tabel.length < 2) throw new Error('Fișierul CSV pare gol.');
 
+  const cap = tabel[0].map((h) => h.toLowerCase());
+  const randuri = tabel.slice(1);
+
+  // Varianta 1: coloană "Geometry" cu WKT (export SW Maps pe layer: POLYGON / LINESTRING).
+  const idxGeom = cap.findIndex((h) => h === 'geometry' || h === 'wkt' || h === 'geom');
+  if (idxGeom >= 0 && randuri.some((r) => /^(POLYGON|LINESTRING)/i.test(r[idxGeom] ?? ''))) {
+    const idxNumeW = cap.findIndex((h) => /^(name|nume|feature name|parcela|parcel|label)$/.test(h));
+    const brute: Brut[] = [];
+    let sarite = 0;
+    for (const r of randuri) {
+      const w = parseazaWkt(r[idxGeom] ?? '');
+      if (!w) {
+        sarite++;
+        continue;
+      }
+      brute.push({ nume: idxNumeW >= 0 ? r[idxNumeW] ?? '' : '', puncte: w.puncte, sursa: w.sursa });
+    }
+    if (sarite > 0) avertismente.push(`${sarite} rând(uri) cu geometrie necunoscută (puncte, multi-poligoane etc.) au fost sărite.`);
+    return { brute, avertismente };
+  }
+
+  // Varianta 2: puncte cu coloane de latitudine / longitudine.
   const idxLat = cap.findIndex((h) => /^(lat|latitude|latitudine|y)$/.test(h) || h.includes('latitud'));
   const idxLon = cap.findIndex(
     (h) => /^(lon|lng|long|longitude|longitudine|x)$/.test(h) || h.includes('longitud'),
@@ -246,10 +345,9 @@ function parseazaCsv(text: string): { brute: Brut[]; avertismente: string[] } {
     (h, i) =>
       i !== idxLatF &&
       i !== idxLonF &&
-      /^(name|nume|parcela|parcel|feature|feature name|feature_name|group|grup|poligon|polygon|layer|fid)$/.test(h),
+      /^(name|nume|parcela|parcel|feature|feature name|feature_name|track name|group|grup|poligon|polygon|layer|fid)$/.test(h),
   );
 
-  const randuri = linii.slice(1).map((l) => imparteLinieCsv(l, delim));
   const grupuri = new Map<string, [number, number][]>();
   const toate: [number, number][] = [];
   for (const r of randuri) {
@@ -500,8 +598,15 @@ export async function parseazaArhiva(bytes: Uint8Array): Promise<RezultatParsare
       avertismente.push(...r.avertismente);
       for (const c of r.candidati) candidati.push({ ...c, cheie: `${idx}-${c.cheie}` });
     } catch (err) {
-      eroriFisiere.push(`${e.nume}: ${err instanceof Error ? err.message : 'eroare'}`);
+      const mesaj = err instanceof Error ? err.message : 'eroare';
+      if (!/pare gol/.test(mesaj)) eroriFisiere.push(`${e.nume}: ${mesaj}`); // fișierele goale (ex. PHOTOS) se sar fără zgomot
     }
+  }
+  // Export CSV SW Maps: fișierele de puncte (FEATURE_POINTS, TRACK_POINTS) repetă aceleași
+  // vârfuri ca fișierele de layer (poligoane WKT) — dacă avem poligoane reale, le ignorăm pe cele din puncte.
+  if (candidati.some((c) => c.sursa === 'Polygon') && candidati.some((c) => c.sursa === 'Puncte CSV')) {
+    for (let i = candidati.length - 1; i >= 0; i--) if (candidati[i].sursa === 'Puncte CSV') candidati.splice(i, 1);
+    avertismente.push('Am ignorat fișierele de puncte din arhivă (vârfurile poligoanelor sunt deja în fișierele de layer).');
   }
   if (candidati.length === 0) {
     throw new Error(`Nu am găsit poligoane în arhivă. ${eroriFisiere.join('; ')}`.trim());
