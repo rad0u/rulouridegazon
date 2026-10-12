@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Parcela } from '../lib/parcelaTypes';
 import { LABEL_OPERATIUNE, Operatiune } from '../lib/operatiuniTypes';
+import ConsumuriOperatiune from './ConsumuriOperatiune';
 
 interface ParcelaPanelProps {
   parcela: Parcela;
@@ -112,7 +113,7 @@ export default function ParcelaPanel({
     const { data: rows, error: fetchError } = await supabase
       .from('operatiuni')
       .select(
-        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,operatiuni_substante(cantitate,substante(nume,unitate_masura)),operatiuni_materii_prime(cantitate,materii_prime(nume,unitate_masura))',
+        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,operatiuni_substante(id,cantitate,substante(nume,unitate_masura)),operatiuni_materii_prime(id,cantitate,materii_prime(nume,unitate_masura))',
       )
       .eq('parcela_id', parcela.id)
       .order('data', { ascending: false });
@@ -255,22 +256,42 @@ export default function ParcelaPanel({
                 <strong>{op.data}</strong> — {LABEL_OPERATIUNE[op.tip]}
                 {op.ore_lucru != null && <> · {op.ore_lucru}h</>}
                 {op.cantitate_mp_recoltat != null && <> · {op.cantitate_mp_recoltat} mp recoltați</>}
+                {editable ? (
+                  <ConsumuriOperatiune
+                    substante={(op.operatiuni_substante ?? []).map((s) => ({
+                      id: s.id,
+                      nume: s.substante?.nume ?? '—',
+                      um: s.substante?.unitate_masura ?? '',
+                      cantitate: Number(s.cantitate),
+                    }))}
+                    materii={(op.operatiuni_materii_prime ?? []).map((m) => ({
+                      id: m.id,
+                      nume: m.materii_prime?.nume ?? '—',
+                      um: m.materii_prime?.unitate_masura ?? '',
+                      cantitate: Number(m.cantitate),
+                    }))}
+                    onSaved={loadIstoric}
+                  />
+                ) : (
+                  <>
                 {op.operatiuni_substante && op.operatiuni_substante.length > 0 && (
-                  <div style={{ fontSize: '0.85rem', color: '#555' }}>
-                    {op.operatiuni_substante
-                      .map((s) => `${s.substante?.nume ?? '—'}: ${s.cantitate} ${s.substante?.unitate_masura ?? ''}`)
-                      .join(', ')}
-                  </div>
-                )}
-                {op.operatiuni_materii_prime && op.operatiuni_materii_prime.length > 0 && (
-                  <div style={{ fontSize: '0.85rem', color: '#555' }}>
-                    {op.operatiuni_materii_prime
-                      .map(
-                        (m) =>
-                          `${m.materii_prime?.nume ?? '—'}: ${m.cantitate} ${m.materii_prime?.unitate_masura ?? ''}`,
-                      )
-                      .join(', ')}
-                  </div>
+                    <div style={{ fontSize: '0.85rem', color: '#555' }}>
+                      {op.operatiuni_substante
+                        .map((s) => `${s.substante?.nume ?? '—'}: ${s.cantitate} ${s.substante?.unitate_masura ?? ''}`)
+                        .join(', ')}
+                    </div>
+                  )}
+                  {op.operatiuni_materii_prime && op.operatiuni_materii_prime.length > 0 && (
+                    <div style={{ fontSize: '0.85rem', color: '#555' }}>
+                      {op.operatiuni_materii_prime
+                        .map(
+                          (m) =>
+                            `${m.materii_prime?.nume ?? '—'}: ${m.cantitate} ${m.materii_prime?.unitate_masura ?? ''}`,
+                        )
+                        .join(', ')}
+                    </div>
+                  )}
+                  </>
                 )}
                 {op.note && <div style={{ fontSize: '0.85rem', color: '#555' }}>{op.note}</div>}
               </li>

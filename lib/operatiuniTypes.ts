@@ -50,6 +50,7 @@ export type Substanta = {
 };
 
 export type SubstantaOperatiune = {
+  id: string;
   cantitate: number;
   substante: { nume: string; unitate_masura: string } | null;
 };
@@ -64,6 +65,7 @@ export type MateriePrima = {
 };
 
 export type MateriePrimaOperatiune = {
+  id: string;
   cantitate: number;
   materii_prime: { nume: string; unitate_masura: string } | null;
 };

@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 import { useUserRole } from '../../lib/useUserRole';
+import ConsumuriInregistrate from '../../components/ConsumuriInregistrate';
 import {
   LABEL_OPERATIUNE,
   MateriePrima,
@@ -1001,6 +1002,17 @@ export default function ActivitatiParceleScreen() {
           );
         })}
       </div>
+
+      {/* 2026-10-12 (Radu): corectarea cantităților de consumabile deja confirmate
+          (ex. un bidon scăzut în loc de un litru) — stocul se recalculează în DB. */}
+      <ConsumuriInregistrate
+        fermaId={fermaActiva}
+        deLa={deLa}
+        panaLa={panaLa}
+        onModificat={async () => {
+          if (fermaActiva) await incarcaConsumabile(fermaActiva);
+        }}
+      />
 
       {/* Fișa de teren (doar la tipărire) — vezi nota v7 de sus. */}
       <section className="fisa-teren">
