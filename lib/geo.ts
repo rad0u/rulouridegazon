@@ -61,17 +61,30 @@ export function generateCirclePolygon(
   return ring;
 }
 
-// Suprafața (mp) a unui poligon dat ca listă de [lat, lon] (nedeschis sau
-// închis — punctul repetat la final nu schimbă rezultatul). Proiecție plană
-// locală (echirectangulară în jurul centroidului) + formula "shoelace": la
-// scara unei parcele, eroarea față de calculul geodezic exact e sub 0,01%.
-export function ariePoligonMp(ring: [number, number][]): number {
-  if (ring.length < 3) return 0;
+// Proiecție plană locală (metri) pe elipsoidul WGS84, centrată pe media
+// punctelor: grad de latitudine = π/180·M (raza meridianului), grad de
+// longitudine = π/180·N·cosφ (raza verticalului primar). Pe o sferă (R=6371 km)
+// suprafețele ies cu ~0,27% prea mici la latitudinea României; cu elipsoidul
+// coincid cu SW Maps (diferență < 0,01%).
+export function proiectieLocala(ring: [number, number][]): [number, number][] {
   const lat0 = ring.reduce((s, p) => s + p[0], 0) / ring.length;
   const lon0 = ring.reduce((s, p) => s + p[1], 0) / ring.length;
-  const mPerDeg = (EARTH_RADIUS_M * Math.PI) / 180;
-  const cosLat0 = Math.cos((lat0 * Math.PI) / 180);
-  const pts = ring.map(([lat, lon]) => [(lon - lon0) * mPerDeg * cosLat0, (lat - lat0) * mPerDeg]);
+  const a = 6378137.0;
+  const e2 = 0.00669437999014;
+  const phi = (lat0 * Math.PI) / 180;
+  const w = 1 - e2 * Math.sin(phi) * Math.sin(phi);
+  const M = (a * (1 - e2)) / Math.pow(w, 1.5);
+  const N = a / Math.sqrt(w);
+  const rad = Math.PI / 180;
+  return ring.map(([lat, lon]) => [(lon - lon0) * rad * N * Math.cos(phi), (lat - lat0) * rad * M]);
+}
+
+// Suprafața (mp) a unui poligon dat ca listă de [lat, lon] (nedeschis sau
+// închis — punctul repetat la final nu schimbă rezultatul). Formula "shoelace"
+// pe proiecția locală de mai sus.
+export function ariePoligonMp(ring: [number, number][]): number {
+  if (ring.length < 3) return 0;
+  const pts = proiectieLocala(ring);
   let suma = 0;
   for (let i = 0; i < pts.length; i++) {
     const [x1, y1] = pts[i];
@@ -83,9 +96,13 @@ export function ariePoligonMp(ring: [number, number][]): number {
 
 // Perimetrul (m) al poligonului (ring nedeschis; se închide automat).
 export function perimetruPoligonM(ring: [number, number][]): number {
+  if (ring.length < 2) return 0;
+  const pts = proiectieLocala(ring);
   let total = 0;
-  for (let i = 0; i < ring.length; i++) {
-    total += distantaMetri(ring[i], ring[(i + 1) % ring.length]);
+  for (let i = 0; i < pts.length; i++) {
+    const [x1, y1] = pts[i];
+    const [x2, y2] = pts[(i + 1) % pts.length];
+    total += Math.hypot(x2 - x1, y2 - y1);
   }
   return total;
 }

@@ -14,7 +14,7 @@
 // și se așteaptă în WGS84 (lat/lon în grade, ca la orice export GPS/GNSS).
 // Funcții pure, fără dependențe de browser (testabile în Node).
 
-import { ariePoligonMp, perimetruPoligonM } from './geo';
+import { ariePoligonMp, perimetruPoligonM, proiectieLocala } from './geo';
 
 export type CandidatPoligon = {
   cheie: string;
@@ -289,14 +289,31 @@ function parseazaCsv(text: string): { brute: Brut[]; avertismente: string[] } {
 
 // --------------------------------------------------------- curățare/validare
 
-function seIntersecteaza(a: [number, number][]): boolean {
-  const n = a.length;
+// Un contur măsurat din mers (GNSS, câte un punct pe secundă) are aproape
+// mereu mici bucle de zgomot, mai ales în colțuri unde operatorul stă pe loc —
+// acestea sunt inofensive. Semnalăm doar încrucișările dintre părți ale
+// conturului aflate departe unele de altele ca DISTANȚĂ PARCURSĂ pe contur
+// (ex. puncte în ordine greșită, "fundă", traseu care se întoarce peste el).
+function seIntersecteaza(ring: [number, number][]): boolean {
+  const n = ring.length;
+  const a = proiectieLocala(ring);
+  const cum: number[] = [0]; // distanța cumulată până la începutul laturii i
+  for (let i = 0; i < n; i++) {
+    const [x1, y1] = a[i];
+    const [x2, y2] = a[(i + 1) % n];
+    cum.push(cum[i] + Math.hypot(x2 - x1, y2 - y1));
+  }
+  const total = cum[n];
+  const prag = Math.min(10, total / 8); // metri
   const ccw = (p: number[], q: number[], r: number[]) => (r[1] - p[1]) * (q[0] - p[0]) > (q[1] - p[1]) * (r[0] - p[0]);
   const inter = (p1: number[], p2: number[], p3: number[], p4: number[]) =>
     ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
   for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      if (Math.abs(i - j) <= 1 || (i === 0 && j === n - 1)) continue; // laturi vecine
+    for (let j = i + 2; j < n; j++) {
+      if (i === 0 && j === n - 1) continue; // laturi vecine (închiderea)
+      const inainte = cum[j] - cum[i + 1]; // de la capătul laturii i la începutul laturii j
+      const inapoi = total - (cum[j + 1] - cum[i]); // de la capătul laturii j, în jur, la începutul laturii i
+      if (Math.min(inainte, inapoi) <= prag) continue;
       if (inter(a[i], a[(i + 1) % n], a[j], a[(j + 1) % n])) return true;
     }
   }
