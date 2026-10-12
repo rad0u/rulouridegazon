@@ -20,6 +20,7 @@ type Rand = {
   c: CandidatPoligon;
   actiune: Actiune;
   numeNou: string;
+  implicita: Actiune; // propunerea automată (la bifare se revine la ea)
   nota: string | null; // ex. nume duplicat în fermă, poligon departe de ferma curentă
 };
 
@@ -44,6 +45,8 @@ function actiuneImplicita(
   centruFerma: [number, number] | null,
 ): { actiune: Actiune; nota: string | null } {
   if (!c.valid) return { actiune: 'ignora', nota: null };
+  // Liniile (drumuri, canale etc.) din lista de feature-uri nu sunt parcele: ignorate implicit.
+  if (c.sursa === 'Linie') return { actiune: 'ignora', nota: 'Linie, nu poligon (ignorată implicit; o poți bifa dacă vrei totuși să fie închisă ca parcelă).' };
 
   // Poligon departe de centrul fermei -> probabil fișierul altei ferme: nu propunem nicio acțiune.
   if (centruFerma) {
@@ -138,7 +141,7 @@ export default function ImportParceleSwMaps({
       const rez = parseazaFisier(f.name, text);
       const r: Rand[] = rez.candidati.map((c) => {
         const { actiune, nota } = actiuneImplicita(c, parcele, centruFerma);
-        return { c, actiune, numeNou: c.nume, nota };
+        return { c, actiune, numeNou: c.nume, implicita: actiune, nota };
       });
       setNumeFisier(f.name);
       setFormat(rez.format);
@@ -155,6 +158,22 @@ export default function ImportParceleSwMaps({
   function schimba(idx: number, patch: Partial<Rand>) {
     setRanduri((prev) => {
       const next = prev.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+      publicaPreview(next);
+      return next;
+    });
+  }
+
+  function bifeaza(idx: number, bifat: boolean) {
+    const r = randuri[idx];
+    if (!r || !r.c.valid) return;
+    schimba(idx, { actiune: bifat ? (r.implicita !== 'ignora' ? r.implicita : 'nou') : 'ignora' });
+  }
+
+  function bifeazaToate(bifat: boolean) {
+    setRanduri((prev) => {
+      const next = prev.map((r) =>
+        r.c.valid ? { ...r, actiune: bifat ? (r.implicita !== 'ignora' ? r.implicita : 'nou') : 'ignora' } : r,
+      );
       publicaPreview(next);
       return next;
     });
@@ -267,10 +286,23 @@ export default function ImportParceleSwMaps({
             </p>
           ))}
 
+          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap', margin: '0.5rem 0' }}>
+            <button onClick={() => bifeazaToate(true)} style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem' }}>
+              Bifează toate
+            </button>
+            <button onClick={() => bifeazaToate(false)} style={{ padding: '0.3rem 0.6rem', fontSize: '0.85rem' }}>
+              Debifează toate
+            </button>
+            <span style={{ fontSize: '0.85rem', color: '#555' }}>
+              {deAplicat.length} din {randuri.length} se vor importa
+            </span>
+          </div>
+
           <div style={{ overflowX: 'auto' }}>
             <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
+                  <th style={{ padding: '0.3rem' }}>Import</th>
                   <th style={{ padding: '0.3rem' }}>Din fișier</th>
                   <th style={{ padding: '0.3rem', textAlign: 'right' }}>Suprafață măsurată</th>
                   <th style={{ padding: '0.3rem' }}>Ce fac</th>
@@ -285,7 +317,19 @@ export default function ImportParceleSwMaps({
                       ? ((r.c.suprafataMp - tinta.suprafata_mp) / tinta.suprafata_mp) * 100
                       : null;
                   return (
-                    <tr key={r.c.cheie} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top' }}>
+                    <tr
+                      key={r.c.cheie}
+                      style={{ borderBottom: '1px solid #eee', verticalAlign: 'top', opacity: r.actiune === 'ignora' ? 0.55 : 1 }}
+                    >
+                      <td style={{ padding: '0.3rem', textAlign: 'center' }}>
+                        <input
+                          type="checkbox"
+                          checked={r.actiune !== 'ignora'}
+                          disabled={!r.c.valid}
+                          onChange={(e) => bifeaza(i, e.target.checked)}
+                          title={r.c.valid ? 'Bifat = se importă' : 'Poligon invalid — nu se poate importa'}
+                        />
+                      </td>
                       <td style={{ padding: '0.3rem' }}>
                         {r.c.nume || <em style={{ color: '#888' }}>(fără nume)</em>}
                         <div style={{ color: '#888' }}>{r.c.ring.length} puncte</div>

@@ -22,6 +22,7 @@ export type CandidatPoligon = {
   ring: [number, number][]; // [lat, lon], NEdeschis (fără punctul de închidere)
   suprafataMp: number;
   perimetruM: number;
+  sursa: string; // 'Polygon' | 'Linie' | 'Traseu' | 'Puncte CSV' | 'Puncte (waypoint)'
   valid: boolean; // false => nu se poate importa (vezi `avertismente`)
   avertismente: string[];
 };
@@ -367,6 +368,7 @@ function curataSiValideaza(brut: Brut, index: number): CandidatPoligon {
     ring: puncte,
     suprafataMp: valid ? ariePoligonMp(puncte) : 0,
     perimetruM: valid ? perimetruPoligonM(puncte) : 0,
+    sursa: brut.sursa,
     valid,
     avertismente,
   };
