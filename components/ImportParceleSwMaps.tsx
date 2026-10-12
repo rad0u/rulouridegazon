@@ -10,7 +10,13 @@ import { useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
 import { Parcela, polygonLatLngs, centroidLatLng } from '../lib/parcelaTypes';
 import { distantaMetri } from '../lib/geo';
-import { parseazaFisier, parseazaArhiva, cheieNume, type CandidatPoligon } from '../lib/importParcele';
+import {
+  parseazaFisier,
+  parseazaArhiva,
+  cheieNume,
+  potrivireSpatiala,
+  type CandidatPoligon,
+} from '../lib/importParcele';
 
 export type PreviewImport = { cheie: string; nume: string; ring: [number, number][]; valid: boolean };
 
@@ -145,6 +151,11 @@ export default function ImportParceleSwMaps({
         const { actiune, nota } = actiuneImplicita(c, parcele, centruFerma);
         return { c, actiune, numeNou: c.nume, implicita: actiune, nota };
       });
+      potrivireSpatiala(
+        r,
+        parcele.map((p) => ({ id: p.id, nume: p.nume, ring: polygonLatLngs(p) })),
+      );
+      for (const x of r) x.implicita = x.actiune;
       setNumeFisier(f.name);
       setFormat(rez.format);
       setAvertismente(rez.avertismente);

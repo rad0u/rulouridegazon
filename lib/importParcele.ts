@@ -403,7 +403,7 @@ function seIntersecteaza(ring: [number, number][]): boolean {
     cum.push(cum[i] + Math.hypot(x2 - x1, y2 - y1));
   }
   const total = cum[n];
-  const prag = Math.min(10, total / 8); // metri
+  const prag = Math.min(25, total / 8); // metri
   const ccw = (p: number[], q: number[], r: number[]) => (r[1] - p[1]) * (q[0] - p[0]) > (q[1] - p[1]) * (r[0] - p[0]);
   const inter = (p1: number[], p2: number[], p3: number[], p4: number[]) =>
     ccw(p1, p3, p4) !== ccw(p2, p3, p4) && ccw(p1, p2, p3) !== ccw(p1, p2, p4);
@@ -615,3 +615,118 @@ export async function parseazaArhiva(bytes: Uint8Array): Promise<RezultatParsare
   avertismente.push(...eroriFisiere.map((m) => `Fișier sărit — ${m}`));
   return { format, candidati, avertismente };
 }
+
+// ------------------------------------------------- potrivire pe hartă (spațial)
+
+// Punct în poligon (ray casting) pe coordonate [lat, lon] — la scara unei ferme
+// nu e nevoie de proiecție.
+export function punctInPoligon(lat: number, lon: number, ring: [number, number][]): boolean {
+  let inauntru = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [yi, xi] = ring[i];
+    const [yj, xj] = ring[j];
+    if (yi > lat !== yj > lat && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inauntru = !inauntru;
+  }
+  return inauntru;
+}
+
+// Puncte-eșantion (grilă regulată) aflate în interiorul poligonului — pentru
+// estimarea suprapunerii dintre două contururi fără o bibliotecă de clipping.
+export function esantioaneInterior(ring: [number, number][], grila = 50): [number, number][] {
+  const lats = ring.map((p) => p[0]);
+  const lons = ring.map((p) => p[1]);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLon = Math.min(...lons);
+  const maxLon = Math.max(...lons);
+  const out: [number, number][] = [];
+  for (let i = 0; i < grila; i++) {
+    for (let j = 0; j < grila; j++) {
+      const lat = minLat + ((i + 0.5) / grila) * (maxLat - minLat);
+      const lon = minLon + ((j + 0.5) / grila) * (maxLon - minLon);
+      if (punctInPoligon(lat, lon, ring)) out.push([lat, lon]);
+    }
+  }
+  return out;
+}
+
+// Ce fracțiune din eșantioane cade în `ring` (0..1).
+export function fractieInPoligon(esantioane: [number, number][], ring: [number, number][]): number {
+  if (esantioane.length === 0) return 0;
+  let n = 0;
+  for (const [lat, lon] of esantioane) if (punctInPoligon(lat, lon, ring)) n++;
+  return n / esantioane.length;
+}
+
+// Potrivire pe hartă: când numele nu spune nimic (ex. numerotare diferită în teren față de
+// aplicație), propunem parcela existentă cu care conturul măsurat se suprapune cel mai bine
+// (IoU = intersecție / reuniune >= 0,35 — contururile vechi, desenate "din ochi", nu se suprapun perfect). O parcelă existentă e propusă unui singur poligon;
+// celelalte poligoane din aceeași zonă (variante vechi/noi) sunt ignorate implicit, ca să nu
+// se creeze duplicate. Poligoanele aflate (aproape) complet în interiorul altuia sunt
+// considerate sub-zone și ignorate implicit.
+const PRAG_IOU = 0.35;
+const PRAG_INCLUS = 0.95;
+
+export function potrivireSpatiala(
+  randuri: { c: CandidatPoligon; actiune: string; nota: string | null }[],
+  parcele: { id: string; nume: string; ring: [number, number][] }[],
+) {
+  const cu = parcele
+    .filter((x) => x.ring.length >= 3)
+    .map((x) => ({ p: x, ring: x.ring, aria: ariePoligonMp(x.ring) }));
+  const luate = new Set<string>(randuri.map((r) => r.actiune).filter((a) => a !== 'ignora' && a !== 'nou'));
+
+  const candidati = randuri
+    .map((r, idx) => ({ r, idx }))
+    .filter(({ r }) => r.c.valid && r.actiune === 'nou' && r.c.sursa !== 'Linie');
+  const esantioane = new Map<number, [number, number][]>();
+  for (const { r, idx } of candidati) esantioane.set(idx, esantioaneInterior(r.c.ring));
+
+  // 1) perechi (poligon, parcelă existentă) cu IoU >= prag, cele mai bune întâi
+  const perechi: { idx: number; parcela: { id: string; nume: string }; iou: number }[] = [];
+  for (const { r, idx } of candidati) {
+    const es = esantioane.get(idx) ?? [];
+    for (const x of cu) {
+      const inter = fractieInPoligon(es, x.ring) * r.c.suprafataMp;
+      const uniune = r.c.suprafataMp + x.aria - inter;
+      const iou = uniune > 0 ? inter / uniune : 0;
+      if (iou >= PRAG_IOU) perechi.push({ idx, parcela: x.p, iou });
+    }
+  }
+  perechi.sort((a, b) => b.iou - a.iou);
+  const rezolvat = new Set<number>();
+  for (const pr of perechi) {
+    if (rezolvat.has(pr.idx)) continue;
+    const r = randuri[pr.idx];
+    if (luate.has(pr.parcela.id)) {
+      continue; // parcela e deja propusă altui poligon -> tratăm mai jos
+    }
+    luate.add(pr.parcela.id);
+    rezolvat.add(pr.idx);
+    r.actiune = pr.parcela.id;
+    r.nota = `Potrivit pe hartă: se suprapune ${Math.round(pr.iou * 100)}% cu parcela „${pr.parcela.nume}” existentă (numele din fișier nu se potrivește).`;
+  }
+  // poligoane care concurează pentru o parcelă deja propusă altuia = variante alternative
+  for (const pr of perechi) {
+    if (rezolvat.has(pr.idx)) continue;
+    const r = randuri[pr.idx];
+    r.actiune = 'ignora';
+    r.nota = `Se suprapune ${Math.round(pr.iou * 100)}% cu parcela „${pr.parcela.nume}”, deja propusă pentru alt poligon — variantă alternativă? (ignorat implicit; schimbă dacă e cel corect).`;
+    rezolvat.add(pr.idx);
+  }
+
+  // 2) sub-zone: poligoane aproape complet în interiorul altui poligon din fișier
+  for (const { r, idx } of candidati) {
+    if (rezolvat.has(idx)) continue;
+    const es = esantioane.get(idx) ?? [];
+    for (const alt of randuri) {
+      if (alt === r || !alt.c.valid || alt.c.suprafataMp <= r.c.suprafataMp) continue;
+      if (fractieInPoligon(es, alt.c.ring) >= PRAG_INCLUS) {
+        r.actiune = 'ignora';
+        r.nota = `Este în interiorul poligonului „${alt.c.nume || 'fără nume'}” — sub-zonă? (ignorat implicit; bifează dacă vrei și această parcelă).`;
+        break;
+      }
+    }
+  }
+}
+
