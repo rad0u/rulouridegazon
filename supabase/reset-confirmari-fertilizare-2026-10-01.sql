@@ -1,6 +1,7 @@
 -- 2026-10-14 (Radu): „sa resetezi toate confirmarile de lucrari de fertilizare solida sau lichida,
 -- de la toate fermele, incepand cu 01.10.2026 pana la zi. Voi opera din nou confirmarile."
 --
+-- NOTĂ: SQL Editor-ul Supabase poate comite instrucțiunile pe rând (tabelele temporare dispar); de aceea nu se folosesc tabele temp.
 -- SE RULEAZĂ MANUAL în Supabase -> SQL Editor (rol postgres). Aplicația nu are politică DELETE pe operatiuni.
 -- Ce face (într-o singură tranzacție):
 --   1) salvează copii în tabele backup_reset_* (RLS activat, fără acces din API);
@@ -34,14 +35,11 @@ select (select count(*) from backup_reset_operatiuni_20261014) as operatiuni,
        (select count(*) from backup_reset_operatiuni_substante_20261014) as linii_substante,
        (select count(*) from backup_reset_operatiuni_materii_prime_20261014) as linii_materii_prime;
 
-create temp table subst_afectate on commit drop as
-  select distinct substanta_id from backup_reset_operatiuni_substante_20261014;
-
 delete from operatiuni_substante where id in (select id from backup_reset_operatiuni_substante_20261014);
 delete from operatiuni_materii_prime where id in (select id from backup_reset_operatiuni_materii_prime_20261014);
 delete from operatiuni where id in (select id from backup_reset_operatiuni_20261014);
 
-select recalculeaza_stoc_substanta(substanta_id) from subst_afectate;
+select recalculeaza_stoc_substanta(substanta_id) from (select distinct substanta_id from backup_reset_operatiuni_substante_20261014) x;
 
 -- Verificări: 0 operațiuni rămase de tipul resetat; 0 diferențe între stoc și intrări − consumuri.
 select count(*) as ramase_fertilizare_de_la_1_oct
