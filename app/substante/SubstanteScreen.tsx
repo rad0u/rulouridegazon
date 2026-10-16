@@ -245,6 +245,27 @@ const initialAlimentareForm = {
   nota: '',
 };
 
+type TransferSubstanta = {
+  id: string;
+  cantitate: number;
+  pret_unitar: number;
+  data: string;
+  nota: string | null;
+  created_at: string;
+  sursa: { nume: string; unitate_masura: string; ferme: { nume: string } | null } | null;
+  dest: { ferme: { nume: string } | null } | null;
+  utilizatori: { nume: string } | null;
+};
+
+const initialTransferForm = {
+  sursa_id: '',
+  ferma_dest_id: '',
+  cantitate: '',
+  cantitate_um: '',
+  data: aziLocal(),
+  nota: '',
+};
+
 function SubstanteAdminCentral() {
   const [nomenclator, setNomenclator] = useState<NomenclatorItem[]>([]);
   const [ferme, setFerme] = useState<Ferma[]>([]);
@@ -262,6 +283,13 @@ function SubstanteAdminCentral() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveOk, setSaveOk] = useState(false);
+
+  const [transferuri, setTransferuri] = useState<TransferSubstanta[]>([]);
+  const [transferDeschis, setTransferDeschis] = useState(false);
+  const [transferForm, setTransferForm] = useState(initialTransferForm);
+  const [transferSaving, setTransferSaving] = useState(false);
+  const [transferError, setTransferError] = useState<string | null>(null);
+  const [transferOk, setTransferOk] = useState<string | null>(null);
 
   const [nomenclatorModalDeschis, setNomenclatorModalDeschis] = useState(false);
   const [cautareNomenclator, setCautareNomenclator] = useState('');
@@ -292,7 +320,7 @@ function SubstanteAdminCentral() {
     setLoading(true);
     setLoadError(null);
 
-    const [nomenclatorRes, fermeRes, stocuriRes, intrariRes] = await Promise.all([
+    const [nomenclatorRes, fermeRes, stocuriRes, intrariRes, transferuriRes] = await Promise.all([
       supabase.from('substante_nomenclator').select('id, nume, unitate_masura').order('nume'),
       supabase.from('ferme').select('id, nume').order('nume'),
       supabase
@@ -304,6 +332,13 @@ function SubstanteAdminCentral() {
         .from('substante_intrari')
         .select(
           'id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferma_id, ferme(nume)), utilizatori(nume)',
+        )
+        .order('created_at', { ascending: false })
+        .limit(50),
+      supabase
+        .from('substante_transferuri')
+        .select(
+          'id, cantitate, pret_unitar, data, nota, created_at, sursa:substante!substanta_sursa_id(nume, unitate_masura, ferme(nume)), dest:substante!substanta_dest_id(ferme(nume)), utilizatori(nume)',
         )
         .order('created_at', { ascending: false })
         .limit(50),
@@ -327,6 +362,12 @@ function SubstanteAdminCentral() {
     if (intrariRes.error) {
       setLoadError(intrariRes.error.message);
       return;
+    }
+    // Istoricul transferurilor e secundar: dacă nu se încarcă, restul ecranului rămâne utilizabil.
+    if (transferuriRes.error) {
+      console.error('Transferuri substanțe:', transferuriRes.error.message);
+    } else {
+      setTransferuri((transferuriRes.data as unknown as TransferSubstanta[]) ?? []);
     }
 
     setNomenclator((nomenclatorRes.data as NomenclatorItem[]) ?? []);
@@ -426,6 +467,67 @@ function SubstanteAdminCentral() {
       ferma_id: prev.ferma_id,
       nomenclator_id: prev.nomenclator_id,
     }));
+    await incarca();
+  }
+
+  const sursaTransfer = stocuri.find((x) => x.id === transferForm.sursa_id) ?? null;
+  const cantitateTransfer = inBaza(
+    parseazaNumar(transferForm.cantitate),
+    transferForm.cantitate_um,
+    sursaTransfer?.unitate_masura ?? '',
+  );
+  const optiuniSursaTransfer = stocuri
+    .filter((x) => (x.stoc_curent ?? 0) > 0 && x.ferma_id)
+    .sort((a, b) => (a.ferme?.nume ?? '').localeCompare(b.ferme?.nume ?? '', 'ro') || a.nume.localeCompare(b.nume, 'ro'));
+
+  async function salveazaTransfer(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setTransferError(null);
+    setTransferOk(null);
+
+    if (!sursaTransfer) {
+      setTransferError('Alege gestiunea sursă (fermă + substanță).');
+      return;
+    }
+    if (!transferForm.ferma_dest_id) {
+      setTransferError('Alege ferma destinație.');
+      return;
+    }
+    if (transferForm.ferma_dest_id === sursaTransfer.ferma_id) {
+      setTransferError('Ferma destinație trebuie să fie diferită de cea sursă.');
+      return;
+    }
+    if (!transferForm.cantitate || Number.isNaN(cantitateTransfer) || cantitateTransfer <= 0) {
+      setTransferError('Completează o cantitate pozitivă.');
+      return;
+    }
+    if (cantitateTransfer > (sursaTransfer.stoc_curent ?? 0)) {
+      setTransferError(
+        `Stoc insuficient în gestiunea sursă (disponibil: ${sursaTransfer.stoc_curent} ${sursaTransfer.unitate_masura}).`,
+      );
+      return;
+    }
+
+    setTransferSaving(true);
+    const { error: rpcError } = await supabase.rpc('transfera_substanta', {
+      p_substanta_sursa_id: sursaTransfer.id,
+      p_ferma_dest_id: transferForm.ferma_dest_id,
+      p_cantitate: cantitateTransfer,
+      p_data: transferForm.data,
+      p_nota: transferForm.nota.trim() || null,
+    });
+    setTransferSaving(false);
+
+    if (rpcError) {
+      setTransferError(rpcError.message);
+      return;
+    }
+
+    const fermaDest = ferme.find((f) => f.id === transferForm.ferma_dest_id)?.nume ?? '';
+    setTransferOk(
+      `Transferat ${cantitateTransfer} ${sursaTransfer.unitate_masura} din ${sursaTransfer.ferme?.nume ?? 'gestiunea sursă'} în ${fermaDest}.`,
+    );
+    setTransferForm({ ...initialTransferForm, data: transferForm.data, sursa_id: '', ferma_dest_id: transferForm.ferma_dest_id });
     await incarca();
   }
 
@@ -651,6 +753,123 @@ function SubstanteAdminCentral() {
         {saveOk && <p style={{ color: '#2e7d32', marginBottom: 0 }}>Gestiunea a fost alimentată cu succes.</p>}
       </section>
 
+      {/* Transfer între gestiuni */}
+      <section style={{ border: '1px solid #eee', borderRadius: '8px', padding: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', flexWrap: 'wrap' }}>
+          <h2 style={{ margin: 0, fontSize: '1.1rem' }}>Transfer între gestiuni</h2>
+          <button
+            type="button"
+            onClick={() => {
+              setTransferDeschis((v) => !v);
+              setTransferError(null);
+            }}
+            style={{ ...butonStyle, background: transferDeschis ? '#eee' : '#e3f2fd' }}
+          >
+            {transferDeschis ? 'Închide transferul ▲' : '⇄ Transfer între gestiuni'}
+          </button>
+        </div>
+        {transferOk && <p style={{ color: '#2e7d32', marginBottom: 0 }}>{transferOk}</p>}
+        {transferDeschis && (
+          <>
+            <p style={{ color: '#666' }}>
+              Mută o cantitate dintr-o gestiune (fermă) în alta. Stocul sursei scade, iar cel al destinației crește, la
+              prețul mediu al sursei din momentul transferului. Dacă ferma destinație nu are încă acea substanță, gestiunea
+              ei se creează automat.
+            </p>
+            <form
+              onSubmit={salveazaTransfer}
+              style={{ display: 'flex', flexWrap: 'wrap', gap: '0.75rem', alignItems: 'flex-end' }}
+            >
+              <label>
+                Din gestiunea (fermă — substanță)
+                <select
+                  value={transferForm.sursa_id}
+                  onChange={(e) => {
+                    setTransferForm((prev) => ({
+                      ...prev,
+                      sursa_id: e.target.value,
+                      cantitate_um: '',
+                      ferma_dest_id: prev.ferma_dest_id === (stocuri.find((x) => x.id === e.target.value)?.ferma_id ?? '') ? '' : prev.ferma_dest_id,
+                    }));
+                    setTransferOk(null);
+                  }}
+                  style={{ ...inputStyle, minWidth: '280px' }}
+                >
+                  <option value="">— alege sursa —</option>
+                  {optiuniSursaTransfer.map((x) => (
+                    <option key={x.id} value={x.id}>
+                      {x.ferme?.nume ?? '—'} — {x.nume} (stoc {x.stoc_curent} {x.unitate_masura})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                În ferma
+                <select
+                  value={transferForm.ferma_dest_id}
+                  onChange={(e) => {
+                    setTransferForm((prev) => ({ ...prev, ferma_dest_id: e.target.value }));
+                    setTransferOk(null);
+                  }}
+                  style={inputStyle}
+                >
+                  <option value="">— alege ferma destinație —</option>
+                  {ferme
+                    .filter((f) => f.id !== sursaTransfer?.ferma_id)
+                    .map((f) => (
+                      <option key={f.id} value={f.id}>
+                        {f.nume}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <label>
+                Cantitate {sursaTransfer ? `(${sursaTransfer.unitate_masura})` : ''}
+                <CantitateCuUm
+                  baza={sursaTransfer?.unitate_masura}
+                  value={transferForm.cantitate}
+                  um={transferForm.cantitate_um}
+                  onChange={(v, u) => {
+                    setTransferForm((prev) => ({ ...prev, cantitate: v, cantitate_um: u }));
+                    setTransferOk(null);
+                  }}
+                  style={inputStyle}
+                />
+              </label>
+              <label>
+                Dată
+                <input
+                  type="date"
+                  value={transferForm.data}
+                  onChange={(e) => setTransferForm((prev) => ({ ...prev, data: e.target.value }))}
+                  style={inputStyle}
+                />
+              </label>
+              <label>
+                Notă (opțional)
+                <input
+                  type="text"
+                  value={transferForm.nota}
+                  onChange={(e) => setTransferForm((prev) => ({ ...prev, nota: e.target.value }))}
+                  style={inputStyle}
+                />
+              </label>
+              <button type="submit" disabled={transferSaving} style={{ ...butonStyle, background: transferSaving ? '#eee' : '#e8f5e9' }}>
+                {transferSaving ? 'Se transferă...' : 'Transferă'}
+              </button>
+            </form>
+            {sursaTransfer && !Number.isNaN(cantitateTransfer) && cantitateTransfer > 0 && (
+              <p style={{ color: '#666', marginBottom: 0 }}>
+                Valoare transferată: {formatLei(cantitateTransfer * (sursaTransfer.pret_unitar ?? 0))} (preț mediu{' '}
+                {formatLei(sursaTransfer.pret_unitar)}/{sursaTransfer.unitate_masura}). Rămâne în sursă:{' '}
+                {Math.round(((sursaTransfer.stoc_curent ?? 0) - cantitateTransfer) * 1e6) / 1e6} {sursaTransfer.unitate_masura}.
+              </p>
+            )}
+            {transferError && <p style={{ color: '#b00020', marginBottom: 0 }}>{transferError}</p>}
+          </>
+        )}
+      </section>
+
       {/* Stoc curent */}
       <section style={{ overflowX: 'auto' }}>
         <h2 style={{ fontSize: '1.1rem' }}>Stoc curent pe ferme</h2>
@@ -837,6 +1056,42 @@ function SubstanteAdminCentral() {
           </tbody>
         </table>
       </section>
+
+      {transferuri.length > 0 && (
+        <section style={{ overflowX: 'auto' }}>
+          <h2 style={{ fontSize: '1.1rem' }}>Istoric transferuri (ultimele 50)</h2>
+          <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
+            <thead>
+              <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                <th style={{ padding: '0.4rem' }}>Dată</th>
+                <th style={{ padding: '0.4rem' }}>Substanță</th>
+                <th style={{ padding: '0.4rem' }}>Din</th>
+                <th style={{ padding: '0.4rem' }}>În</th>
+                <th style={{ padding: '0.4rem' }}>Cantitate</th>
+                <th style={{ padding: '0.4rem' }}>Valoare</th>
+                <th style={{ padding: '0.4rem' }}>Operat de</th>
+                <th style={{ padding: '0.4rem' }}>Notă</th>
+              </tr>
+            </thead>
+            <tbody>
+              {transferuri.map((t) => (
+                <tr key={t.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '0.4rem' }}>{formatData(t.data)}</td>
+                  <td style={{ padding: '0.4rem' }}>{t.sursa?.nume ?? '—'}</td>
+                  <td style={{ padding: '0.4rem' }}>{t.sursa?.ferme?.nume ?? '—'}</td>
+                  <td style={{ padding: '0.4rem' }}>{t.dest?.ferme?.nume ?? '—'}</td>
+                  <td style={{ padding: '0.4rem' }}>
+                    {t.cantitate} {t.sursa?.unitate_masura ?? ''}
+                  </td>
+                  <td style={{ padding: '0.4rem' }}>{formatLei(t.cantitate * t.pret_unitar)}</td>
+                  <td style={{ padding: '0.4rem' }}>{t.utilizatori?.nume ?? '—'}</td>
+                  <td style={{ padding: '0.4rem', color: '#666' }}>{t.nota ?? ''}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+      )}
 
       {nomenclatorModalDeschis && (
         <div
