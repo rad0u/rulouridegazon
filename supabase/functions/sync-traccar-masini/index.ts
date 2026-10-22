@@ -151,45 +151,108 @@ function pointInRing(lon: number, lat: number, ring: number[][]): boolean {
   return inside;
 }
 
-// v2: geocodare inversă via Nominatim (OpenStreetMap) — vezi nota v2 de sus.
-// Throttling la nivel de modul (o singură instanță per rulare de cron), ca
-// să respectăm limita Nominatim de ~1 cerere/secundă indiferent de câte
-// mașini/curse se procesează în aceeași rulare.
-const NOMINATIM_URL = 'https://nominatim.openstreetmap.org/reverse';
-let ultimaCerereGeocodareMs = 0;
-async function reverseGeocode(lat: number, lon: number): Promise<string | null> {
-  const acum = Date.now();
-  const asteapta = 1100 - (acum - ultimaCerereGeocodareMs);
+// v5, 2026-10-21 (Radu): "la foile de parcurs tot nu vad locatia pornire si
+// locatia sosire completate". Diagnostic (21.10, funcție de test
+// debug-geocode rulată din rețeaua Supabase Edge): Nominatim
+// (nominatim.openstreetmap.org) răspunde 403 "Access denied" la orice cerere
+// venită de aici (IP-uri cloud partajate, blocate de OSM Foundation) — de
+// aceea 100% din cursele de după 24.09 au rămas fără adresă; Photon
+// (photon.komoot.io, tot date OpenStreetMap, gratuit, fără cheie) răspunde 200.
+// Schimbări:
+//  1. geocodare inversă prin Photon (în loc de Nominatim), cu layer=street
+//     (fără el întoarce cel mai apropiat obiect de orice fel — "Popas
+//     Cristian", "1 Martie" — nu strada); dacă nu găsește nicio stradă, a doua
+//     cerere fără layer (localitate); dacă nici așa, coordonatele ca text;
+//  2. eșec de rețea / HTTP != 200 => NULL și rândul e reluat la rularea
+//     următoare (nu mai rămâne definitiv fără adresă); 3 eșecuri la rând =>
+//     oprim geocodarea în rularea curentă;
+//  3. coordonatele de sosire se salvează pe cursă (latitudine_stop /
+//     longitudine_stop), ca adresa de sosire să poată fi completată oricând;
+//  4. buget de timp pe rulare + completare treptată a curselor rămase fără
+//     adresă (cele mai recente întâi) la sfârșitul fiecărei rulări, cu cereri
+//     în paralel (max. 3 în zbor), dar cu start la cel mult 1 cerere/secundă.
+const PHOTON_URL = 'https://photon.komoot.io/reverse';
+const BUGET_GEOCODARE_MS = 100_000; // per rulare de cron (cronul rulează la 5 min)
+const PAUZA_GEOCODARE_MS = 1000; // cel mult ~1 cerere începută pe secundă, politicos față de serviciul gratuit
+const MAX_ESECURI_CONSECUTIVE = 3; // furnizor căzut/blocat => oprim geocodarea în rularea asta
+const MAX_CURSE_COMPLETARE = 150; // câte curse fără adresă citim la o rulare pentru completare
+const CONCURENTA_COMPLETARE = 3; // curse completate în paralel (cererile rămân cadențate de poarta de start)
+let inceputRulareMs = Date.now(); // resetat la începutul fiecărei invocări
+let urmatoareaCerereMs = 0;
+let esecuriConsecutive = 0;
+const cacheGeocodare = new Map<string, string>();
+
+function geocodareDisponibila(): boolean {
+  return Date.now() - inceputRulareMs < BUGET_GEOCODARE_MS && esecuriConsecutive < MAX_ESECURI_CONSECUTIVE;
+}
+
+function adresaDinProprietati(p: Record<string, unknown>): string | null {
+  const text = (v: unknown) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+  const strada = text(p.street) ?? (p.type === 'street' ? text(p.name) : null);
+  const numar = text(p.housenumber);
+  const localitate = text(p.city) ?? text(p.locality) ?? text(p.district) ?? text(p.county);
+  const parti: string[] = [];
+  if (strada) parti.push(numar ? `${strada} ${numar}` : strada);
+  if (localitate) parti.push(localitate);
+  if (parti.length > 0) return parti.join(', ');
+  return text(p.name);
+}
+
+// O cerere Photon. undefined = eșec (rețea / HTTP != 200 / buget epuizat) -> se
+// reîncearcă la o rulare viitoare; null = răspuns valid, dar fără niciun rezultat.
+async function cerePhoton(lat: number, lon: number, layer: string | null): Promise<Record<string, unknown> | null | undefined> {
+  // Poartă de start: cel puțin PAUZA între începuturile cererilor, chiar dacă
+  // sunt lansate în paralel (slotul se rezervă sincron, înainte de await).
+  const start = Math.max(Date.now(), urmatoareaCerereMs);
+  urmatoareaCerereMs = start + PAUZA_GEOCODARE_MS;
+  const asteapta = start - Date.now();
   if (asteapta > 0) await new Promise((r) => setTimeout(r, asteapta));
-  ultimaCerereGeocodareMs = Date.now();
+  if (!geocodareDisponibila()) return undefined;
 
   try {
-    const url = `${NOMINATIM_URL}?format=jsonv2&lat=${lat}&lon=${lon}&zoom=17&addressdetails=1`;
-    const res = await fetch(url, {
-      headers: {
-        // Nominatim cere un User-Agent care identifică aplicația (nu cel
-        // implicit generic al fetch) — vezi politica lor de utilizare.
-        'User-Agent': 'RulouriDeGazon-FlotaAuto/1.0 (radu.dragulinescu@me.com)',
-      },
+    const res = await fetch(`${PHOTON_URL}?lat=${lat}&lon=${lon}${layer ? `&layer=${layer}` : ''}`, {
+      headers: { 'User-Agent': 'RulouriDeGazon-FlotaAuto/1.0 (radu.dragulinescu@me.com)' },
+      signal: AbortSignal.timeout(10_000),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      esecuriConsecutive++;
+      console.warn(`[geocodare] Photon a răspuns ${res.status}`);
+      return undefined;
+    }
     const json = await res.json();
-    const a = (json?.address ?? {}) as Record<string, string>;
-    const strada = a.road ?? a.pedestrian ?? a.footway ?? a.residential ?? null;
-    const numar = a.house_number ?? null;
-    const localitate = a.city ?? a.town ?? a.village ?? a.municipality ?? a.suburb ?? null;
-    const judet = a.county ?? null;
-
-    const parti: string[] = [];
-    if (strada) parti.push(numar ? `${strada} ${numar}` : strada);
-    if (localitate) parti.push(localitate);
-    else if (judet) parti.push(judet);
-
-    if (parti.length === 0) return typeof json?.display_name === 'string' ? json.display_name : null;
-    return parti.join(', ');
-  } catch {
-    return null;
+    esecuriConsecutive = 0;
+    return (json?.features?.[0]?.properties as Record<string, unknown> | undefined) ?? null;
+  } catch (e) {
+    esecuriConsecutive++;
+    console.warn(`[geocodare] eroare: ${e instanceof Error ? e.message : String(e)}`);
+    return undefined;
   }
+}
+
+// Întoarce adresa text (strada + localitatea; localitatea singură dacă nu e nicio
+// stradă; coordonatele ca text dacă furnizorul n-are nimic pentru punct) ori
+// NULL dacă geocodarea n-a putut fi făcută acum — în cazul ăsta coloana rămâne
+// NULL și rândul e reluat la o rulare viitoare.
+async function reverseGeocode(latIn: number, lonIn: number): Promise<string | null> {
+  const lat = Number(latIn);
+  const lon = Number(lonIn);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const cheie = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+  const dinCache = cacheGeocodare.get(cheie);
+  if (dinCache) return dinCache;
+  if (!geocodareDisponibila()) return null;
+
+  const pStrada = await cerePhoton(lat, lon, 'street');
+  if (pStrada === undefined) return null;
+  let adresa = pStrada ? adresaDinProprietati(pStrada) : null;
+  if (!adresa) {
+    const pGeneral = await cerePhoton(lat, lon, null);
+    if (pGeneral === undefined) return null;
+    adresa = pGeneral ? adresaDinProprietati(pGeneral) : null;
+  }
+  const rezultat = adresa ?? `${lat.toFixed(5)}, ${lon.toFixed(5)}`;
+  cacheGeocodare.set(cheie, rezultat);
+  return rezultat;
 }
 
 interface TraccarPosition {
@@ -240,6 +303,11 @@ function ringValid(poligon: unknown): number[][] | null {
 }
 
 Deno.serve(async () => {
+  // v5: bugetul de timp și contorul de eșecuri se resetează la fiecare invocare
+  // (instanța edge poate fi refolosită între invocări).
+  inceputRulareMs = Date.now();
+  esecuriConsecutive = 0;
+
   if (!TRACCAR_URL || !TRACCAR_USER || !TRACCAR_PASSWORD) {
     return new Response('Lipsesc credențialele Traccar (TRACCAR_URL/USER/PASSWORD).', { status: 500 });
   }
@@ -409,11 +477,18 @@ Deno.serve(async () => {
         // update ulterior, care ar fi doar km recalculat pe o cursă deja
         // închisă — asta nu se întâmplă în fluxul curent, dar verificăm
         // oricum ca să nu geocodăm de două ori).
+        // v5: salvăm și coordonatele de sosire; adresa se scrie doar dacă
+        // geocodarea a reușit (altfel rămâne NULL și o completează
+        // trecerea de completare de la finalul rulării).
         if (dataStop && latStop != null && lonStop != null) {
-          update.adresa_sosire = await reverseGeocode(latStop, lonStop);
+          update.latitudine_stop = latStop;
+          update.longitudine_stop = lonStop;
+          const adresaSosire = await reverseGeocode(latStop, lonStop);
+          if (adresaSosire) update.adresa_sosire = adresaSosire;
         }
         if (!existent.adresa_pornire && latStart != null && lonStart != null) {
-          update.adresa_pornire = await reverseGeocode(latStart, lonStart);
+          const adresaPornire = await reverseGeocode(latStart, lonStart);
+          if (adresaPornire) update.adresa_pornire = adresaPornire;
         }
         await supabase.from('curse').update(update).eq('id', existent.id);
       } else {
@@ -431,6 +506,8 @@ Deno.serve(async () => {
           longitudine_start: lonStart,
           adresa_pornire: adresaPornire,
           adresa_sosire: adresaSosire,
+          latitudine_stop: dataStop ? latStop : null,
+          longitudine_stop: dataStop ? lonStop : null,
         });
         curseSalvate++;
       }
@@ -552,5 +629,50 @@ Deno.serve(async () => {
     perMasina[masina.id].alerte = alerteSalvate;
   }
 
-  return new Response(JSON.stringify({ per_masina: perMasina, erori }), { status: 200 });
+  // v5: completare treptată a adreselor lipsă (curse vechi + cele la care
+  // geocodarea a eșuat), cele mai recente întâi, cât ține bugetul de timp.
+  let adreseCompletate = 0;
+  try {
+    const { data: lipsa } = await supabase
+      .from('curse')
+      .select(
+        'id, latitudine_start, longitudine_start, adresa_pornire, data_ora_stop, latitudine_stop, longitudine_stop, adresa_sosire',
+      )
+      .or('adresa_pornire.is.null,and(data_ora_stop.not.is.null,adresa_sosire.is.null)')
+      .order('data_ora_start', { ascending: false })
+      .limit(MAX_CURSE_COMPLETARE);
+
+    // deno-lint-ignore no-explicit-any
+    const completeaza = async (c: any): Promise<number> => {
+      const patch: Record<string, string> = {};
+      if (!c.adresa_pornire && c.latitudine_start != null && c.longitudine_start != null) {
+        const a = await reverseGeocode(c.latitudine_start, c.longitudine_start);
+        if (a) patch.adresa_pornire = a;
+      }
+      if (c.data_ora_stop && !c.adresa_sosire && c.latitudine_stop != null && c.longitudine_stop != null) {
+        const a = await reverseGeocode(c.latitudine_stop, c.longitudine_stop);
+        if (a) patch.adresa_sosire = a;
+      }
+      if (Object.keys(patch).length === 0) return 0;
+      const { error: patchError } = await supabase.from('curse').update(patch).eq('id', c.id);
+      if (patchError) {
+        erori['completare_adrese'] = patchError.message;
+        return 0;
+      }
+      return Object.keys(patch).length;
+    };
+
+    const lista = lipsa ?? [];
+    for (let i = 0; i < lista.length && geocodareDisponibila(); i += CONCURENTA_COMPLETARE) {
+      const rezultate = await Promise.all(lista.slice(i, i + CONCURENTA_COMPLETARE).map(completeaza));
+      adreseCompletate += rezultate.reduce((a, b) => a + b, 0);
+    }
+  } catch (e) {
+    erori['completare_adrese'] = e instanceof Error ? e.message : String(e);
+  }
+
+  return new Response(
+    JSON.stringify({ per_masina: perMasina, erori, adrese_completate: adreseCompletate, geocodare_esecuri_consecutive: esecuriConsecutive }),
+    { status: 200 },
+  );
 });

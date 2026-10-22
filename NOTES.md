@@ -2574,3 +2574,14 @@ Radu: „la Substante, pe langa Alimentare gestiune, mai vreau un buton transfer
 - Testat în Supabase cu rollback: Săbăreni 25.060 → 24.060 kg, Timișoara 4.000 → 5.000 kg (preț 1,8909 → 1,8911), erorile pentru stoc insuficient și aceeași fermă, creare automată de gestiune la destinație.
 - Netestat în browser. Nu există anulare/ștergere de transfer din UI (corecția = transfer invers).
 - Verificarea „stoc = intrări − consumuri" trebuie acum să includă transferurile (formula în fișierul SQL).
+
+## 2026-10-21 — Adrese pornire/sosire lipsă pe foile de parcurs (cauza reală + fix)
+
+Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire completate".
+- **Cauza reală**: din 24.09 Nominatim (nominatim.openstreetmap.org) răspunde `403 Access denied` la orice cerere din rețeaua Supabase Edge (IP-uri cloud partajate, blocate de OSM Foundation); `sync-traccar-masini` înghițea eroarea (NULL). Confirmat cu o funcție de test (`debug-geocode`): Nominatim 403, Photon 200. Ipoteza din 30.09 (volum mare de curse fragmentate) era incompletă. La 21.10: 7.531 curse închise fără adresă de sosire.
+- **Fix** (`sync-traccar-masini` v7): geocodare inversă prin Photon (`photon.komoot.io`, date OSM, gratuit, fără cheie) cu `layer=street` (fără el întoarce cel mai apropiat obiect de orice tip); fallback fără layer (localitate), apoi coordonatele ca text. Eșec de rețea/HTTP => NULL și rândul e reluat la rularea următoare; 3 eșecuri la rând opresc geocodarea în rularea respectivă.
+- **Coloane noi** `curse.latitudine_stop` / `longitudine_stop` (`supabase/schema-curse-coordonate-stop.sql`), completate retroactiv din `masini_pozitii`.
+- **Completare treptată**: la finalul fiecărei rulări de cron (5 min) se completează adresele lipsă, cele mai recente curse întâi (buget 100 s/rulare, max. 3 cereri în zbor, start la cel mult 1 cerere/secundă, cache pe coordonate rotunjite la 4 zecimale). La 22.10 dimineața: 7.889 curse cu adresă de pornire, 0 fără; 5 fără sosire.
+- Atenție: fiecare UPDATE pe `curse` scrie în `jurnal_activitate` (trigger `jurnal_curse`) — completarea retroactivă a adăugat zeci de MB de rânduri de jurnal.
+- Dacă Photon cade/blochează: loguri `[geocodare] Photon a răspuns <cod>`; alternative cu cheie (LocationIQ / Geoapify) sau Nominatim găzduit propriu.
+- Funcția `debug-geocode` din Supabase e doar de diagnostic (se poate șterge din dashboard).
