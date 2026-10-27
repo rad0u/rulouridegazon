@@ -2598,4 +2598,4 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - La cantitate negativă prețul introdus se ignoră: intrarea se salvează la prețul mediu curent, deci prețul mediu nu se schimbă (consistent cu `recalculeaza_stoc_substanta`).
 - UI: `app/substante/SubstanteScreen.tsx` — câmpul de preț se dezactivează la cantitate negativă, mesaj explicativ, validări relaxate (și la editarea unei alimentări).
 - Același 2026-10-27: NUTRI-MEAL 6-12-44 (SABMAUX000394) convertit din buc în kg (×25) la toate fermele (backup: `backup_nutrimeal394_*_20261027`).
-- Neacoperit: Materii prime (`materii_prime_intrari`) are încă cantitate > 0.
+- Același lucru făcut și la Materii prime (`alimenteaza_materie_prima`, `editeaza_alimentare_materie_prima`, constrângerea `materii_prime_intrari_cantitate_check`; UI în `MateriiPrimeScreen.tsx`).

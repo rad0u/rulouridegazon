@@ -236,7 +236,7 @@ function MateriiPrimeAdminCentral() {
   const cantitateNum = inBaza(parseazaNumar(form.cantitate), form.cantitate_um, materiePrimaSelectata?.unitate_masura ?? '');
   const pretNum = Number(form.pret_intrare_unitar);
   const costTotal =
-    form.cantitate && form.pret_intrare_unitar && !Number.isNaN(cantitateNum) && !Number.isNaN(pretNum)
+    form.cantitate && form.pret_intrare_unitar && !Number.isNaN(cantitateNum) && !Number.isNaN(pretNum) && cantitateNum > 0
       ? cantitateNum * pretNum
       : null;
 
@@ -253,11 +253,12 @@ function MateriiPrimeAdminCentral() {
       setSaveError('Alege materia primă din nomenclator.');
       return;
     }
-    if (!form.cantitate || Number.isNaN(cantitateNum) || cantitateNum <= 0) {
-      setSaveError('Completează o cantitate pozitivă.');
+    if (!form.cantitate || Number.isNaN(cantitateNum) || cantitateNum === 0) {
+      setSaveError('Completează o cantitate diferită de 0 (negativă = corecție de stoc).');
       return;
     }
-    if (!form.pret_intrare_unitar || pretNum < 0) {
+    // Corecție negativă: prețul nu se cere — intrarea se face la prețul mediu curent.
+    if (cantitateNum > 0 && (!form.pret_intrare_unitar || pretNum < 0)) {
       setSaveError('Completează prețul de intrare (poate fi 0, dar nu negativ).');
       return;
     }
@@ -267,7 +268,7 @@ function MateriiPrimeAdminCentral() {
       p_ferma_id: form.ferma_id,
       p_nomenclator_id: form.nomenclator_id,
       p_cantitate: cantitateNum,
-      p_pret_intrare_unitar: pretNum,
+      p_pret_intrare_unitar: cantitateNum < 0 ? 0 : pretNum,
       p_data: form.data,
       p_furnizor: form.furnizor.trim() || null,
       p_nota: form.nota.trim() || null,
@@ -319,8 +320,8 @@ function MateriiPrimeAdminCentral() {
       setEditIntrareError('Alege ferma.');
       return;
     }
-    if (!editIntrareForm.cantitate || Number.isNaN(cant) || cant <= 0) {
-      setEditIntrareError('Cantitatea trebuie să fie un număr pozitiv.');
+    if (!editIntrareForm.cantitate || Number.isNaN(cant) || cant === 0) {
+      setEditIntrareError('Cantitatea trebuie să fie un număr diferit de 0 (negativ = corecție de stoc).');
       return;
     }
     if (!editIntrareForm.pret_intrare_unitar || Number.isNaN(pret) || pret < 0) {
@@ -456,7 +457,7 @@ function MateriiPrimeAdminCentral() {
             </select>
           </label>
           <label>
-            Cantitate {materiePrimaSelectata ? `(${materiePrimaSelectata.unitate_masura})` : ''}
+            Cantitate {materiePrimaSelectata ? `(${materiePrimaSelectata.unitate_masura})` : ''} — negativă = corecție de stoc
             <CantitateCuUm
               baza={materiePrimaSelectata?.unitate_masura}
               value={form.cantitate}
@@ -474,7 +475,9 @@ function MateriiPrimeAdminCentral() {
               type="number"
               min="0"
               step="0.01"
-              value={form.pret_intrare_unitar}
+              value={cantitateNum < 0 ? '' : form.pret_intrare_unitar}
+              disabled={cantitateNum < 0}
+              placeholder={cantitateNum < 0 ? 'preț mediu curent' : undefined}
               onChange={(e) => updateForm('pret_intrare_unitar', e.target.value)}
               style={inputStyle}
             />
@@ -497,6 +500,12 @@ function MateriiPrimeAdminCentral() {
         </form>
         {costTotal !== null && (
           <p style={{ color: '#666', marginBottom: 0 }}>Cost total intrare: {formatLei(costTotal)}</p>
+        )}
+        {!Number.isNaN(cantitateNum) && cantitateNum < 0 && (
+          <p style={{ color: '#e65100', marginBottom: 0 }}>
+            Corecție de stoc: se scad {Math.abs(cantitateNum)} {materiePrimaSelectata?.unitate_masura ?? ''} din gestiune, la prețul mediu curent
+            (prețul mediu nu se modifică).
+          </p>
         )}
         {saveError && <p style={{ color: '#b00020', marginBottom: 0 }}>{saveError}</p>}
         {saveOk && <p style={{ color: '#2e7d32', marginBottom: 0 }}>Gestiunea a fost alimentată cu succes.</p>}

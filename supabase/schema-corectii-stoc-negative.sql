@@ -163,3 +163,11 @@ begin
   end if;
 end;
 $function$;
+
+-- Materii prime: aceeași schimbare (aplicată ca migrare Supabase
+-- `corectii_stoc_negative_alimentare_materii_prime`) — constrângerea
+-- materii_prime_intrari_cantitate_check devine `cantitate <> 0`, iar funcțiile
+-- alimenteaza_materie_prima / editeaza_alimentare_materie_prima sunt identice
+-- cu cele de mai sus, cu tabelele materii_prime / materii_prime_intrari /
+-- materii_prime_nomenclator (coloana materie_prima_id) și
+-- recalculeaza_stoc_materie_prima. Definițiile complete: vezi migrarea.
