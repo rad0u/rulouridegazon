@@ -2585,3 +2585,9 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - Atenție: fiecare UPDATE pe `curse` scrie în `jurnal_activitate` (trigger `jurnal_curse`) — completarea retroactivă a adăugat zeci de MB de rânduri de jurnal.
 - Dacă Photon cade/blochează: loguri `[geocodare] Photon a răspuns <cod>`; alternative cu cheie (LocationIQ / Geoapify) sau Nominatim găzduit propriu.
 - Funcția `debug-geocode` din Supabase e doar de diagnostic (se poate șterge din dashboard).
+
+## 2026-10-27 — Eroare „Activități detectate pe parcele" la Săbăreni (HTTP 546)
+- Simptom: pe perioade de ~8+ zile (ex. 02.10–10.10) pagina arăta „Eroare la încărcarea activităților detectate."; logurile Edge arătau `get-sesiuni-detectate` → 546 (limită de resurse worker), iar perioadele ≤6 zile mergeau.
+- Cauză: după importul parcelelor din SW Maps, contururile Săbăreni au 229–1644 de vârfuri (~7.800 în total, față de ~50 înainte). `gasesteParcela()` rula ray-casting pe TOATE vârfurile TUTUROR parcelelor pentru fiecare citire GPS (~31.000 citiri / 9 zile, 13 utilaje).
+- Fix (v9 deployat): pre-filtru bounding-box per parcelă în `gasesteParcela` (rezultate identice). Fișier: `supabase/functions/get-sesiuni-detectate/index.ts`.
+- De ținut minte: `get-combustibil-parcele` și `get-utilaj-istoric-parcele` au aceeași funcție `gasesteParcela` fără pre-filtru — dacă ecranele lor dau 546/lentoare pe perioade lungi la Săbăreni, se aplică același fix.

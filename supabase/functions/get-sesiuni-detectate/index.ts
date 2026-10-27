@@ -99,6 +99,16 @@
 // necalibrat, fără `tanc_capacitate_litri`); front-end-ul le însumează pe
 // grup pentru totalul cerut de Radu.
 
+// v9, 2026-10-27 (Radu): "la Sabareni imi da eroare la incarcarea activitatilor"
+// — pe perioade de ~8+ zile funcția întorcea HTTP 546 (limită de resurse a
+// worker-ului Edge). Cauza: după importul parcelelor din SW Maps, contururile
+// Săbăreni au 229-1644 de vârfuri fiecare (~7.800 în total, față de ~50
+// înainte), iar gasesteParcela() parcurgea TOATE vârfurile TUTUROR parcelelor
+// pentru fiecare citire GPS (~31.000 citiri / 9 zile x 13 utilaje -> sute de
+// milioane de iterații). Fix: pre-filtru bounding-box per parcelă (un punct
+// în afara dreptunghiului nu poate fi în poligon) — rezultate identice,
+// ordinea parcelelor neschimbată.
+
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -207,6 +217,12 @@ interface ParcelaRing {
   id: string;
   nume: string;
   ring: number[][];
+  // v9: dreptunghiul care încadrează poligonul — respinge rapid punctele
+  // aflate în afara parcelei, fără să parcurgem toate vârfurile.
+  minLon: number;
+  maxLon: number;
+  minLat: number;
+  maxLat: number;
 }
 
 function poligonValid(parcela: ParcelaRaw): number[][] | null {
@@ -231,6 +247,12 @@ function pointInRing(lon: number, lat: number, ring: number[][]): boolean {
 
 function gasesteParcela(lat: number, lon: number, parcele: ParcelaRing[]): { id: string; nume: string } | null {
   for (const p of parcele) {
+    // v9: pre-filtru bounding-box. Contururile importate din SW Maps au sute /
+    // mii de vârfuri; fără acest filtru fiecare citire GPS parcurgea toate
+    // vârfurile tuturor parcelelor și funcția depășea limita de resurse
+    // (HTTP 546) pe perioade de peste ~1 săptămână. Rezultatul e identic:
+    // un punct în afara dreptunghiului nu poate fi în interiorul poligonului.
+    if (lon < p.minLon || lon > p.maxLon || lat < p.minLat || lat > p.maxLat) continue;
     if (pointInRing(lon, lat, p.ring)) return { id: p.id, nume: p.nume };
   }
   return null;
@@ -558,7 +580,15 @@ Deno.serve(async (req) => {
   const parcele = ((parceleRaw ?? []) as ParcelaRaw[])
     .map((p) => {
       const ring = poligonValid(p);
-      return ring ? { id: p.id, nume: p.nume, ring } : null;
+      if (!ring) return null;
+      let minLon = Infinity, maxLon = -Infinity, minLat = Infinity, maxLat = -Infinity;
+      for (const [lon, lat] of ring) {
+        if (lon < minLon) minLon = lon;
+        if (lon > maxLon) maxLon = lon;
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+      }
+      return { id: p.id, nume: p.nume, ring, minLon, maxLon, minLat, maxLat };
     })
     .filter((p): p is ParcelaRing => p !== null);
 
