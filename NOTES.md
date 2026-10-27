@@ -2591,3 +2591,11 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - Cauză: după importul parcelelor din SW Maps, contururile Săbăreni au 229–1644 de vârfuri (~7.800 în total, față de ~50 înainte). `gasesteParcela()` rula ray-casting pe TOATE vârfurile TUTUROR parcelelor pentru fiecare citire GPS (~31.000 citiri / 9 zile, 13 utilaje).
 - Fix (v9 deployat): pre-filtru bounding-box per parcelă în `gasesteParcela` (rezultate identice). Fișier: `supabase/functions/get-sesiuni-detectate/index.ts`.
 - De ținut minte: `get-combustibil-parcele` și `get-utilaj-istoric-parcele` au aceeași funcție `gasesteParcela` fără pre-filtru — dacă ecranele lor dau 546/lentoare pe perioade lungi la Săbăreni, se aplică același fix.
+
+## 2026-10-27 — Corecții de stoc negative la „Alimentare gestiune fermă" (substanțe)
+- Cerință Radu: stocul faptic ≠ scriptic, vrea să poată alinia cu contabilitatea.
+- `alimenteaza_substanta` / `editeaza_alimentare_substanta` acceptă acum cantitate NEGATIVĂ (≠ 0); constrângerea `substante_intrari_cantitate_check` e acum `cantitate <> 0`. SQL: `supabase/schema-corectii-stoc-negative.sql` (aplicat în Supabase ca migrare).
+- La cantitate negativă prețul introdus se ignoră: intrarea se salvează la prețul mediu curent, deci prețul mediu nu se schimbă (consistent cu `recalculeaza_stoc_substanta`).
+- UI: `app/substante/SubstanteScreen.tsx` — câmpul de preț se dezactivează la cantitate negativă, mesaj explicativ, validări relaxate (și la editarea unei alimentări).
+- Același 2026-10-27: NUTRI-MEAL 6-12-44 (SABMAUX000394) convertit din buc în kg (×25) la toate fermele (backup: `backup_nutrimeal394_*_20261027`).
+- Neacoperit: Materii prime (`materii_prime_intrari`) are încă cantitate > 0.
