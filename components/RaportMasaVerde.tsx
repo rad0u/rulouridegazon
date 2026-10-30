@@ -217,7 +217,7 @@ export const STIL_RAPORT_MASA_VERDE = `
     body div:has(> header) { display: block !important; min-height: 0 !important; }
     main { display: block !important; min-height: 0 !important; padding: 0 !important; }
     .inventar-ecran > *:not(.raport-mv) { display: none !important; }
-    .raport-mv { border: none; padding: 0; margin: 0; border-radius: 0; }
+    .raport-mv { border: none; padding: 0 2px 0 0; margin: 0; border-radius: 0; box-sizing: border-box; width: 100%; }
     .raport-mv .mv-bloc { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .raport-mv .mv-tabel th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .raport-mv .mv-svg { max-height: 108mm; }

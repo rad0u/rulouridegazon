@@ -190,19 +190,17 @@ export default function InventarFermaScreen({ fermaId }: { fermaId: string }) {
             </div>
 
             {inv && (
-              <div style={{ marginTop: '1rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
-                  <h2 style={{ fontSize: '1.05rem', margin: 0 }}>Raport — inventar la {formatDataLunga(inv.data_inventar)}</h2>
-                  <button onClick={() => window.print()} disabled={loadingRaport || randuri.length === 0} style={{ padding: '0.5rem 1rem', fontWeight: 600 }}>
-                    🖨️ Tipărește raportul
-                  </button>
-                </div>
-                {loadingRaport ? (
-                  <p>Se încarcă raportul...</p>
-                ) : (
-                  <RaportMasaVerde fermaNume={fermaNume} dataInventar={inv.data_inventar} randuri={randuri} nota={inv.nota} />
-                )}
+              <div style={{ marginTop: '1rem', display: 'flex', alignItems: 'center', gap: '0.75rem', flexWrap: 'wrap' }}>
+                <h2 style={{ fontSize: '1.05rem', margin: 0 }}>Raport — inventar la {formatDataLunga(inv.data_inventar)}</h2>
+                <button onClick={() => window.print()} disabled={loadingRaport || randuri.length === 0} style={{ padding: '0.5rem 1rem', fontWeight: 600 }}>
+                  🖨️ Tipărește raportul
+                </button>
               </div>
+            )}
+            {/* Raportul trebuie să fie copil DIRECT al .inventar-ecran: la tipărire se ascunde orice alt copil direct. */}
+            {inv && loadingRaport && <p>Se încarcă raportul...</p>}
+            {inv && !loadingRaport && (
+              <RaportMasaVerde fermaNume={fermaNume} dataInventar={inv.data_inventar} randuri={randuri} nota={inv.nota} />
             )}
           </>
         )}
