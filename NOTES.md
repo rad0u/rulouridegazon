@@ -2599,3 +2599,10 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - UI: `app/substante/SubstanteScreen.tsx` — câmpul de preț se dezactivează la cantitate negativă, mesaj explicativ, validări relaxate (și la editarea unei alimentări).
 - Același 2026-10-27: NUTRI-MEAL 6-12-44 (SABMAUX000394) convertit din buc în kg (×25) la toate fermele (backup: `backup_nutrimeal394_*_20261027`).
 - Același lucru făcut și la Materii prime (`alimenteaza_materie_prima`, `editeaza_alimentare_materie_prima`, constrângerea `materii_prime_intrari_cantitate_check`; UI în `MateriiPrimeScreen.tsx`).
+
+## 2026-10-30 — Secțiunea „Inventar masă verde”
+- Cerință Radu: câte un buton pe fermă; la fiecare fermă import din SW Maps cu contururile gazonului rămas (parcele cu numele reale: 10, 3 etc.); raport printabil cu desenul parcelei inițiale (gri) și conturul măsurat al masei verzi (verde) suprapus exact, plus legendă (suprafață totală mp / masă verde mp), la data inventarului.
+- Decizii Radu: data inventarului se alege la import; importurile NU modifică parcelele (nici contur, nici suprafață) și se păstrează în istoric (raport nou la fiecare import); acces doar admin_central.
+- Date: tabele `inventar_masa_verde` + `inventar_masa_verde_parcele` (RLS doar admin_central); fiecare rând păstrează un instantaneu al parcelei (suprafață + contur) la data inventarului. SQL: `supabase/schema-inventar-masa-verde.sql` (aplicat ca migrare).
+- UI: `/inventar-masa-verde` (butoane pe ferme), `/inventar-masa-verde/[fermaId]` (import + istoric + raport + Tipărește), `components/ImportInventarMasaVerde.tsx`, `components/RaportMasaVerde.tsx`, `lib/inventarMasaVerde.ts`; link „Inventar masă verde” în meniu (doar admin_central).
+- Import: potrivire după nume (cheieNume), apoi pe hartă (≥50% din contur în parcelă); mai multe contururi pe aceeași parcelă se adună; avertisment dacă masa verde depășește suprafața parcelei.

@@ -164,6 +164,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                     Materii prime
                   </Link>
 
+                  {/* 2026-10-30 (Radu): evidența gazonului rămas de recoltat (SW Maps). */}
+                  {role === 'admin_central' && (
+                    <Link href="/inventar-masa-verde" style={navLinkStyle} onClick={closeMenu}>
+                      Inventar masă verde
+                    </Link>
+                  )}
+
                   {(role === 'admin_central' || role === 'admin_ferma') && (
                     <Link href="/activitati-parcele" style={navLinkStyle} onClick={closeMenu}>
                       Activități parcele
