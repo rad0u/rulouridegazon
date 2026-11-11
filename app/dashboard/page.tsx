@@ -119,6 +119,17 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
         titlu: 'Cheltuieli indirecte',
         descriere: 'Cheltuieli comune, neatribuite direct',
       },
+      // 2026-11-11 (Radu): listing Ferme–Parcele–Suprafețe măsurate (printabil A4) — doar admin general.
+      ...(esteAdminCentral
+        ? [
+            {
+              href: '/rapoarte',
+              icon: '📐',
+              titlu: 'Listing parcele',
+              descriere: 'Ferme – Parcele – Suprafețe măsurate',
+            },
+          ]
+        : []),
     ],
   });
 

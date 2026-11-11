@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import { useUserRole } from '../../lib/useUserRole';
 import { Parcela, polygonLatLngs } from '../../lib/parcelaTypes';
@@ -125,6 +125,13 @@ export default function RapoarteScreen() {
     setBlocuri(rezultat);
     setGeneratLa(new Date());
   }
+
+  // Listingul se generează automat la deschiderea paginii (din meniu sau din
+  // cardul „Listing parcele" de pe Dashboard); butonul rămâne pentru regenerare.
+  useEffect(() => {
+    if (role === 'admin_central') void genereaza();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [role]);
 
   if (roleLoading) {
     return (
