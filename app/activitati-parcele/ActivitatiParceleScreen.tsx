@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import { supabase, supabaseUrl } from '../../lib/supabaseClient';
 import { useUserRole } from '../../lib/useUserRole';
 import ConsumuriInregistrate from '../../components/ConsumuriInregistrate';
+import LucrariInAfaraInregistrate from '../../components/LucrariInAfaraInregistrate';
 import CantitateCuUm from '../../components/CantitateCuUm';
 import { inBaza, parseazaNumar } from '../../lib/unitati';
 import {
@@ -12,6 +13,7 @@ import {
   Substanta,
   TIPURI_CU_MATERII_PRIME,
   TIPURI_CU_SUBSTANTE,
+  TIPURI_OPERATIUNE,
   TipOperatiune,
 } from '../../lib/operatiuniTypes';
 
@@ -84,12 +86,27 @@ import {
 // hârtie se introduc apoi în formularele de pe ecran. Fișa e un bloc ascuns pe
 // ecran, vizibil doar la tipărire (@media print) -- vezi <style> din randare.
 
+// v8, 2026-11-11 (Radu): "un utilaj care efectueaza o lucrare in afara
+// parcelelor nu apare monitorizat in activitati parcele [...] vreau sa-mi
+// apara in raportul Activitati parcele si sa fie monitorizat consumul si
+// numarul de ore, exact ca in parcele — dar cu o mentiune, sa stiu ca a
+// lucrat outside". get-sesiuni-detectate (v10) întoarce acum și sesiuni
+// "în afara parcelelor" (`in_afara: true`, `parcela_id: null`) pentru orice
+// perioadă de funcționare (peste 10 minute) în afara poligoanelor fermei.
+// Ele apar ca grupuri separate (utilaj + zi), marcate vizibil „ÎN AFARA
+// PARCELELOR", cu ore + motorină exact ca în parcele. Confirmarea (tip
+// lucrare, ore, „unde / pentru cine", notă) se salvează în tabela
+// `lucrari_in_afara_fermei` (nu în `operatiuni`, care cere parcelă) — câte un
+// rând pe sesiune GPS, cu `grup_id` comun; orele/locația/nota doar pe primul
+// rând. Lista celor confirmate: components/LucrariInAfaraInregistrate.tsx.
+
 type Sesiune = {
   utilaj_id: string;
   utilaj_nume: string;
   utilaj_recoltare: boolean;
-  parcela_id: string;
+  parcela_id: string | null;
   parcela_nume: string;
+  in_afara?: boolean;
   inceput: string;
   sfarsit: string;
   ore: number;
@@ -124,6 +141,7 @@ type FormSesiune = {
   oreLucru: string;
   cantitateMpRecoltat: string;
   note: string;
+  locatie: string;
   substanteLinii: SubstantaLinie[];
   materiiPrimeLinii: MateriePrimaLinie[];
   saving: boolean;
@@ -184,12 +202,20 @@ function stocProblema(stoc: number | null): boolean {
 
 const AVERTIZARE_STOC = 'Atenție la stoc!';
 
-function formGol(ore: number): FormSesiune {
+// În afara parcelelor: ore întregi 0–24 (nu 0–8), implicit rotunjit din orele detectate.
+function oreLucruImplicitAfara(ore: number): string {
+  if (ore <= 0) return '0';
+  if (ore < 1) return '1';
+  return String(Math.min(24, Math.round(ore)));
+}
+
+function formGol(ore: number, inAfara = false): FormSesiune {
   return {
     tipLucrare: '',
-    oreLucru: oreLucruImplicit(ore),
+    oreLucru: inAfara ? oreLucruImplicitAfara(ore) : oreLucruImplicit(ore),
     cantitateMpRecoltat: '',
     note: '',
+    locatie: '',
     substanteLinii: [],
     materiiPrimeLinii: [],
     saving: false,
@@ -204,8 +230,9 @@ type GrupSesiuni = {
   utilaj_id: string;
   utilaj_nume: string;
   utilaj_recoltare: boolean;
-  parcela_id: string;
+  parcela_id: string | null;
   parcela_nume: string;
+  in_afara: boolean;
   ziua: string;
   sesiuni: Sesiune[];
   oreTotal: number;
@@ -213,7 +240,7 @@ type GrupSesiuni = {
 };
 
 function cheieGrup(s: Sesiune): string {
-  return `${s.utilaj_id}_${s.parcela_id}_${ziuaLocala(s.inceput)}`;
+  return `${s.utilaj_id}_${s.parcela_id ?? 'afara'}_${ziuaLocala(s.inceput)}`;
 }
 
 function grupeazaSesiuni(sesiuni: Sesiune[]): GrupSesiuni[] {
@@ -230,6 +257,7 @@ function grupeazaSesiuni(sesiuni: Sesiune[]): GrupSesiuni[] {
         utilaj_recoltare: s.utilaj_recoltare,
         parcela_id: s.parcela_id,
         parcela_nume: s.parcela_nume,
+        in_afara: s.in_afara === true || s.parcela_id === null,
         ziua: ziuaLocala(s.inceput),
         sesiuni: [],
         oreTotal: 0,
@@ -258,6 +286,8 @@ function grupeazaSesiuni(sesiuni: Sesiune[]): GrupSesiuni[] {
   grupuri.sort((a, b) => {
     const cmpUtilaj = a.utilaj_nume.localeCompare(b.utilaj_nume, 'ro', { sensitivity: 'base' });
     if (cmpUtilaj !== 0) return cmpUtilaj;
+    // v8: „în afara parcelelor” vine după parcelele numerotate ale aceluiași utilaj.
+    if (a.in_afara !== b.in_afara) return a.in_afara ? 1 : -1;
     const cmpParcela = a.parcela_nume.localeCompare(b.parcela_nume, 'ro', {
       numeric: true,
       sensitivity: 'base',
@@ -297,6 +327,8 @@ export default function ActivitatiParceleScreen() {
   const [materiiPrimeToate, setMateriiPrimeToate] = useState<MateriePrima[]>([]);
   const [forms, setForms] = useState<Record<string, FormSesiune>>({});
   const [confirmate, setConfirmate] = useState<Set<string>>(new Set());
+  // v8: crește după fiecare confirmare „în afara parcelelor” ca lista de lucrări confirmate să se reîncarce.
+  const [versiuneAfara, setVersiuneAfara] = useState(0);
 
   const poateVedea = role === 'admin_central' || role === 'admin_ferma';
   const fermaActiva = role === 'admin_central' ? fermaSelectata : fermaProprie;
@@ -408,7 +440,7 @@ export default function ActivitatiParceleScreen() {
       setForms((prev) => {
         const next = { ...prev };
         for (const grup of grupuriNoi) {
-          if (!next[grup.cheie]) next[grup.cheie] = formGol(grup.oreTotal);
+          if (!next[grup.cheie]) next[grup.cheie] = formGol(grup.oreTotal, grup.in_afara);
         }
         return next;
       });
@@ -484,7 +516,65 @@ export default function ActivitatiParceleScreen() {
     }));
   }
 
+  // v8: confirmarea unui grup „în afara parcelelor” -> tabela lucrari_in_afara_fermei.
+  async function confirmaGrupAfara(grup: GrupSesiuni) {
+    const cheie = grup.cheie;
+    const form = forms[cheie];
+    if (!form || !fermaActiva) return;
+
+    const oreNum = form.oreLucru === '' ? null : Number(form.oreLucru);
+    if (
+      form.oreLucru !== '' &&
+      (Number.isNaN(oreNum) || !Number.isInteger(oreNum) || (oreNum ?? 0) < 0 || (oreNum ?? 0) > 24)
+    ) {
+      actualizeazaForm(cheie, { error: 'Orele de lucru trebuie să fie un număr întreg între 0 și 24.' });
+      return;
+    }
+
+    const tip: TipOperatiune = form.tipLucrare || 'Altele';
+    actualizeazaForm(cheie, { saving: true, error: null });
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    const grupId = crypto.randomUUID();
+    const randuri = grup.sesiuni.map((s, index) => ({
+      grup_id: grupId,
+      ferma_id: fermaActiva,
+      utilaj_id: s.utilaj_id,
+      tip,
+      data: ziuaLocala(s.inceput),
+      sesiune_inceput: s.inceput,
+      sesiune_sfarsit: s.sfarsit,
+      ore_detectate: s.ore,
+      litri_combustibil: s.litri_combustibil,
+      ore_lucru: index === 0 ? oreNum : null,
+      locatie: index === 0 ? form.locatie.trim() || null : null,
+      note: index === 0 ? form.note.trim() || null : null,
+      user_id: user?.id ?? null,
+    }));
+
+    const { error: insErr } = await supabase.from('lucrari_in_afara_fermei').insert(randuri);
+    if (insErr) {
+      actualizeazaForm(cheie, { saving: false, error: insErr.message });
+      return;
+    }
+
+    actualizeazaForm(cheie, { saving: false });
+    setConfirmate((prev) => {
+      const next = new Set(prev);
+      for (const s of grup.sesiuni) next.add(cheieSesiune(s));
+      return next;
+    });
+    setVersiuneAfara((v) => v + 1);
+  }
+
   async function confirmaGrup(grup: GrupSesiuni) {
+    if (grup.in_afara) {
+      await confirmaGrupAfara(grup);
+      return;
+    }
     const cheie = grup.cheie;
     const form = forms[cheie];
     if (!form) return;
@@ -561,7 +651,7 @@ export default function ActivitatiParceleScreen() {
     // fiecare cu propriul interval), dar ore_lucru / mp recoltat / notă se
     // pun DOAR pe primul rând, ca să nu se numere de două ori în rapoarte.
     const randuri = grup.sesiuni.map((s, index) => ({
-      parcela_id: s.parcela_id,
+      parcela_id: s.parcela_id as string,
       tip,
       data: ziuaLocala(s.inceput),
       ore_lucru: index === 0 ? oreNum : null,
@@ -765,7 +855,9 @@ export default function ActivitatiParceleScreen() {
         lucrare doar dacă a fost fertilizare sau însămânțare, ca să alegi substanța/materia primă și cantitatea) —
         pentru utilajele de recoltare, introdu doar suprafața (mp) de gazon recoltată. O sesiune apare aici doar
         după ce s-a încheiat (utilajul a plecat din parcelă sau a oprit motorul) și doar dacă a durat peste 10
-        minute.
+        minute. Perioadele în care un utilaj a funcționat în AFARA parcelelor fermei apar separat, marcate „în
+        afara parcelelor” (portocaliu): alegi tipul lucrării, orele și — în câmpul „Unde / pentru cine” — locul
+        sau beneficiarul; ele se salvează ca lucrări în afara fermei, cu orele și motorina monitorizate la fel.
       </p>
 
       {role === 'admin_central' && !fermaSelectata && <p>Alege o fermă pentru a vedea activitățile detectate.</p>}
@@ -789,20 +881,49 @@ export default function ActivitatiParceleScreen() {
       <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', overflowY: 'auto' }}>
         {grupuriDeAfisat.map((grup) => {
           const cheie = grup.cheie;
-          const form = forms[cheie] ?? formGol(grup.oreTotal);
+          const form = forms[cheie] ?? formGol(grup.oreTotal, grup.in_afara);
 
           return (
-            <div key={cheie} style={{ border: '1px solid #ddd', borderRadius: '8px', padding: '1rem' }}>
+            <div
+              key={cheie}
+              style={{
+                border: grup.in_afara ? '1px solid #f0b46a' : '1px solid #ddd',
+                borderLeft: grup.in_afara ? '5px solid #e8890c' : undefined,
+                borderRadius: '8px',
+                padding: '1rem',
+              }}
+            >
               <div style={{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem', marginBottom: '0.6rem' }}>
                 <div>
-                  <strong>{grup.utilaj_nume}</strong> — parcela <strong>{grup.parcela_nume}</strong>
-                  {grup.utilaj_recoltare && (
+                  <strong>{grup.utilaj_nume}</strong> —{' '}
+                  {grup.in_afara ? (
+                    <span
+                      style={{
+                        background: '#fff1dc',
+                        color: '#a85a00',
+                        border: '1px solid #f0b46a',
+                        borderRadius: '4px',
+                        padding: '0.1rem 0.45rem',
+                        fontWeight: 700,
+                        fontSize: '0.85rem',
+                      }}
+                    >
+                      ÎN AFARA PARCELELOR / FERMEI
+                    </span>
+                  ) : (
+                    <>
+                      parcela <strong>{grup.parcela_nume}</strong>
+                    </>
+                  )}
+                  {grup.utilaj_recoltare && !grup.in_afara && (
                     <span style={{ marginLeft: '0.5rem', fontSize: '0.75rem', color: '#8a5a00' }}>utilaj de recoltare</span>
                   )}
                   <div style={{ fontSize: '0.85rem', color: '#666' }}>
                     {formatZiuaLocala(grup.ziua)} · total <strong>{grup.oreTotal}h</strong> · motorină{' '}
                     <strong>{formatLitri(grup.litriTotal)}</strong>
-                    {grup.sesiuni.length > 1 ? ` · ${grup.sesiuni.length} intrări în parcelă` : ''}
+                    {grup.sesiuni.length > 1
+                      ? ` · ${grup.sesiuni.length} ${grup.in_afara ? 'perioade în afara parcelelor' : 'intrări în parcelă'}`
+                      : ''}
                   </div>
 
                   {/* Detaliul sesiunilor GPS individuale care compun grupul */}
@@ -822,7 +943,7 @@ export default function ActivitatiParceleScreen() {
                   <input
                     type="number"
                     min="0"
-                    max="8"
+                    max={grup.in_afara ? '24' : '8'}
                     step="1"
                     inputMode="numeric"
                     value={form.oreLucru}
@@ -831,7 +952,38 @@ export default function ActivitatiParceleScreen() {
                   />
                 </label>
 
-                {grup.utilaj_recoltare ? (
+                {grup.in_afara ? (
+                  <>
+                    <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', minWidth: '170px' }}>
+                      Tip lucrare
+                      <select
+                        value={form.tipLucrare}
+                        onChange={(e) => actualizeazaForm(cheie, { tipLucrare: e.target.value as TipOperatiune | '' })}
+                        style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc' }}
+                      >
+                        <option value="">Altă lucrare</option>
+                        {TIPURI_OPERATIUNE.filter(
+                          (t) =>
+                            t !== 'Altele' && !TIPURI_CU_SUBSTANTE.includes(t) && !TIPURI_CU_MATERII_PRIME.includes(t),
+                        ).map((tip) => (
+                          <option key={tip} value={tip}>
+                            {LABEL_OPERATIUNE[tip]}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', flex: '1 1 200px' }}>
+                      Unde / pentru cine
+                      <input
+                        type="text"
+                        placeholder="ex. teren vecin, client X, drum de acces"
+                        value={form.locatie}
+                        onChange={(e) => actualizeazaForm(cheie, { locatie: e.target.value })}
+                        style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc' }}
+                      />
+                    </label>
+                  </>
+                ) : grup.utilaj_recoltare ? (
                   <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
                     Suprafață recoltată (mp)
                     <input
@@ -1029,6 +1181,9 @@ export default function ActivitatiParceleScreen() {
         }}
       />
 
+      {/* v8: lucrările „în afara parcelelor” deja confirmate (ore + motorină). */}
+      <LucrariInAfaraInregistrate fermaId={fermaActiva} deLa={deLa} panaLa={panaLa} versiune={versiuneAfara} />
+
       {/* Fișa de teren (doar la tipărire) — vezi nota v7 de sus. */}
       <section className="fisa-teren">
         <h2>FIȘĂ DE TEREN — Activități pe parcele</h2>
@@ -1067,14 +1222,26 @@ export default function ActivitatiParceleScreen() {
                 <td>
                   <strong>{grup.utilaj_nume}</strong>
                   <br />
-                  Parcela <strong>{grup.parcela_nume}</strong>
+                  {grup.in_afara ? (
+                    <strong>ÎN AFARA PARCELELOR / FERMEI</strong>
+                  ) : (
+                    <>
+                      Parcela <strong>{grup.parcela_nume}</strong>
+                    </>
+                  )}
                   <br />
                   {formatZiuaLocala(grup.ziua)} · {grup.oreTotal}h
                   <div className="mic">
                     {grup.sesiuni.map((sesiune) => `${formatOra(sesiune.inceput)}–${formatOra(sesiune.sfarsit)}`).join(', ')}
                   </div>
                 </td>
-                {grup.utilaj_recoltare ? (
+                {grup.in_afara ? (
+                  <td colSpan={2}>
+                    <strong>Lucrare în afara parcelelor</strong>
+                    <div className="linie">Tip lucrare:</div>
+                    <div className="linie">Unde / pentru cine:</div>
+                  </td>
+                ) : grup.utilaj_recoltare ? (
                   <td colSpan={2}>
                     <strong>Recoltare</strong> — suprafață recoltată: ______________ mp
                   </td>

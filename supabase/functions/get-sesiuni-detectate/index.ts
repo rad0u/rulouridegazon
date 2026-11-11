@@ -109,6 +109,19 @@
 // în afara dreptunghiului nu poate fi în poligon) — rezultate identice,
 // ordinea parcelelor neschimbată.
 
+// v10, 2026-11-11 (Radu): "un utilaj care efectueaza o lucrare in afara
+// parcelelor nu apare monitorizat in activitati parcele [...] vreau sa-mi apara
+// in raportul Activitati parcele si sa fie monitorizat consumul si numarul de
+// ore, exact ca in parcele — dar cu o mentiune, sa stiu ca a lucrat outside".
+// Intervalele în care utilajul e în funcțiune (contact SAU mișcare ≥20 m) în
+// AFARA tuturor parcelelor fermei formează acum sesiuni „în afara parcelelor”
+// (`in_afara: true`, `parcela_id: null`), cu aceleași reguli ca în parcele
+// (continuitate, gap ≤ 1h, peste 10 minute, ore + litri de motorină). Decizie
+// Radu: fără filtru de distanță/viteză — orice perioadă în afara parcelelor
+// (include și deplasări/manevre prin curte; pragul se poate ridica ulterior cu
+// PRAG_MINIM_MINUTE_AFARA). Deduplicarea ține cont și de lucrările deja
+// confirmate în `lucrari_in_afara_fermei`.
+
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -132,6 +145,10 @@ function jsonResponse(body: unknown, status = 200) {
 // get-combustibil-parcele.
 const MAX_GAP_ORE = 1;
 const PRAG_MINIM_MINUTE = 10;
+// v10: durata minimă a unei sesiuni „în afara parcelelor” (minute).
+const PRAG_MINIM_MINUTE_AFARA = 10;
+const ID_AFARA = '__afara__';
+const NUME_AFARA = 'În afara parcelelor';
 // v2: prag de mișcare GPS pentru fallback-ul la semnalul de contact nesigur
 // — identic cu PRAG_MISCARE_METRI din get-combustibil-report v11.
 const PRAG_MISCARE_METRI = 20;
@@ -457,8 +474,9 @@ interface Sesiune {
   utilaj_id: string;
   utilaj_nume: string;
   utilaj_recoltare: boolean;
-  parcela_id: string;
+  parcela_id: string | null; // v10: null = în afara parcelelor
   parcela_nume: string;
+  in_afara: boolean;
   inceput: string;
   sfarsit: string;
   ore: number;
@@ -617,6 +635,21 @@ Deno.serve(async (req) => {
     }
   }
 
+  // v10: lucrările „în afara parcelelor” deja confirmate nu se mai propun.
+  const { data: confirmateAfaraRaw, error: confirmateAfaraError } = await adminClient
+    .from('lucrari_in_afara_fermei')
+    .select('utilaj_id, sesiune_inceput, sesiune_sfarsit')
+    .in('utilaj_id', utilajIds)
+    .gte('sesiune_sfarsit', de_la);
+
+  if (!confirmateAfaraError) {
+    for (const c of (confirmateAfaraRaw ?? []) as { utilaj_id: string; sesiune_inceput: string; sesiune_sfarsit: string }[]) {
+      const lista = confirmatePorUtilaj.get(c.utilaj_id) ?? [];
+      lista.push({ start: new Date(c.sesiune_inceput).getTime(), stop: new Date(c.sesiune_sfarsit).getTime() });
+      confirmatePorUtilaj.set(c.utilaj_id, lista);
+    }
+  }
+
   const sesiuni: Sesiune[] = [];
 
   for (const utilaj of utilaje) {
@@ -662,12 +695,14 @@ Deno.serve(async (req) => {
 
     const confirmate = confirmatePorUtilaj.get(utilaj.id) ?? [];
 
+    // parcelaId = ID_AFARA pentru sesiunile „în afara parcelelor” (v10).
     let current: { parcelaId: string; parcelaNume: string; start: string; end: string } | null = null;
 
     const inchideSiSalveaza = () => {
       if (!current) return;
       const durataMinute = (new Date(current.end).getTime() - new Date(current.start).getTime()) / 60_000;
-      if (durataMinute > PRAG_MINIM_MINUTE) {
+      const pragMinute = current.parcelaId === ID_AFARA ? PRAG_MINIM_MINUTE_AFARA : PRAG_MINIM_MINUTE;
+      if (durataMinute > pragMinute) {
         const startMs = new Date(current.start).getTime();
         const endMs = new Date(current.end).getTime();
         const seSuprapune = confirmate.some((c) => startMs < c.stop && endMs > c.start);
@@ -679,8 +714,9 @@ Deno.serve(async (req) => {
             utilaj_id: utilaj.id,
             utilaj_nume: utilaj.nume,
             utilaj_recoltare: utilaj.este_utilaj_recoltare,
-            parcela_id: current.parcelaId,
+            parcela_id: current.parcelaId === ID_AFARA ? null : current.parcelaId,
             parcela_nume: current.parcelaNume,
+            in_afara: current.parcelaId === ID_AFARA,
             inceput: current.start,
             sfarsit: current.end,
             ore: Math.round((durataMinute / 60) * 10) / 10,
@@ -699,18 +735,21 @@ Deno.serve(async (req) => {
       // v2: era `prev.contact === true` strict — acum contact SAU mișcare GPS
       // reală (vezi comentariul intervalInFunctionare de mai sus).
       const functionareOk = intervalInFunctionare(prev, curr);
-      const parcelaPrev =
-        functionareOk && prev.latitudine !== null && prev.longitudine !== null
-          ? gasesteParcela(prev.latitudine, prev.longitudine, parcele)
-          : null;
-      const valid = functionareOk && parcelaPrev !== null && deltaOre > 0 && deltaOre <= MAX_GAP_ORE;
+      // v10: locul = parcela în care e utilajul SAU „în afara parcelelor” (dacă e în
+      // funcțiune cu coordonate valide, dar în niciun poligon).
+      let loc: { id: string; nume: string } | null = null;
+      if (functionareOk && prev.latitudine !== null && prev.longitudine !== null) {
+        const parcelaPrev = gasesteParcela(prev.latitudine, prev.longitudine, parcele);
+        loc = parcelaPrev ?? { id: ID_AFARA, nume: NUME_AFARA };
+      }
+      const valid = loc !== null && deltaOre > 0 && deltaOre <= MAX_GAP_ORE;
 
-      if (valid && current && current.parcelaId === parcelaPrev!.id) {
+      if (valid && current && current.parcelaId === loc!.id) {
         current.end = curr.data_ora;
       } else {
         inchideSiSalveaza();
         if (valid) {
-          current = { parcelaId: parcelaPrev!.id, parcelaNume: parcelaPrev!.nume, start: prev.data_ora, end: curr.data_ora };
+          current = { parcelaId: loc!.id, parcelaNume: loc!.nume, start: prev.data_ora, end: curr.data_ora };
         }
       }
     }
