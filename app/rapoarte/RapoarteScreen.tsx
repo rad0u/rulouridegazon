@@ -14,6 +14,53 @@ import { Parcela, polygonLatLngs } from '../../lib/parcelaTypes';
 // parcelele cu contur GPS valid (măsurate); intrările fără contur (seed/test
 // vechi) sunt excluse, cu o notă în raport cu numărul lor.
 
+// 2026-11-11 (Radu): „pentru contabilitate, pentru a stabili producția în curs de
+// execuție — vreau să evidențiez parcelele pe care se execută lucrări [...]
+// parcele pe care au lucrat utilajele anul ăsta; dacă n-au fost lucrări
+// detectate, înseamnă că nu este producție în execuție. Exemplu P4 de la
+// Bobicești". Criteriu: orele de lucru ale utilajelor confirmate pe parcelă în
+// anul curent (durata sesiunilor GPS din `operatiuni`; la operațiunile manuale,
+// fără sesiune, `ore_lucru`). Sub PRAG_ORE_LUCRARI parcela NU e considerată în
+// lucru — P4 Bobicești are doar 2 treceri de ~12 minute (0,4 h în total), deci
+// simple traversări. Rândurile „în lucru" sunt evidențiate (fundal verde + DA).
+const PRAG_ORE_LUCRARI = 1;
+
+type RandOperatiune = {
+  parcela_id: string;
+  ore_lucru: number | null;
+  sesiune_inceput: string | null;
+  sesiune_sfarsit: string | null;
+};
+
+// Orele de lucru confirmate pe fiecare parcelă de la 1 ianuarie al anului dat
+// (paginat: Supabase întoarce cel mult 1000 de rânduri pe cerere).
+async function oreLucrariPeParcele(an: number): Promise<{ ore: Map<string, number>; error: string | null }> {
+  const ore = new Map<string, number>();
+  const PAGINA = 1000;
+  for (let from = 0; ; from += PAGINA) {
+    const { data, error } = await supabase
+      .from('operatiuni')
+      .select('parcela_id,ore_lucru,sesiune_inceput,sesiune_sfarsit')
+      .gte('data', `${an}-01-01`)
+      .lte('data', `${an}-12-31`)
+      .order('id')
+      .range(from, from + PAGINA - 1);
+    if (error) return { ore, error: error.message };
+    const randuri = (data as RandOperatiune[]) ?? [];
+    for (const r of randuri) {
+      let h = 0;
+      if (r.sesiune_inceput && r.sesiune_sfarsit) {
+        h = (new Date(r.sesiune_sfarsit).getTime() - new Date(r.sesiune_inceput).getTime()) / 3_600_000;
+      } else if (r.ore_lucru !== null) {
+        h = Number(r.ore_lucru);
+      }
+      if (h > 0) ore.set(r.parcela_id, (ore.get(r.parcela_id) ?? 0) + h);
+    }
+    if (randuri.length < PAGINA) break;
+  }
+  return { ore, error: null };
+}
+
 const ETICHETE_FERME: Record<string, { numar: string; nume: string }> = {
   Medgidia: { numar: 'F1', nume: 'Medgidia' },
   'Holboca (Iași)': { numar: 'F2', nume: 'Holboca (Iași)' },
@@ -27,6 +74,7 @@ type RandParcela = {
   nume: string;
   tipGazon: string | null;
   mp: number;
+  inLucru: boolean;
 };
 
 type BlocFerma = {
@@ -59,6 +107,8 @@ const STIL = `
   .raport-lst th { background: #f4f4f4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .raport-lst .dr { text-align: right; }
   .raport-lst .total td { font-weight: bold; background: #f4f4f4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .raport-lst tr.lucru td { background: #dff0d8; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .raport-lst .legenda-lucru { display: inline-block; width: 14px; height: 10px; background: #dff0d8; border: 1px solid #000; margin-right: 5px; vertical-align: -1px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .raport-lst .mic { font-size: 8.5pt; color: #333; margin-top: 4px; }
   @media print {
     @page { size: A4 portrait; margin: 10mm; }
@@ -77,6 +127,7 @@ export default function RapoarteScreen() {
   const [error, setError] = useState<string | null>(null);
   const [blocuri, setBlocuri] = useState<BlocFerma[] | null>(null);
   const [generatLa, setGeneratLa] = useState<Date | null>(null);
+  const [anLucrari, setAnLucrari] = useState<number>(new Date().getFullYear());
 
   async function genereaza() {
     setLoading(true);
@@ -87,11 +138,15 @@ export default function RapoarteScreen() {
       supabase.from('parcele').select('id,ferma_id,nume,tip_gazon,stadiu,suprafata_mp,poligon_harta'),
     ]);
 
+    const an = new Date().getFullYear();
+    const { ore: orePeParcela, error: errO } = await oreLucrariPeParcele(an);
+
     setLoading(false);
-    if (errF || errP) {
-      setError(errF?.message ?? errP?.message ?? 'Eroare la citirea datelor.');
+    if (errF || errP || errO) {
+      setError(errF?.message ?? errP?.message ?? errO ?? 'Eroare la citirea datelor.');
       return;
     }
+    setAnLucrari(an);
 
     const listaParcele = (parcele as Parcela[]) ?? [];
     const rezultat: BlocFerma[] = ((ferme as { id: string; nume: string }[]) ?? []).map((f) => {
@@ -103,6 +158,7 @@ export default function RapoarteScreen() {
           nume: p.nume,
           tipGazon: p.tip_gazon,
           mp: Number(p.suprafata_mp ?? 0),
+          inLucru: (orePeParcela.get(p.id) ?? 0) >= PRAG_ORE_LUCRARI,
         }))
         .sort((a, b) => a.nume.localeCompare(b.nume, 'ro', { numeric: true, sensitivity: 'base' }));
       return {
@@ -210,27 +266,30 @@ export default function RapoarteScreen() {
                       <th>Cultură</th>
                       <th className="dr">Suprafață (mp)</th>
                       <th className="dr">Suprafață (ha)</th>
+                      <th style={{ width: '14%' }}>Lucrări {anLucrari}</th>
                     </tr>
                   </thead>
                   <tbody>
                     {b.parcele.length === 0 && (
                       <tr>
-                        <td colSpan={5}>Nicio parcelă cu contur măsurat.</td>
+                        <td colSpan={6}>Nicio parcelă cu contur măsurat.</td>
                       </tr>
                     )}
                     {b.parcele.map((p, i) => (
-                      <tr key={p.id}>
+                      <tr key={p.id} className={p.inLucru ? 'lucru' : undefined}>
                         <td>{i + 1}</td>
                         <td>{p.nume}</td>
                         <td>{p.tipGazon ?? ''}</td>
                         <td className="dr">{mp(p.mp)}</td>
                         <td className="dr">{ha(p.mp)}</td>
+                        <td>{p.inLucru ? 'DA' : ''}</td>
                       </tr>
                     ))}
                     <tr className="total">
                       <td colSpan={3}>Total {b.numar ?? b.nume}</td>
                       <td className="dr">{mp(b.totalMp)}</td>
                       <td className="dr">{ha(b.totalMp)}</td>
+                      <td />
                     </tr>
                   </tbody>
                 </table>
@@ -268,6 +327,11 @@ export default function RapoarteScreen() {
                   </tr>
                 </tbody>
               </table>
+              <p className="mic">
+                <span className="legenda-lucru" />
+                Rând evidențiat + „DA" = parcelă pe care au lucrat utilajele în {anLucrari} (producție în curs de execuție);
+                parcelele neevidențiate nu au lucrări detectate în {anLucrari}.
+              </p>
               <p className="mic">
                 Sunt incluse doar parcelele cu contur GPS măsurat (suprafața importată din SW Maps sau desenată pe hartă).
                 {nrExcluse > 0
