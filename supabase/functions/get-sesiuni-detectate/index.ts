@@ -122,6 +122,15 @@
 // PRAG_MINIM_MINUTE_AFARA). Deduplicarea ține cont și de lucrările deja
 // confirmate în `lucrari_in_afara_fermei`.
 
+// v11, 2026-11-11 (Radu): „Autostack apare în afara parcelelor — e utilaj de
+// recoltare, nu poate lucra în altă parte; în Traccar a stat pe loc, la ralanti,
+// în garaj". Cauza: în afara parcelelor, `contact = pornit` singur (ralanti pe loc)
+// conta ca funcționare. Corecții: (1) utilajele de recoltare NU produc sesiuni
+// „în afara parcelelor"; (2) pentru ceilalți, în afara parcelelor contează doar
+// MIȘCAREA reală (≥ PRAG_MISCARE_METRI între două citiri) — un utilaj care stă
+// pe loc cu motorul pornit nu mai e raportat. În parcele regula rămâne cea
+// veche (ralanti-ul contează, decizie Radu 30.09).
+
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
@@ -290,6 +299,15 @@ function distantaMetri(lat1: number, lon1: number, lat2: number, lon2: number): 
 // efectiv ≥PRAG_MISCARE_METRI până la citirea următoare — fallback identic cu
 // intervalInFunctionare din get-combustibil-report v11, pentru cazul în care
 // `contact` flichează fals tranzitoriu chiar în timpul lucrului real.
+// v11: mișcare reală între două citiri (fără a lua în calcul `contact`) —
+// folosită pentru sesiunile „în afara parcelelor".
+function miscareReala(prev: Citire, curr: Citire): boolean {
+  if (prev.latitudine == null || prev.longitudine == null || curr.latitudine == null || curr.longitudine == null) {
+    return false;
+  }
+  return distantaMetri(prev.latitudine, prev.longitudine, curr.latitudine, curr.longitudine) >= PRAG_MISCARE_METRI;
+}
+
 function intervalInFunctionare(prev: Citire, curr: Citire): boolean {
   if (prev.contact === true) return true;
   if (prev.latitudine == null || prev.longitudine == null || curr.latitudine == null || curr.longitudine == null) {
@@ -740,7 +758,12 @@ Deno.serve(async (req) => {
       let loc: { id: string; nume: string } | null = null;
       if (functionareOk && prev.latitudine !== null && prev.longitudine !== null) {
         const parcelaPrev = gasesteParcela(prev.latitudine, prev.longitudine, parcele);
-        loc = parcelaPrev ?? { id: ID_AFARA, nume: NUME_AFARA };
+        if (parcelaPrev) {
+          loc = parcelaPrev;
+        } else if (!utilaj.este_utilaj_recoltare && miscareReala(prev, curr)) {
+          // v11: în afara parcelelor doar utilaje neprecizate ca „de recoltare" și doar cu mișcare reală.
+          loc = { id: ID_AFARA, nume: NUME_AFARA };
+        }
       }
       const valid = loc !== null && deltaOre > 0 && deltaOre <= MAX_GAP_ORE;
 
