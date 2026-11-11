@@ -10,8 +10,9 @@ import { Parcela, polygonLatLngs } from '../../lib/parcelaTypes';
 // tehnică de tipărire ca la Inventar masă verde: raportul `.raport-lst` e
 // copil DIRECT al `.rapoarte-ecran`, iar la tipărire se ascunde orice alt copil
 // direct). Suprafața e `parcele.suprafata_mp` (actualizată de importul
-// SW Maps / desenarea pe hartă). Parcelele fără contur GPS valid au doar o
-// valoare declarată (nemăsurată) — sunt marcate distinct și însumate separat.
+// SW Maps / desenarea pe hartă). Decizie Radu (11.11): listingul conține DOAR
+// parcelele cu contur GPS valid (măsurate); intrările fără contur (seed/test
+// vechi) sunt excluse, cu o notă în raport cu numărul lor.
 
 const ETICHETE_FERME: Record<string, { numar: string; nume: string }> = {
   Medgidia: { numar: 'F1', nume: 'Medgidia' },
@@ -26,7 +27,6 @@ type RandParcela = {
   nume: string;
   tipGazon: string | null;
   mp: number;
-  masurat: boolean;
 };
 
 type BlocFerma = {
@@ -35,7 +35,7 @@ type BlocFerma = {
   nume: string;
   parcele: RandParcela[];
   totalMp: number;
-  masuratMp: number;
+  excluse: number;
 };
 
 const nf0 = new Intl.NumberFormat('ro-RO', { maximumFractionDigits: 0 });
@@ -59,7 +59,6 @@ const STIL = `
   .raport-lst th { background: #f4f4f4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .raport-lst .dr { text-align: right; }
   .raport-lst .total td { font-weight: bold; background: #f4f4f4; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  .raport-lst .nem { color: #a85a00; }
   .raport-lst .mic { font-size: 8.5pt; color: #333; margin-top: 4px; }
   @media print {
     @page { size: A4 portrait; margin: 10mm; }
@@ -98,13 +97,12 @@ export default function RapoarteScreen() {
     const rezultat: BlocFerma[] = ((ferme as { id: string; nume: string }[]) ?? []).map((f) => {
       const et = ETICHETE_FERME[f.nume];
       const randuri: RandParcela[] = listaParcele
-        .filter((p) => p.ferma_id === f.id)
+        .filter((p) => p.ferma_id === f.id && polygonLatLngs(p).length > 0)
         .map((p) => ({
           id: p.id,
           nume: p.nume,
           tipGazon: p.tip_gazon,
           mp: Number(p.suprafata_mp ?? 0),
-          masurat: polygonLatLngs(p).length > 0,
         }))
         .sort((a, b) => a.nume.localeCompare(b.nume, 'ro', { numeric: true, sensitivity: 'base' }));
       return {
@@ -113,7 +111,7 @@ export default function RapoarteScreen() {
         nume: et?.nume ?? f.nume,
         parcele: randuri,
         totalMp: randuri.reduce((acc, r) => acc + r.mp, 0),
-        masuratMp: randuri.filter((r) => r.masurat).reduce((acc, r) => acc + r.mp, 0),
+        excluse: listaParcele.filter((p) => p.ferma_id === f.id && polygonLatLngs(p).length === 0).length,
       };
     });
 
@@ -145,9 +143,8 @@ export default function RapoarteScreen() {
   }
 
   const totalGeneral = (blocuri ?? []).reduce((acc, b) => acc + b.totalMp, 0);
-  const masuratGeneral = (blocuri ?? []).reduce((acc, b) => acc + b.masuratMp, 0);
   const nrParcele = (blocuri ?? []).reduce((acc, b) => acc + b.parcele.length, 0);
-  const nrNemasurate = (blocuri ?? []).reduce((acc, b) => acc + b.parcele.filter((p) => !p.masurat).length, 0);
+  const nrExcluse = (blocuri ?? []).reduce((acc, b) => acc + b.excluse, 0);
 
   return (
     <main style={{ padding: 'clamp(1rem, 4vw, 2rem)', maxWidth: '1000px', margin: '0 auto' }}>
@@ -206,13 +203,12 @@ export default function RapoarteScreen() {
                       <th>Tip gazon</th>
                       <th className="dr">Suprafață (mp)</th>
                       <th className="dr">Suprafață (ha)</th>
-                      <th>Sursă</th>
                     </tr>
                   </thead>
                   <tbody>
                     {b.parcele.length === 0 && (
                       <tr>
-                        <td colSpan={6}>Nicio parcelă înregistrată.</td>
+                        <td colSpan={5}>Nicio parcelă cu contur măsurat.</td>
                       </tr>
                     )}
                     {b.parcele.map((p, i) => (
@@ -222,14 +218,12 @@ export default function RapoarteScreen() {
                         <td>{p.tipGazon ?? '—'}</td>
                         <td className="dr">{mp(p.mp)}</td>
                         <td className="dr">{ha(p.mp)}</td>
-                        <td className={p.masurat ? '' : 'nem'}>{p.masurat ? 'Măsurat (contur GPS)' : 'Fără contur — valoare declarată'}</td>
                       </tr>
                     ))}
                     <tr className="total">
                       <td colSpan={3}>Total {b.numar ?? b.nume}</td>
                       <td className="dr">{mp(b.totalMp)}</td>
                       <td className="dr">{ha(b.totalMp)}</td>
-                      <td>din care măsurat: {mp(b.masuratMp)} mp</td>
                     </tr>
                   </tbody>
                 </table>
@@ -245,7 +239,6 @@ export default function RapoarteScreen() {
                     <th className="dr">Parcele</th>
                     <th className="dr">Suprafață (mp)</th>
                     <th className="dr">Suprafață (ha)</th>
-                    <th className="dr">Din care măsurat (mp)</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -258,7 +251,6 @@ export default function RapoarteScreen() {
                       <td className="dr">{b.parcele.length}</td>
                       <td className="dr">{mp(b.totalMp)}</td>
                       <td className="dr">{ha(b.totalMp)}</td>
-                      <td className="dr">{mp(b.masuratMp)}</td>
                     </tr>
                   ))}
                   <tr className="total">
@@ -266,14 +258,13 @@ export default function RapoarteScreen() {
                     <td className="dr">{nrParcele}</td>
                     <td className="dr">{mp(totalGeneral)}</td>
                     <td className="dr">{ha(totalGeneral)}</td>
-                    <td className="dr">{mp(masuratGeneral)}</td>
                   </tr>
                 </tbody>
               </table>
               <p className="mic">
-                Suprafața este cea înregistrată pe parcelă (importată din SW Maps sau desenată pe hartă).
-                {nrParcele > 0 && nrNemasurate > 0
-                  ? ` ${nrNemasurate} parcele nu au încă contur GPS valid — suprafața lor este o valoare declarată, nemăsurată.`
+                Sunt incluse doar parcelele cu contur GPS măsurat (suprafața importată din SW Maps sau desenată pe hartă).
+                {nrExcluse > 0
+                  ? ` ${nrExcluse} intrări fără contur valid nu sunt incluse în listing.`
                   : ''}
               </p>
             </div>
