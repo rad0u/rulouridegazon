@@ -200,7 +200,7 @@ export default function RapoarteScreen() {
                     <tr>
                       <th style={{ width: '6%' }}>Nr.</th>
                       <th>Parcelă</th>
-                      <th>Tip gazon</th>
+                      <th>Cultură</th>
                       <th className="dr">Suprafață (mp)</th>
                       <th className="dr">Suprafață (ha)</th>
                     </tr>
@@ -215,7 +215,7 @@ export default function RapoarteScreen() {
                       <tr key={p.id}>
                         <td>{i + 1}</td>
                         <td>{p.nume}</td>
-                        <td>{p.tipGazon ?? '—'}</td>
+                        <td>{p.tipGazon ?? ''}</td>
                         <td className="dr">{mp(p.mp)}</td>
                         <td className="dr">{ha(p.mp)}</td>
                       </tr>
