@@ -23,7 +23,8 @@ import { Parcela, polygonLatLngs } from '../../lib/parcelaTypes';
 // fără sesiune, `ore_lucru`). Sub PRAG_ORE_LUCRARI parcela NU e considerată în
 // lucru — P4 Bobicești are doar 2 treceri de ~12 minute (0,4 h în total), deci
 // simple traversări. Rândurile „în lucru" sunt evidențiate (fundal verde + DA).
-const PRAG_ORE_LUCRARI = 1;
+// Prag ridicat de la 1 h la 3 h (Radu, 11.11.2026: „e mult prea puțin 1h în 2 luni").
+const PRAG_ORE_LUCRARI = 3;
 
 type RandOperatiune = {
   parcela_id: string;
