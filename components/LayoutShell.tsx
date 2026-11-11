@@ -171,6 +171,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                     </Link>
                   )}
 
+                  {/* 2026-11-11 (Radu): pagina Rapoarte (listing Ferme–Parcele–Suprafețe). */}
+                  {role === 'admin_central' && (
+                    <Link href="/rapoarte" style={navLinkStyle} onClick={closeMenu}>
+                      Rapoarte
+                    </Link>
+                  )}
+
                   {(role === 'admin_central' || role === 'admin_ferma') && (
                     <Link href="/activitati-parcele" style={navLinkStyle} onClick={closeMenu}>
                       Activități parcele

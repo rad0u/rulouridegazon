@@ -2617,3 +2617,9 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - Atenție: fără filtru, manevrele prin curte și deplasările pe drum >10 min în afara parcelelor vor apărea ca sesiuni „în afara"; pragul se poate ridica din constanta de mai sus. Lucrul în parcelele altei ferme proprii e tot „în afara" pentru ferma de origine a utilajului.
 - Rămas de făcut (la cerere): bucket „în afara" în rapoartele de combustibil pe parcele; pre-filtru bbox și în `get-combustibil-parcele` / `get-utilaj-istoric-parcele`.
 - 2026-11-11 (fix, `get-sesiuni-detectate` v11): Autostack (utilaj de recoltare) apărea „în afara parcelelor" — de fapt stătea la ralanti în garaj (contact pornit, fără mișcare). Acum: (1) utilajele marcate „de recoltare" nu mai produc sesiuni „în afara"; (2) pentru celelalte utilaje, în afara parcelelor contează doar mișcarea reală (≥20 m între citiri), nu și contact-ul singur. În parcele regula rămâne neschimbată (ralanti-ul contează). Efect secundar: o oprire pe loc în afara parcelelor (ex. încărcare la client) rupe sesiunea în bucăți.
+
+## 2026-11-11 — Pagina „Rapoarte”: listing Ferme–Parcele–Suprafețe
+- Cerință Radu: în rapoarte, un buton care dă un listing Ferme–Parcele–Suprafețe măsurate la zi; format: pagină printabilă A4.
+- Pagină nouă `/rapoarte` (`app/rapoarte/RapoarteScreen.tsx`), link „Rapoarte” în meniu (doar admin_central). Buton „Listing Ferme – Parcele – Suprafețe" generează raportul din `ferme` + `parcele` (suprafata_mp), cu data generării, tabel pe fermă (F1–F5), total pe fermă și tabel „Total general" (mp + ha, din care măsurat).
+- Parcelele fără contur GPS valid sunt marcate „Fără contur — valoare declarată" (suprafața lor nu e măsurată) și nu intră în „din care măsurat". Tipărire A4 cu aceeași tehnică ca la Inventar masă verde (raportul e copil direct al `.rapoarte-ecran`).
+- La 11.11.2026: 10 parcele fără contur (Bobicești 2, Holboca 3, Medgidia 3, Timișoara 2), Săbăreni 0.
