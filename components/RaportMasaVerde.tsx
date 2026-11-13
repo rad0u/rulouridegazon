@@ -8,14 +8,30 @@
 
 import {
   formatDataLunga,
+  formatDataScurta,
   formatHa,
   formatMp,
   grupeazaPeParcela,
   lungimeScara,
   pregatesteDesen,
+  type ComparatieParcela,
   type GrupParcela,
   type RandInventar,
 } from '../lib/inventarMasaVerde';
+
+// 2026-11-13 (Radu): „să-mi treci și cantitatea de rulouri în mp recoltată de la
+// data ultimului inventar din fiecare parcelă (dacă există) [...] să știu dacă
+// există furt" — coloane noi în tabelul de sinteză (doar dacă măcar o parcelă
+// are un inventar anterior): inventar anterior, recoltat înregistrat de atunci,
+// diferență nejustificată = anterior − actual − recoltat.
+function diferentaNejustificata(g: GrupParcela, c: ComparatieParcela): number {
+  return c.masaVerdeAnteriorMp - g.masaVerdeMp - c.recoltatMp;
+}
+
+// Semnalăm doar diferențele peste toleranța de măsurare (2% din inventarul anterior, minimum 20 mp).
+function eSemnificativa(dif: number, c: ComparatieParcela): boolean {
+  return dif > Math.max(20, c.masaVerdeAnteriorMp * 0.02);
+}
 
 const VERDE = '#2e9e4f';
 const VERDE_MARGINE = '#1b6e32';
@@ -66,16 +82,24 @@ export default function RaportMasaVerde({
   dataInventar,
   randuri,
   nota,
+  comparatie,
 }: {
   fermaNume: string;
   dataInventar: string;
   randuri: RandInventar[];
   nota?: string | null;
+  // cheie = GrupParcela.cheie (id-ul parcelei); lipsește pentru parcelele fără inventar anterior
+  comparatie?: Record<string, ComparatieParcela>;
 }) {
   const grupuri = grupeazaPeParcela(randuri);
   const totalMasaVerde = grupuri.reduce((s, g) => s + g.masaVerdeMp, 0);
   const totalSuprafata = grupuri.reduce((s, g) => s + (g.totalMp ?? 0), 0);
   const dataText = formatDataLunga(dataInventar);
+  const cuComparatie = grupuri.filter((g) => comparatie?.[g.cheie]);
+  const areComparatie = cuComparatie.length > 0;
+  const totalAnterior = cuComparatie.reduce((s, g) => s + comparatie![g.cheie].masaVerdeAnteriorMp, 0);
+  const totalRecoltat = cuComparatie.reduce((s, g) => s + comparatie![g.cheie].recoltatMp, 0);
+  const totalDiferenta = cuComparatie.reduce((s, g) => s + diferentaNejustificata(g, comparatie![g.cheie]), 0);
 
   return (
     <section className="raport-mv">
@@ -93,7 +117,7 @@ export default function RaportMasaVerde({
             „masă verde” sunt calculate din conturul măsurat în teren (SW Maps).{nota ? ` ${nota}` : ''}
           </div>
         </div>
-        <table className="mv-tabel">
+        <table className={areComparatie ? 'mv-tabel mv-tabel-lat' : 'mv-tabel'}>
           <thead>
             <tr>
               <th>Parcela</th>
@@ -101,6 +125,13 @@ export default function RaportMasaVerde({
               <th className="mv-dr">Masă verde (mp)</th>
               <th className="mv-dr">Masă verde (ha)</th>
               <th className="mv-dr">% din parcelă</th>
+              {areComparatie && (
+                <>
+                  <th className="mv-dr">Inventar anterior (mp)</th>
+                  <th className="mv-dr">Recoltat înregistrat de atunci (mp)</th>
+                  <th className="mv-dr">Diferență nejustificată (mp)</th>
+                </>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -111,6 +142,30 @@ export default function RaportMasaVerde({
                 <td className="mv-dr">{formatMp(g.masaVerdeMp)}</td>
                 <td className="mv-dr">{formatHa(g.masaVerdeMp)}</td>
                 <td className="mv-dr">{g.totalMp ? `${Math.round((g.masaVerdeMp / g.totalMp) * 100)}%` : '—'}</td>
+                {areComparatie &&
+                  (() => {
+                    const c = comparatie?.[g.cheie];
+                    if (!c) {
+                      return (
+                        <>
+                          <td className="mv-dr">—</td>
+                          <td className="mv-dr">—</td>
+                          <td className="mv-dr">—</td>
+                        </>
+                      );
+                    }
+                    const dif = diferentaNejustificata(g, c);
+                    return (
+                      <>
+                        <td className="mv-dr">
+                          {formatMp(c.masaVerdeAnteriorMp)}
+                          <div className="mv-sub">{formatDataScurta(c.dataAnterior)}</div>
+                        </td>
+                        <td className="mv-dr">{formatMp(c.recoltatMp)}</td>
+                        <td className={eSemnificativa(dif, c) ? 'mv-dr mv-avert' : 'mv-dr'}>{formatMp(dif)}</td>
+                      </>
+                    );
+                  })()}
               </tr>
             ))}
           </tbody>
@@ -131,9 +186,31 @@ export default function RaportMasaVerde({
               <td className="mv-dr">
                 <strong>{totalSuprafata > 0 ? `${Math.round((totalMasaVerde / totalSuprafata) * 100)}%` : '—'}</strong>
               </td>
+              {areComparatie && (
+                <>
+                  <td className="mv-dr">
+                    <strong>{formatMp(totalAnterior)}</strong>
+                  </td>
+                  <td className="mv-dr">
+                    <strong>{formatMp(totalRecoltat)}</strong>
+                  </td>
+                  <td className="mv-dr">
+                    <strong>{formatMp(totalDiferenta)}</strong>
+                  </td>
+                </>
+              )}
             </tr>
           </tfoot>
         </table>
+        {areComparatie && (
+          <p className="mv-mic" style={{ margin: '6px 0 0' }}>
+            Inventar anterior = ultimul inventar al parcelei dinaintea acestei date. Recoltat înregistrat = suprafața (mp) de
+            rulouri confirmată ca recoltată în „Activități parcele”, după data inventarului anterior și până la data acestui
+            inventar inclusiv. Diferență nejustificată = inventar anterior − masă verde actuală − recoltat înregistrat: valoarea
+            pozitivă e gazon dispărut fără recoltare înregistrată (calamitate — inundație, uscare etc. — sau lipsă); cu roșu,
+            diferențele peste toleranța de măsurare (2%, minimum 20 mp). „—” = parcela nu are un inventar anterior.
+          </p>
+        )}
       </div>
 
       {grupuri.map((g) => (
@@ -168,6 +245,17 @@ export default function RaportMasaVerde({
                   </div>
                 </div>
               </div>
+              {comparatie?.[g.cheie] && (
+                <div className="mv-leg-mic">
+                  De la inventarul din {formatDataScurta(comparatie[g.cheie].dataAnterior)} (
+                  {formatMp(comparatie[g.cheie].masaVerdeAnteriorMp)} mp): recoltat înregistrat{' '}
+                  <strong>{formatMp(comparatie[g.cheie].recoltatMp)} mp</strong>, diferență nejustificată{' '}
+                  <strong className={eSemnificativa(diferentaNejustificata(g, comparatie[g.cheie]), comparatie[g.cheie]) ? 'mv-avert' : undefined}>
+                    {formatMp(diferentaNejustificata(g, comparatie[g.cheie]))} mp
+                  </strong>
+                  .
+                </div>
+              )}
               {g.poligonParcela === null && (
                 <div className="mv-leg-mic">Parcela nu avea contur desenat la data inventarului — se vede doar masa verde.</div>
               )}
@@ -196,6 +284,8 @@ export const STIL_RAPORT_MASA_VERDE = `
   .raport-mv .mv-tabel th, .raport-mv .mv-tabel td { border: 1px solid #000; padding: 3px 6px; font-size: 10pt; text-align: left; }
   .raport-mv .mv-tabel th { background: #eee; }
   .raport-mv .mv-dr { text-align: right !important; }
+  .raport-mv .mv-tabel-lat th, .raport-mv .mv-tabel-lat td { font-size: 8.5pt; padding: 3px 4px; }
+  .raport-mv .mv-sub { font-size: 7.5pt; color: #444; font-weight: normal; }
   .raport-mv .mv-bloc { border: 1px solid #000; margin-top: 14px; break-inside: avoid; page-break-inside: avoid; }
   .raport-mv .mv-bloc-titlu { display: flex; justify-content: space-between; gap: 8px; background: #eee; padding: 4px 8px; font-weight: bold; font-size: 11pt; border-bottom: 1px solid #000; }
   .raport-mv .mv-bloc-corp { display: flex; gap: 12px; padding: 8px; align-items: stretch; }

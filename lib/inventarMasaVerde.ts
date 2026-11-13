@@ -39,6 +39,21 @@ export type GrupParcela = {
   poligoaneMasaVerde: PoligonGeoJson[];
 };
 
+// 2026-11-13 (Radu): comparația cu inventarul ANTERIOR al aceleiași parcele —
+// masa verde de atunci și suprafața (mp) de rulouri înregistrată ca recoltată
+// între cele două inventare (operatiuni.cantitate_mp_recoltat, confirmată în
+// „Activități parcele”). Diferența nejustificată = anterior − actual − recoltat
+// (calamități: inundație, uscare etc. — sau furt).
+export type ComparatieParcela = {
+  dataAnterior: string; // YYYY-MM-DD
+  masaVerdeAnteriorMp: number;
+  recoltatMp: number;
+};
+
+export function formatDataScurta(dataIso: string): string {
+  return new Date(`${dataIso}T12:00:00`).toLocaleDateString('ro-RO', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
 const colatorNume = new Intl.Collator('ro', { numeric: true });
 
 // Grupează rândurile inventarului pe parcelă (aceeași parcelă poate avea mai multe
