@@ -70,9 +70,6 @@ type RandZi = {
   nevalidateNr: number;
   nevalidateOre: number;
   mpEstimat: number | null; // doar pentru zile lucrate fără mp declarați
-  // Autostack + Steyr lucrează în tandem: dacă în ziua respectivă recoltarea e
-  // declarată pe ALT utilaj de recoltare al fermei, ziua nu e „fără recoltare".
-  declaratPe: string | null;
 };
 
 type RaportUtilaj = {
@@ -218,7 +215,7 @@ export default function RecoltareGazonScreen() {
       const zi = (cheie: string) => {
         let z = zile.get(cheie);
         if (!z) {
-          z = { zi: cheie, ore: null, litri: null, mp: 0, nrInregistrari: 0, nrSuspecte: 0, parcele: [], nevalidateNr: 0, nevalidateOre: 0, mpEstimat: null, declaratPe: null };
+          z = { zi: cheie, ore: null, litri: null, mp: 0, nrInregistrari: 0, nrSuspecte: 0, parcele: [], nevalidateNr: 0, nevalidateOre: 0, mpEstimat: null };
           zile.set(cheie, z);
         }
         return z;
@@ -282,21 +279,13 @@ export default function RecoltareGazonScreen() {
       };
     });
 
-    // 4. Zile lucrate fără recoltare declarată (ținând cont de tandem)
-    const declaratPeZi = new Map<string, string[]>();
-    for (const r of rezultat) {
-      for (const z of r.zile) {
-        if (z.mp >= PRAG_MP_SUSPECT) declaratPeZi.set(z.zi, [...(declaratPeZi.get(z.zi) ?? []), r.utilaj.nume]);
-      }
-    }
+    // 4. Zile lucrate fără recoltare declarată. Fiecare utilaj de recoltare se
+    // judecă separat (Radu, 14.11: la F5, Autostack intră în teren când Steyr
+    // 4100 Kompakt nu face față — NU lucrează în tandem, recoltarea fiecăruia
+    // trebuie declarată pe el).
     for (const r of rezultat) {
       for (const z of r.zile) {
         if ((z.ore ?? 0) < PRAG_ORE_ZI_LUCRATA || z.mp >= PRAG_MP_SUSPECT) continue;
-        const alte = (declaratPeZi.get(z.zi) ?? []).filter((n) => n !== r.utilaj.nume);
-        if (alte.length > 0) {
-          z.declaratPe = alte.join(', ');
-          continue;
-        }
         r.zileFaraMp += 1;
         if (r.randament !== null) {
           z.mpEstimat = Math.round((z.ore as number) * r.randament);
@@ -425,7 +414,11 @@ export default function RecoltareGazonScreen() {
                   {r.zileFaraMp > 0 && (
                     <span style={{ color: '#b00020', marginRight: '1rem' }}>
                       {r.zileFaraMp} {r.zileFaraMp === 1 ? 'zi lucrată' : 'zile lucrate'} fără recoltare declarată
-                      {r.mpEstimatNedeclarat > 0 ? ` (estimat ~${nf0.format(r.mpEstimatNedeclarat)} mp)` : ''}
+                      {r.mpEstimatNedeclarat > 0
+                        ? ` (estimat ~${nf0.format(r.mpEstimatNedeclarat)} mp)`
+                        : r.randament === null
+                          ? ' (fără estimare: utilajul nu are nicio zi cu recoltare declarată în interval)'
+                          : ''}
                     </span>
                   )}
                   {r.nevalidateNr > 0 && <span style={{ color: '#a35a00' }}>{r.nevalidateNr} sesiuni nevalidate în Activități parcele</span>}
@@ -452,11 +445,10 @@ export default function RecoltareGazonScreen() {
                     <tbody>
                       {r.zile.map((z) => {
                         const lucrata = (z.ore ?? 0) >= PRAG_ORE_ZI_LUCRATA;
-                        const faraMp = lucrata && z.mp < PRAG_MP_SUSPECT && !z.declaratPe;
+                        const faraMp = lucrata && z.mp < PRAG_MP_SUSPECT;
                         const bg = faraMp ? '#fdecea' : z.nevalidateNr > 0 ? '#fff3e0' : undefined;
                         const obs: string[] = [];
                         if (faraMp) obs.push(z.mpEstimat !== null ? `fără recoltare declarată (estimat ~${nf0.format(z.mpEstimat)} mp)` : 'fără recoltare declarată');
-                        if (z.declaratPe) obs.push(`recoltare declarată pe ${z.declaratPe}`);
                         if (z.nevalidateNr > 0) obs.push(`${z.nevalidateNr} sesiuni nevalidate (${nf1.format(z.nevalidateOre)} h)`);
                         if (z.nrSuspecte > 0) obs.push(`${z.nrSuspecte} înregistr. sub ${PRAG_MP_SUSPECT} mp`);
                         return (
