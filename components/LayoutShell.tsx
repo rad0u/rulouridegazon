@@ -178,6 +178,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                     </Link>
                   )}
 
+                  {/* 2026-11-14 (Radu): raport utilaje de recoltare — ore, motorină, mp declarați pe zile. */}
+                  {role === 'admin_central' && (
+                    <Link href="/recoltare-gazon" style={navLinkStyle} onClick={closeMenu}>
+                      Recoltare gazon
+                    </Link>
+                  )}
+
                   {(role === 'admin_central' || role === 'admin_ferma') && (
                     <Link href="/activitati-parcele" style={navLinkStyle} onClick={closeMenu}>
                       Activități parcele

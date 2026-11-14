@@ -128,6 +128,13 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
               titlu: 'Listing parcele',
               descriere: 'Ferme – Parcele – Suprafețe măsurate',
             },
+            // 2026-11-14 (Radu): utilajele de recoltare — ore, motorină, mp declarați vs. zile lucrate.
+            {
+              href: '/recoltare-gazon',
+              icon: '🌱',
+              titlu: 'Recoltare gazon',
+              descriere: 'Ore, motorină și mp pe utilajele de recoltare',
+            },
           ]
         : []),
     ],
