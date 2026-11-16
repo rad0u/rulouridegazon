@@ -1,7 +1,14 @@
-// lib/exportStocMateriiPrime.ts
+// lib/exportStocuriFerme.ts
 //
 // 2026-11-16 (Radu): „în zona Rapoarte din Dashboard, un buton de export date
 // stocuri materii prime pe fiecare fermă, în Excel".
+//
+// 2026-11-16 (Radu, completare): „vreau tot nomenclatorul de substanțe pe
+// verticală, iar pe orizontală stocul pe fiecare fermă" — foaie nouă
+// „Substanțe pe ferme" (matrice: toate cele din `substante_nomenclator` ×
+// fermele; celulă goală = substanța nu e în gestiunea fermei, 0 = e în
+// gestiune, dar fără stoc), plus valoarea stocului de substanțe pe fermă în
+// Centralizator. Fișierul se numește acum `stocuri-ferme-AAAA-LL-ZZ.xlsx`.
 //
 // Generează în browser (fără server) un fișier .xlsx cu:
 //  - „Centralizator": o linie pe fermă — nr. articole, valoare stoc (lei) — și total;
@@ -26,6 +33,8 @@ type Rand = {
 };
 
 type Ferma = { id: string; nume: string };
+type Nomenclator = { id: string; nume: string; unitate_masura: string };
+type StocSubstanta = { nomenclator_id: string | null; ferma_id: string | null; stoc_curent: number | null; pret_unitar: number | null };
 
 const FORMAT_LEI = '#,##0.00';
 const FORMAT_CANT = '#,##0.##';
@@ -52,13 +61,24 @@ function dataAzi() {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Bucharest' }).format(new Date());
 }
 
-export async function exportaStocMateriiPrime(): Promise<void> {
-  const [{ data: fermeData, error: errF }, { data: mpData, error: errM }] = await Promise.all([
-    supabase.from('ferme').select('id,nume').order('nume'),
-    supabase.from('materii_prime').select('nume,unitate_masura,stoc_curent,pret_unitar,ferma_id').order('nume'),
-  ]);
+export async function exportaStocuriFerme(): Promise<void> {
+  const [{ data: fermeData, error: errF }, { data: mpData, error: errM }, { data: nomData, error: errN }, { data: subData, error: errS }] =
+    await Promise.all([
+      supabase.from('ferme').select('id,nume').order('nume'),
+      supabase.from('materii_prime').select('nume,unitate_masura,stoc_curent,pret_unitar,ferma_id').order('nume'),
+      supabase.from('substante_nomenclator').select('id,nume,unitate_masura').order('nume'),
+      supabase.from('substante').select('nomenclator_id,ferma_id,stoc_curent,pret_unitar').order('nume'),
+    ]);
   if (errF) throw new Error(`Eroare la citirea fermelor: ${errF.message}`);
   if (errM) throw new Error(`Eroare la citirea materiilor prime: ${errM.message}`);
+  if (errN) throw new Error(`Eroare la citirea nomenclatorului de substanțe: ${errN.message}`);
+  if (errS) throw new Error(`Eroare la citirea stocurilor de substanțe: ${errS.message}`);
+  const nomenclator = ((nomData as Nomenclator[]) ?? []).sort((a, b) => a.nume.localeCompare(b.nume, 'ro'));
+  const substante = ((subData as StocSubstanta[]) ?? []).map((r) => ({
+    ...r,
+    stoc_curent: r.stoc_curent === null ? 0 : Number(r.stoc_curent),
+    pret_unitar: r.pret_unitar === null ? null : Number(r.pret_unitar),
+  }));
 
   const ferme = (fermeData as Ferma[]) ?? [];
   const randuri = ((mpData as Rand[]) ?? []).map((r) => ({
@@ -71,6 +91,8 @@ export async function exportaStocMateriiPrime(): Promise<void> {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Rulouri de Gazon — aplicație ferme';
   wb.created = new Date();
+  // Excel recalculează toate formulele la deschidere (valorile salvate sunt doar provizorii).
+  wb.calcProperties.fullCalcOnLoad = true;
 
   const azi = dataAzi();
   const [an, luna, zi] = azi.split('-');
@@ -88,16 +110,62 @@ export async function exportaStocMateriiPrime(): Promise<void> {
 
   // ── Centralizator (completat după foile pe fermă) ─────────────────────────
   const wsC = wb.addWorksheet(numeFoaie('Centralizator', folosite));
-  wsC.columns = [{ width: 30 }, { width: 14 }, { width: 20 }];
-  wsC.addRow([`Stoc materii prime pe ferme — la ${dataRo}`]).font = { bold: true, size: 14 };
+  wsC.columns = [{ width: 30 }, { width: 16 }, { width: 22 }, { width: 22 }];
+  wsC.addRow([`Stocuri pe ferme — la ${dataRo}`]).font = { bold: true, size: 14 };
   wsC.addRow([]);
-  stilAntet(wsC.addRow(['Fermă', 'Nr. articole', 'Valoare stoc (lei)']));
+  stilAntet(wsC.addRow(['Fermă', 'Nr. materii prime', 'Valoare materii prime (lei)', 'Valoare substanțe (lei)']));
   const legaturiCentralizator: { ferma: string; foaie: string; nr: number; randTotal: number }[] = [];
 
-  // ── O foaie pe fermă ──────────────────────────────────────────────────────
+  // ── Substanțe pe ferme: nomenclator (vertical) × ferme (orizontal) ───────
+  const wsS = wb.addWorksheet(numeFoaie('Substanțe pe ferme', folosite));
+  wsS.columns = [{ width: 6 }, { width: 46 }, { width: 6 }, ...ferme.map(() => ({ width: 15 })), { width: 15 }];
+  wsS.addRow([`Stoc substanțe pe ferme — la ${dataRo}`]).font = { bold: true, size: 13 };
+  wsS.addRow(['', 'Celulă goală = substanța nu e în gestiunea fermei; 0 = e în gestiune, fără stoc.']).font = {
+    italic: true,
+    color: { argb: 'FF777777' },
+  };
+  const antetS = wsS.addRow(['Nr.', 'Substanță', 'UM', ...ferme.map((f) => f.nume), 'Total']);
+  stilAntet(antetS);
+  const colTotal = 4 + ferme.length; // coloana „Total"
+  const literaCol = (n: number) => {
+    let l = '';
+    while (n > 0) {
+      const m = (n - 1) % 26;
+      l = String.fromCharCode(65 + m) + l;
+      n = Math.floor((n - 1) / 26);
+    }
+    return l;
+  };
+  const stocPe = new Map<string, number>(); // `${nomenclator_id}|${ferma_id}` → stoc
+  for (const r of substante) {
+    if (!r.nomenclator_id || !r.ferma_id) continue;
+    const k = `${r.nomenclator_id}|${r.ferma_id}`;
+    stocPe.set(k, (stocPe.get(k) ?? 0) + r.stoc_curent);
+  }
+  nomenclator.forEach((n, i) => {
+    const valori = ferme.map((f) => stocPe.get(`${n.id}|${f.id}`));
+    const row = wsS.addRow([i + 1, n.nume, n.unitate_masura, ...valori.map((v) => (v === undefined ? null : v)), null]);
+    const prima = literaCol(4);
+    const ultima = literaCol(3 + ferme.length);
+    row.getCell(colTotal).value = {
+      formula: `SUM(${prima}${row.number}:${ultima}${row.number})`,
+      result: valori.reduce<number>((s, v) => s + (v ?? 0), 0),
+    };
+    for (let c = 4; c <= colTotal; c++) row.getCell(c).numFmt = FORMAT_CANT;
+    row.getCell(colTotal).font = { bold: true };
+  });
+  if (nomenclator.length === 0) {
+    wsS.addRow(['', 'Nomenclatorul de substanțe e gol.']).font = { italic: true };
+  } else {
+    wsS.autoFilter = { from: { row: antetS.number, column: 1 }, to: { row: wsS.rowCount, column: colTotal } };
+  }
+  wsS.views = [{ state: 'frozen', xSplit: 3, ySplit: antetS.number }];
+  wsS.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
+
+  // ── O foaie pe fermă (materii prime) ──────────────────────────────────────────────────────
   for (const f of ferme) {
     const lista = randuri.filter((r) => r.ferma_id === f.id);
-    const numeWs = numeFoaie(f.nume, folosite);
+    const numeWs = numeFoaie(`MP ${f.nume}`, folosite);
     const ws = wb.addWorksheet(numeWs);
     ws.columns = [{ width: 6 }, { width: 58 }, { width: 18 }, { width: 7 }, { width: 14 }, { width: 16 }, { width: 18 }];
     ws.addRow([`Stoc materii prime — ${f.nume} — la ${dataRo}`]).font = { bold: true, size: 13 };
@@ -148,8 +216,13 @@ export async function exportaStocMateriiPrime(): Promise<void> {
     const valFerma = randuri
       .filter((r) => ferme.find((f) => f.nume === l.ferma)?.id === r.ferma_id)
       .reduce((s, r) => s + (r.pret_unitar === null ? 0 : r.stoc_curent * r.pret_unitar), 0);
-    const row = wsC.addRow([l.ferma, l.nr, l.randTotal ? { formula: ref, result: valFerma } : 0]);
+    const idFerma = ferme.find((f) => f.nume === l.ferma)?.id;
+    const valSubst = substante
+      .filter((r) => r.ferma_id === idFerma)
+      .reduce((s, r) => s + (r.pret_unitar === null ? 0 : r.stoc_curent * r.pret_unitar), 0);
+    const row = wsC.addRow([l.ferma, l.nr, l.randTotal ? { formula: ref, result: valFerma } : 0, Math.round(valSubst * 100) / 100]);
     row.getCell(3).numFmt = FORMAT_LEI;
+    row.getCell(4).numFmt = FORMAT_LEI;
   }
   const ultimulC = wsC.rowCount;
   const totalGeneral = randuri.reduce((s, r) => s + (r.pret_unitar === null ? 0 : r.stoc_curent * r.pret_unitar), 0);
@@ -157,12 +230,26 @@ export async function exportaStocMateriiPrime(): Promise<void> {
     'TOTAL',
     { formula: `SUM(B${primulC}:B${ultimulC})`, result: randuri.filter((r) => r.ferma_id).length },
     { formula: `SUM(C${primulC}:C${ultimulC})`, result: totalGeneral },
+    {
+      formula: `SUM(D${primulC}:D${ultimulC})`,
+      result: legaturiCentralizator.reduce((s, l) => {
+        const id = ferme.find((f) => f.nume === l.ferma)?.id;
+        const v = substante.filter((r) => r.ferma_id === id).reduce((t, r) => t + (r.pret_unitar === null ? 0 : r.stoc_curent * r.pret_unitar), 0);
+        return s + Math.round(v * 100) / 100;
+      }, 0),
+    },
   ]);
   totC.font = { bold: true };
   totC.getCell(3).numFmt = FORMAT_LEI;
+  totC.getCell(4).numFmt = FORMAT_LEI;
+  wsC.addRow([]);
+  wsC.addRow(['Valoare = stoc curent × preț unitar (articolele fără preț nu intră în valoare).']).font = {
+    italic: true,
+    color: { argb: 'FF777777' },
+  };
 
   // ── Toate fermele (listă plată) ───────────────────────────────────────────
-  const wsT = wb.addWorksheet(numeFoaie('Toate fermele', folosite));
+  const wsT = wb.addWorksheet(numeFoaie('MP toate fermele', folosite));
   wsT.columns = [{ width: 24 }, { width: 58 }, { width: 18 }, { width: 7 }, { width: 14 }, { width: 16 }, { width: 18 }];
   const antetT = wsT.addRow(['Fermă', 'Denumire', 'Cod', 'UM', 'Stoc curent', 'Preț unitar (lei)', 'Valoare (lei)']);
   stilAntet(antetT);
@@ -190,7 +277,7 @@ export async function exportaStocMateriiPrime(): Promise<void> {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `stoc-materii-prime-${azi}.xlsx`;
+  a.download = `stocuri-ferme-${azi}.xlsx`;
   document.body.appendChild(a);
   a.click();
   a.remove();

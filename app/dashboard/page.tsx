@@ -3,7 +3,7 @@
 import { useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { useUserRole, UserRole } from '../../lib/useUserRole';
-import { exportaStocMateriiPrime } from '../../lib/exportStocMateriiPrime';
+import { exportaStocuriFerme } from '../../lib/exportStocuriFerme';
 
 // v2, 2026-09-24 (Radu): "trebuie sa refacem Dashboard-ul, sa aiba un design
 // functional. Pune pe el principalele butoane pe care le foloseste admin-ul
@@ -138,13 +138,14 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
               titlu: 'Recoltare gazon',
               descriere: 'Ore, motorină și mp pe utilajele de recoltare',
             },
-            // 2026-11-16 (Radu): export Excel al stocurilor de materii prime, pe fiecare fermă.
+            // 2026-11-16 (Radu): export Excel al stocurilor pe ferme — substanțe
+            // (nomenclator × ferme) + materii prime (o foaie pe fermă) + centralizator.
             {
-              href: '#export-stoc-materii-prime',
+              href: '#export-stocuri-ferme',
               icon: '📥',
-              titlu: 'Export stoc materii prime',
-              descriere: 'Excel: o foaie pe fermă + centralizator',
-              actiune: exportaStocMateriiPrime,
+              titlu: 'Export stocuri (Excel)',
+              descriere: 'Substanțe și materii prime, pe fiecare fermă',
+              actiune: exportaStocuriFerme,
             },
           ]
         : []),
