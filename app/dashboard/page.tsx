@@ -1,8 +1,9 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import Link from 'next/link';
 import { useUserRole, UserRole } from '../../lib/useUserRole';
+import { exportaStocMateriiPrime } from '../../lib/exportStocMateriiPrime';
 
 // v2, 2026-09-24 (Radu): "trebuie sa refacem Dashboard-ul, sa aiba un design
 // functional. Pune pe el principalele butoane pe care le foloseste admin-ul
@@ -25,6 +26,8 @@ type CardInfo = {
   titlu: string;
   descriere: string;
   extern?: boolean;
+  // 2026-11-16: card-buton (fără navigare) — ex. export Excel.
+  actiune?: () => Promise<void>;
 };
 
 type Sectiune = {
@@ -135,6 +138,14 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
               titlu: 'Recoltare gazon',
               descriere: 'Ore, motorină și mp pe utilajele de recoltare',
             },
+            // 2026-11-16 (Radu): export Excel al stocurilor de materii prime, pe fiecare fermă.
+            {
+              href: '#export-stoc-materii-prime',
+              icon: '📥',
+              titlu: 'Export stoc materii prime',
+              descriere: 'Excel: o foaie pe fermă + centralizator',
+              actiune: exportaStocMateriiPrime,
+            },
           ]
         : []),
     ],
@@ -178,7 +189,39 @@ const stilCard: CSSProperties = {
   minHeight: '108px',
 };
 
+function CardActiune({ card }: { card: CardInfo }) {
+  const [lucreaza, setLucreaza] = useState(false);
+  const [eroare, setEroare] = useState<string | null>(null);
+  async function apasa() {
+    if (!card.actiune || lucreaza) return;
+    setLucreaza(true);
+    setEroare(null);
+    try {
+      await card.actiune();
+    } catch (e) {
+      setEroare(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLucreaza(false);
+    }
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => void apasa()}
+      disabled={lucreaza}
+      style={{ ...stilCard, textAlign: 'left', font: 'inherit', cursor: lucreaza ? 'wait' : 'pointer' }}
+    >
+      <span style={{ fontSize: '1.7rem', lineHeight: 1 }}>{card.icon}</span>
+      <span style={{ fontWeight: 600, fontSize: '1rem' }}>{card.titlu}</span>
+      <span style={{ fontSize: '0.8rem', color: eroare ? '#b00020' : '#666' }}>
+        {lucreaza ? 'Se generează fișierul...' : eroare ?? card.descriere}
+      </span>
+    </button>
+  );
+}
+
 function Card({ card }: { card: CardInfo }) {
+  if (card.actiune) return <CardActiune card={card} />;
   const continut = (
     <>
       <span style={{ fontSize: '1.7rem', lineHeight: 1 }}>{card.icon}</span>
