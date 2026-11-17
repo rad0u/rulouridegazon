@@ -2681,3 +2681,8 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - get-combustibil-parcele v4: parametri opționali `utilaj_id` (un singur utilaj) și `fara_zilnic=1` (sare peste consum_zilnic); nivelLaMoment cu căutare binară. Comportament implicit neschimbat.
 - lib/consumuriLunare.ts: câte o cerere per utilaj, 4 în paralel, 1 reîncercare; avertisment cu utilajele eșuate.
 - Funcția publicată (versiunea 15, 17.11.2026).
+
+## 2026-11-17 — Ferme → parcelă → Istoric operațiuni: detalii utilaj
+- Radu: „vreau raportul mai detaliat - ce utilaj a fost".
+- ParcelaPanel: fiecare operațiune arată acum utilajul (🚜), intervalul orar al sesiunii GPS (ora României) și cine a validat-o (utilizatori.nume). Sortare: dată desc, apoi ora de început desc.
+- Operatiune (lib/operatiuniTypes.ts): câmpuri opționale sesiune_inceput, sesiune_sfarsit, utilaje, utilizatori.

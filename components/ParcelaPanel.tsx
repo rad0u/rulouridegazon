@@ -6,6 +6,15 @@ import { Parcela } from '../lib/parcelaTypes';
 import { LABEL_OPERATIUNE, Operatiune } from '../lib/operatiuniTypes';
 import ConsumuriOperatiune from './ConsumuriOperatiune';
 
+const FORMAT_ORA = new Intl.DateTimeFormat('ro-RO', {
+  timeZone: 'Europe/Bucharest',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+function oraLocala(iso: string): string {
+  return FORMAT_ORA.format(new Date(iso));
+}
+
 interface ParcelaPanelProps {
   parcela: Parcela;
   tipuriGazon: { id: string; nume: string }[];
@@ -113,10 +122,11 @@ export default function ParcelaPanel({
     const { data: rows, error: fetchError } = await supabase
       .from('operatiuni')
       .select(
-        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,operatiuni_substante(id,cantitate,substante(nume,unitate_masura)),operatiuni_materii_prime(id,cantitate,materii_prime(nume,unitate_masura))',
+        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,sesiune_inceput,sesiune_sfarsit,utilaje(nume),utilizatori(nume),operatiuni_substante(id,cantitate,substante(nume,unitate_masura)),operatiuni_materii_prime(id,cantitate,materii_prime(nume,unitate_masura))',
       )
       .eq('parcela_id', parcela.id)
-      .order('data', { ascending: false });
+      .order('data', { ascending: false })
+      .order('sesiune_inceput', { ascending: false, nullsFirst: false });
 
     if (!fetchError) {
       setIstoric((rows as unknown as Operatiune[]) ?? []);
@@ -254,7 +264,14 @@ export default function ParcelaPanel({
             {istoric.map((op) => (
               <li key={op.id} style={{ marginBottom: '0.5rem' }}>
                 <strong>{op.data}</strong> — {LABEL_OPERATIUNE[op.tip]}
+                {op.sesiune_inceput && op.sesiune_sfarsit && (
+                  <> · {oraLocala(op.sesiune_inceput)}–{oraLocala(op.sesiune_sfarsit)}</>
+                )}
                 {op.ore_lucru != null && <> · {op.ore_lucru}h</>}
+                <div style={{ fontSize: '0.85rem', color: '#333' }}>
+                  🚜 {op.utilaje?.nume ?? <span style={{ color: '#999' }}>utilaj nespecificat</span>}
+                  {op.utilizatori?.nume && <span style={{ color: '#777' }}> · validat de {op.utilizatori.nume}</span>}
+                </div>
                 {op.cantitate_mp_recoltat != null && <> · {op.cantitate_mp_recoltat} mp recoltați</>}
                 {editable ? (
                   <ConsumuriOperatiune

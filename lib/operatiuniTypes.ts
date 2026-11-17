@@ -77,6 +77,12 @@ export type Operatiune = {
   ore_lucru: number | null;
   note: string | null;
   cantitate_mp_recoltat: number | null;
+  // 2026-11-17 (Radu: „vreau raportul mai detaliat - ce utilaj a fost"):
+  // opționale, aduse doar de istoricul din ParcelaPanel.
+  sesiune_inceput?: string | null;
+  sesiune_sfarsit?: string | null;
+  utilaje?: { nume: string } | null;
+  utilizatori?: { nume: string | null } | null;
   operatiuni_substante: SubstantaOperatiune[] | null;
   operatiuni_materii_prime: MateriePrimaOperatiune[] | null;
 };
