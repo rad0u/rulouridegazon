@@ -2665,3 +2665,13 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - Excel `consumuri-<ferma>-AAAA-LL.xlsx`: „Sumar pe parcele" (formule SUM), „Detaliat" (o linie per articol/utilaj, filtre), „Articole x parcele" (matrice cantități), „Total pe articole".
 - `get-combustibil-parcele` v3 (doar în repo până la deploy): pre-filtru bounding-box în gasesteParcela (ca get-sesiuni-detectate v9) — fără el, o lună întreagă la Săbăreni riscă HTTP 546. Rezultate identice. DEPLOY în așteptarea acordului lui Radu.
 - Verificat: tsc OK; logica + Excel testate pe date de test (totaluri și formule recalculate corect în LibreOffice).
+
+## 2026-11-17 — Consum exagerat Autostack (209 L în 1,2 h pe 10.11)
+- Cauză: trackerul Autostack e alimentat după heblu; ultima citire înainte de tăierea curentului e adesea 0 L (eroare sondă). `eliminaFluctuatiiTranzitorii` elimină un 0 doar dacă revine în 15 min — aici urma o noapte fără date → bilanțul zilei = 209 − 0 = 209 L (real: 209 → 186,3 = ~23 L).
+- Fix în cod (4 edge functions: get-combustibil-report, get-combustibil-parcele, get-sesiuni-detectate, get-cost-productie):
+  - `filtreazaCitiriPlauzibile`: 0 L exact = eroare (era `>= 0`, acum `> 0`);
+  - funcție nouă `eliminaSalturiNeconfirmate` aplicată după `eliminaFluctuatiiTranzitorii`: un salt ≥ 15 L e acceptat doar dacă citirea următoare îl confirmă; dacă următoarea revine la nivelul dinainte (oricât de târziu) sau saltul e ultima citire → eliminat.
+  - Verificat pe citirile reale Autostack 9–12.11: ~6 / ~23 / ~18 / ~27 L pe zi.
+  - DEPLOY în așteptarea acordului explicit al lui Radu (get-combustibil-parcele v13 conține doar bbox, nu și acest fix).
+- Plasă de siguranță în UI (Recoltare gazon, Consumuri lunare): consum > 60 L/h (sau > 30 L în < 0,5 h) marcat „⚠ consum suspect".
+- De reținut: orele Autostack sunt subestimate (contactul flichează) — ex. 10.11 a mers ~10:17–12:14, raportul arată 1,2 h.

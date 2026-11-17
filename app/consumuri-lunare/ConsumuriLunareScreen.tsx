@@ -52,6 +52,12 @@ const nf0 = new Intl.NumberFormat('ro-RO', { maximumFractionDigits: 0 });
 const nf1 = new Intl.NumberFormat('ro-RO', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
 const nf2 = new Intl.NumberFormat('ro-RO', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const nfq = new Intl.NumberFormat('ro-RO', { maximumFractionDigits: 3 });
+// 2026-11-17: peste 60 L/h (sau > 30 L în sub 0,5 h) = aproape sigur eroare de sondă.
+function consumSuspect(litri: number | null, ore: number) {
+  if (litri === null || litri <= 0) return false;
+  if (ore < 0.5) return litri > 30;
+  return litri / ore > 60;
+}
 const lei = (n: number | null) => (n === null ? '—' : `${nf2.format(n)} lei`);
 
 function lunaTrecuta() {
@@ -78,6 +84,7 @@ function TabelMotorina({ linii, pret, neconfirmat }: { linii: LinieMotorina[]; p
             <td>
               {m.utilaj}
               {m.litri === null && <span className="gri"> (fără senzor calibrat)</span>}
+              {consumSuspect(m.litri, m.ore) && <span style={{ color: '#b00020' }}> ⚠ consum suspect — verifică senzorul</span>}
             </td>
             <td className="n">{nf1.format(m.ore)}</td>
             <td className="n">{m.litri === null ? '—' : nf1.format(m.litri)}</td>

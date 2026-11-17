@@ -34,6 +34,15 @@ import { useUserRole } from '../../lib/useUserRole';
 const PRAG_ORE_ZI_LUCRATA = 1;
 // Cantitate declarată sub acest prag = valoare de umplutură (ex. „1 mp").
 const PRAG_MP_SUSPECT = 10;
+// 2026-11-17 (Radu: „Autostack 209 L în 1,2 h — imposibil"): peste acest consum
+// orar (sau > 30 L într-o zi cu sub 0,5 h de motor) cifra e aproape sigur o eroare
+// a sondei — se marchează „consum suspect", nu se ascunde.
+const PRAG_L_PE_ORA_SUSPECT = 60;
+function consumSuspect(litri: number | null, ore: number | null): boolean {
+  if (litri === null || litri <= 0) return false;
+  if (!ore || ore < 0.5) return litri > 30;
+  return litri / ore > PRAG_L_PE_ORA_SUSPECT;
+}
 
 type Utilaj = { id: string; nume: string; tanc_capacitate_litri: number | null };
 
@@ -450,12 +459,14 @@ export default function RecoltareGazonScreen() {
                         const obs: string[] = [];
                         if (faraMp) obs.push(z.mpEstimat !== null ? `fără recoltare declarată (estimat ~${nf0.format(z.mpEstimat)} mp)` : 'fără recoltare declarată');
                         if (z.nevalidateNr > 0) obs.push(`${z.nevalidateNr} sesiuni nevalidate (${nf1.format(z.nevalidateOre)} h)`);
+                        const suspect = consumSuspect(z.litri, z.ore);
+                        if (suspect) obs.push('⚠ consum suspect — probabil eroare de senzor');
                         if (z.nrSuspecte > 0) obs.push(`${z.nrSuspecte} înregistr. sub ${PRAG_MP_SUSPECT} mp`);
                         return (
                           <tr key={z.zi} style={{ borderBottom: '1px solid #eee', background: bg }}>
                             <td style={{ ...td, whiteSpace: 'nowrap' }}>{formatZi(z.zi)}</td>
                             <td style={num}>{cel(z.ore)}</td>
-                            <td style={num}>{cel(z.litri, nf0)}</td>
+                            <td style={{ ...num, color: suspect ? '#b00020' : undefined, fontWeight: suspect ? 700 : undefined }}>{cel(z.litri, nf0)}</td>
                             <td style={num}>{z.ore && z.litri !== null && z.ore > 0 ? nf1.format(z.litri / z.ore) : '—'}</td>
                             <td style={{ ...num, fontWeight: 600 }}>{z.nrInregistrari > 0 ? nf0.format(z.mp) : '—'}</td>
                             <td style={num}>{z.mp >= PRAG_MP_SUSPECT && z.ore ? nf0.format(z.mp / z.ore) : '—'}</td>

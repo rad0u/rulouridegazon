@@ -123,7 +123,7 @@ async function fetchToateRandurile(
 
 function filtreazaCitiriPlauzibile(rows: Citire[], capacitate: number): Citire[] {
   const prag = capacitate * TOLERANTA_CAPACITATE;
-  return rows.filter((r) => r.nivel_litri >= 0 && r.nivel_litri <= prag);
+  return rows.filter((r) => r.nivel_litri > 0 && r.nivel_litri <= prag /* 2026-11-17: 0 L exact = eroare sondă */);
 }
 
 // v2: identic cu get-combustibil-report v15 / get-combustibil-parcele —
@@ -172,6 +172,36 @@ function eliminaFluctuatiiTranzitorii(rows: Citire[]): Citire[] {
 
     rezultat.push(r);
     i++;
+  }
+  return rezultat;
+}
+
+// 2026-11-17 (Radu: „Autostack arată 209 L în 1,2 h — imposibil"): un salt de
+// nivel ≥ PRAG_MINIM_EVENIMENT_L e acceptat doar dacă e CONFIRMAT de citirea
+// următoare. Dacă citirea următoare revine lângă nivelul dinainte (oricât de
+// târziu — ex. după o noapte cu trackerul stins de heblu) sau dacă saltul e
+// ULTIMA citire disponibilă, e o eroare a sondei și se elimină. Caz real:
+// F5 - Autostack, 10.11, ultima citire înainte de tăierea curentului = 0 L
+// (12:14:33) → bilanțul zilei ieșea 209 − 0 = 209 L în loc de ~23 L.
+// eliminaFluctuatiiTranzitorii prinde doar revenirile în 15 minute.
+function eliminaSalturiNeconfirmate<T extends { nivel_litri: number }>(rows: T[]): T[] {
+  const n = rows.length;
+  if (n < 2) return rows;
+  const rezultat: T[] = [];
+  for (let i = 0; i < n; i++) {
+    const r = rows[i];
+    const prev = rezultat.length > 0 ? rezultat[rezultat.length - 1] : null;
+    const next = i + 1 < n ? rows[i + 1] : null;
+    if (prev) {
+      if (Math.abs(r.nivel_litri - prev.nivel_litri) >= PRAG_MINIM_EVENIMENT_L) {
+        if (!next) continue;
+        if (Math.abs(next.nivel_litri - prev.nivel_litri) < PRAG_MINIM_EVENIMENT_L) continue;
+      }
+    } else if (next && Math.abs(next.nivel_litri - r.nivel_litri) >= PRAG_MINIM_EVENIMENT_L) {
+      const next2 = i + 2 < n ? rows[i + 2] : null;
+      if (next2 && Math.abs(next2.nivel_litri - next.nivel_litri) < PRAG_MINIM_EVENIMENT_L) continue;
+    }
+    rezultat.push(r);
   }
   return rezultat;
 }
@@ -521,7 +551,7 @@ Deno.serve(async (req) => {
     );
     if (citiriError) continue;
 
-    const rows = eliminaFluctuatiiTranzitorii(filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number));
+    const rows = eliminaSalturiNeconfirmate(eliminaFluctuatiiTranzitorii(filtreazaCitiriPlauzibile(citiri, u.tanc_capacitate_litri as number)));
 
     // Realimentările confirmate (salturi pozitive peste prag) pe tot
     // istoricul utilajului — folosite atât pentru bilanțul lunar, cât și
