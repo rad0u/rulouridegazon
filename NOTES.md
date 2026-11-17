@@ -2680,4 +2680,4 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - Cauză: o lună întreagă × 13 utilaje (Săbăreni) într-o singură cerere get-combustibil-parcele depășea limita de CPU.
 - get-combustibil-parcele v4: parametri opționali `utilaj_id` (un singur utilaj) și `fara_zilnic=1` (sare peste consum_zilnic); nivelLaMoment cu căutare binară. Comportament implicit neschimbat.
 - lib/consumuriLunare.ts: câte o cerere per utilaj, 4 în paralel, 1 reîncercare; avertisment cu utilajele eșuate.
-- Funcția trebuie publicată (deploy) — NEPUBLICATĂ încă la commit.
+- Funcția publicată (versiunea 15, 17.11.2026).
