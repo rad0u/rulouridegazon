@@ -125,6 +125,13 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
       // 2026-11-11 (Radu): listing Ferme–Parcele–Suprafețe măsurate (printabil A4) — doar admin general.
       ...(esteAdminCentral
         ? [
+            // 2026-11-17 (Radu): raportul principal — tot ce s-a consumat pe fiecare parcelă într-o lună.
+            {
+              href: '/consumuri-lunare',
+              icon: '📊',
+              titlu: 'Consumuri lunare',
+              descriere: 'Motorină, fertilizanți, materii prime — pe parcele',
+            },
             {
               href: '/rapoarte',
               icon: '📐',

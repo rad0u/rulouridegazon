@@ -55,6 +55,11 @@
 // dar litri_total = null pentru fiecare parcelă.
 //
 // Doar admin_central (la fel ca get-combustibil-report / get-cost-productie).
+//
+// v3, 2026-11-17 (Radu, raport „Consumuri lunare"): pre-filtru bounding-box
+// în gasesteParcela (portat din get-sesiuni-detectate v9) — raportul lunar
+// cere o lună întreagă pe fermă, iar fără filtru detecția neconfirmatelor
+// depășea limita de resurse pe contururile mari. Rezultatele nu se schimbă.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -278,6 +283,11 @@ interface ParcelaRing {
   id: string;
   nume: string;
   ring: number[][];
+  // v3: dreptunghiul care încadrează poligonul (ca get-sesiuni-detectate v9).
+  minLon: number;
+  maxLon: number;
+  minLat: number;
+  maxLat: number;
 }
 
 function poligonValid(parcela: ParcelaRaw): number[][] | null {
@@ -302,6 +312,10 @@ function pointInRing(lon: number, lat: number, ring: number[][]): boolean {
 
 function gasesteParcela(lat: number, lon: number, parcele: ParcelaRing[]): { id: string; nume: string } | null {
   for (const p of parcele) {
+    // v3: pre-filtru bounding-box — identic cu get-sesiuni-detectate v9.
+    // Rezultat identic; evită HTTP 546 pe perioade lungi (ex. o lună întreagă
+    // la Săbăreni, cu contururi SW Maps de sute/mii de vârfuri).
+    if (lon < p.minLon || lon > p.maxLon || lat < p.minLat || lat > p.maxLat) continue;
     if (pointInRing(lon, lat, p.ring)) return { id: p.id, nume: p.nume };
   }
   return null;
@@ -558,7 +572,17 @@ Deno.serve(async (req) => {
     const ring = poligonValid(p);
     if (!ring) continue;
     const lista = parcelePorFerma.get(p.ferma_id) ?? [];
-    lista.push({ id: p.id, nume: p.nume, ring });
+    const lons = ring.map((c) => c[0]);
+    const lats = ring.map((c) => c[1]);
+    lista.push({
+      id: p.id,
+      nume: p.nume,
+      ring,
+      minLon: Math.min(...lons),
+      maxLon: Math.max(...lons),
+      minLat: Math.min(...lats),
+      maxLat: Math.max(...lats),
+    });
     parcelePorFerma.set(p.ferma_id, lista);
   }
 

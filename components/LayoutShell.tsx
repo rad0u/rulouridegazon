@@ -178,6 +178,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
                     </Link>
                   )}
 
+                  {/* 2026-11-17 (Radu): consumuri lunare pe parcele (motorină, fertilizanți, materii prime). */}
+                  {role === 'admin_central' && (
+                    <Link href="/consumuri-lunare" style={navLinkStyle} onClick={closeMenu}>
+                      Consumuri lunare
+                    </Link>
+                  )}
+
                   {/* 2026-11-14 (Radu): raport utilaje de recoltare — ore, motorină, mp declarați pe zile. */}
                   {role === 'admin_central' && (
                     <Link href="/recoltare-gazon" style={navLinkStyle} onClick={closeMenu}>
