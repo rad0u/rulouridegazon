@@ -2663,7 +2663,7 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
   - lei: substanțe/MP la `pret_unitar` curent din gestiunea fermei; motorină la prețul mediu ponderat din `rezervor_alimentari` al fermei până la sfârșitul lunii (ca „Cost de producție").
 - Ecran/tipărire A4: sumar pe parcele (ore, L, lei pe categorii, total, mp recoltați) + total fermă pe articole (pagina 1), apoi câte un bloc pe parcelă (nerupt între pagini), lucrări în afara parcelelor; parcelele fără consum listate separat.
 - Excel `consumuri-<ferma>-AAAA-LL.xlsx`: „Sumar pe parcele" (formule SUM), „Detaliat" (o linie per articol/utilaj, filtre), „Articole x parcele" (matrice cantități), „Total pe articole".
-- `get-combustibil-parcele` v3 (doar în repo până la deploy): pre-filtru bounding-box în gasesteParcela (ca get-sesiuni-detectate v9) — fără el, o lună întreagă la Săbăreni riscă HTTP 546. Rezultate identice. DEPLOY în așteptarea acordului lui Radu.
+- `get-combustibil-parcele` v3 (doar în repo până la deploy): pre-filtru bounding-box în gasesteParcela (ca get-sesiuni-detectate v9) — fără el, o lună întreagă la Săbăreni riscă HTTP 546. Rezultate identice. Deployat (v13, apoi v14 cu fixul de mai jos).
 - Verificat: tsc OK; logica + Excel testate pe date de test (totaluri și formule recalculate corect în LibreOffice).
 
 ## 2026-11-17 — Consum exagerat Autostack (209 L în 1,2 h pe 10.11)
@@ -2672,6 +2672,6 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
   - `filtreazaCitiriPlauzibile`: 0 L exact = eroare (era `>= 0`, acum `> 0`);
   - funcție nouă `eliminaSalturiNeconfirmate` aplicată după `eliminaFluctuatiiTranzitorii`: un salt ≥ 15 L e acceptat doar dacă citirea următoare îl confirmă; dacă următoarea revine la nivelul dinainte (oricât de târziu) sau saltul e ultima citire → eliminat.
   - Verificat pe citirile reale Autostack 9–12.11: ~6 / ~23 / ~18 / ~27 L pe zi.
-  - DEPLOY în așteptarea acordului explicit al lui Radu (get-combustibil-parcele v13 conține doar bbox, nu și acest fix).
+  - DEPLOYAT 17.11 cu acordul lui Radu: get-combustibil-report v26, get-combustibil-parcele v14 (bbox + fix), get-cost-productie v13, get-sesiuni-detectate v19.
 - Plasă de siguranță în UI (Recoltare gazon, Consumuri lunare): consum > 60 L/h (sau > 30 L în < 0,5 h) marcat „⚠ consum suspect".
 - De reținut: orele Autostack sunt subestimate (contactul flichează) — ex. 10.11 a mers ~10:17–12:14, raportul arată 1,2 h.
