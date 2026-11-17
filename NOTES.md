@@ -2675,3 +2675,9 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
   - DEPLOYAT 17.11 cu acordul lui Radu: get-combustibil-report v26, get-combustibil-parcele v14 (bbox + fix), get-cost-productie v13, get-sesiuni-detectate v19.
 - Plasă de siguranță în UI (Recoltare gazon, Consumuri lunare): consum > 60 L/h (sau > 30 L în < 0,5 h) marcat „⚠ consum suspect".
 - De reținut: orele Autostack sunt subestimate (contactul flichează) — ex. 10.11 a mers ~10:17–12:14, raportul arată 1,2 h.
+
+## 2026-11-17 — Consumuri lunare: eroare 546 (CPU Time exceeded) la motorină
+- Cauză: o lună întreagă × 13 utilaje (Săbăreni) într-o singură cerere get-combustibil-parcele depășea limita de CPU.
+- get-combustibil-parcele v4: parametri opționali `utilaj_id` (un singur utilaj) și `fara_zilnic=1` (sare peste consum_zilnic); nivelLaMoment cu căutare binară. Comportament implicit neschimbat.
+- lib/consumuriLunare.ts: câte o cerere per utilaj, 4 în paralel, 1 reîncercare; avertisment cu utilajele eșuate.
+- Funcția trebuie publicată (deploy) — NEPUBLICATĂ încă la commit.

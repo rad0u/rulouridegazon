@@ -60,6 +60,14 @@
 // în gasesteParcela (portat din get-sesiuni-detectate v9) — raportul lunar
 // cere o lună întreagă pe fermă, iar fără filtru detecția neconfirmatelor
 // depășea limita de resurse pe contururile mari. Rezultatele nu se schimbă.
+//
+// v4, 2026-11-17: încă „CPU Time exceeded" (HTTP 546) pe o lună întreagă la
+// Săbăreni (13 utilaje). Doi parametri noi, opționali (comportamentul implicit
+// rămâne neschimbat pentru paginile existente):
+//   - `utilaj_id`: calculează doar acel utilaj — raportul „Consumuri lunare"
+//     face câte o cerere per utilaj (fiecare cu bugetul ei de CPU);
+//   - `fara_zilnic=1`: nu mai calculează `consum_zilnic` (ziuaLocala cu Intl pe
+//     fiecare citire = partea cea mai scumpă), nefolosit de acel raport.
 
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 
@@ -450,18 +458,31 @@ function consumZilnic(rows: CitireCombustibil[], realimentari: Eveniment[]): ZiC
 // sortată crescător. Preferă ultima citire ≤ moment; dacă momentul e înainte
 // de prima citire disponibilă, folosește prima citire (cel mai apropiat
 // reper posibil).
+// v4: căutare binară pe momentele (ms) precalculate ale seriei — același
+// rezultat ca parcurgerea liniară de dinainte (ultima citire ≤ moment, altfel
+// prima), dar fără a re-parsa toate datele pentru fiecare sesiune.
+const CACHE_MS = new WeakMap<CitireCombustibil[], number[]>();
 function nivelLaMoment(rows: CitireCombustibil[], momentIso: string): number | null {
   if (rows.length === 0) return null;
-  const momentMs = new Date(momentIso).getTime();
-  let rezultat: CitireCombustibil | null = null;
-  for (const r of rows) {
-    if (new Date(r.data_ora).getTime() <= momentMs) {
-      rezultat = r;
+  let ms = CACHE_MS.get(rows);
+  if (!ms) {
+    ms = rows.map((r) => new Date(r.data_ora).getTime());
+    CACHE_MS.set(rows, ms);
+  }
+  const t = new Date(momentIso).getTime();
+  let lo = 0;
+  let hi = ms.length - 1;
+  let gasit = -1;
+  while (lo <= hi) {
+    const mij = (lo + hi) >> 1;
+    if (ms[mij] <= t) {
+      gasit = mij;
+      lo = mij + 1;
     } else {
-      break;
+      hi = mij - 1;
     }
   }
-  return rezultat ? rezultat.nivel_litri : rows[0].nivel_litri;
+  return gasit >= 0 ? rows[gasit].nivel_litri : rows[0].nivel_litri;
 }
 
 // 2026-09-30 (Radu): o realimentare se aduna la o sesiune doar daca INTREGUL
@@ -555,6 +576,8 @@ Deno.serve(async (req) => {
   const deLaParam = url.searchParams.get('de_la');
   const panaLaParam = url.searchParams.get('pana_la');
   const fermaIdParam = url.searchParams.get('ferma_id');
+  const utilajIdParam = url.searchParams.get('utilaj_id');
+  const faraZilnic = url.searchParams.get('fara_zilnic') === '1';
   const REGEX_DATA_ZI = /^\d{4}-\d{2}-\d{2}$/;
 
   const deLaStr = deLaParam && REGEX_DATA_ZI.test(deLaParam) ? deLaParam : primaZiLuniiCurente();
@@ -582,6 +605,7 @@ Deno.serve(async (req) => {
     .select('id, nume, tanc_capacitate_litri, ferma_id, ferme(nume)')
     .eq('activ', true);
   if (fermaIdParam) utilajeQuery = utilajeQuery.eq('ferma_id', fermaIdParam);
+  if (utilajIdParam) utilajeQuery = utilajeQuery.eq('id', utilajIdParam);
 
   const { data: utilajeRaw, error: utilajeError } = await utilajeQuery;
   if (utilajeError) {
@@ -687,7 +711,7 @@ Deno.serve(async (req) => {
           // padded suplimentare înainte de a apela consumZilnic.
           const rowsInterval = pana_la ? rows.filter((r) => r.data_ora < pana_la!) : rows;
           const realimentariInterval = pana_la ? realimentari.filter((e) => e.data_ora < pana_la!) : realimentari;
-          zileConsum = consumZilnic(rowsInterval, realimentariInterval);
+          if (!faraZilnic) zileConsum = consumZilnic(rowsInterval, realimentariInterval);
         }
       }
     }

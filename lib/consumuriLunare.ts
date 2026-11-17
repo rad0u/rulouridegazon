@@ -215,23 +215,44 @@ export async function incarcaConsumuriLunare(fermaId: string, luna: string): Pro
       .eq('ferma_id', fermaId)
       .lt('data_ora', sfarsitLunaUTC(panaLa)),
     (async (): Promise<RezCombustibil | null> => {
-      try {
-        const res = await fetch(
-          `${supabaseUrl}/functions/v1/get-combustibil-parcele?${new URLSearchParams({ ferma_id: fermaId, de_la: deLa, pana_la: panaLa })}`,
-          { headers: { Authorization: `Bearer ${token}` } },
-        );
-        const json = await res.json().catch(() => null);
-        if (!res.ok) {
-          avertismente.push(
-            `Motorina pe parcele nu s-a putut calcula (${json?.error ?? `eroare ${res.status}`}). Restul raportului e complet; reîncearcă peste câteva minute.`,
-          );
-          return null;
-        }
-        return json as RezCombustibil;
-      } catch (e) {
-        avertismente.push(`Motorina pe parcele nu s-a putut calcula (${(e as Error).message}).`);
+      // 2026-11-17: o cerere per utilaj (o lună întreagă pentru toată ferma
+      // depășea limita de CPU a funcției), câte 4 în paralel.
+      const { data: ut, error: errUt } = await supabase.from('utilaje').select('id,nume').eq('ferma_id', fermaId).eq('activ', true);
+      if (errUt) {
+        avertismente.push(`Motorina pe parcele nu s-a putut calcula (${errUt.message}).`);
         return null;
       }
+      const lista = (ut as { id: string; nume: string }[]) ?? [];
+      const rezultate: RezCombustibil['rezultate'] = [];
+      const esuate: string[] = [];
+      let idx = 0;
+      const lucrator = async () => {
+        while (idx < lista.length) {
+          const u = lista[idx++];
+          let ok = false;
+          for (let incercare = 0; incercare < 2 && !ok; incercare++) {
+            try {
+              const res = await fetch(
+                `${supabaseUrl}/functions/v1/get-combustibil-parcele?${new URLSearchParams({ ferma_id: fermaId, utilaj_id: u.id, de_la: deLa, pana_la: panaLa, fara_zilnic: '1' })}`,
+                { headers: { Authorization: `Bearer ${token}` } },
+              );
+              const json = await res.json().catch(() => null);
+              if (res.ok && json) {
+                rezultate.push(...((json as RezCombustibil).rezultate ?? []));
+                ok = true;
+              }
+            } catch {
+              /* reîncercăm o dată */
+            }
+          }
+          if (!ok) esuate.push(u.nume);
+        }
+      };
+      await Promise.all([lucrator(), lucrator(), lucrator(), lucrator()]);
+      if (esuate.length) {
+        avertismente.push(`Motorina nu s-a putut calcula pentru: ${esuate.join(', ')}. Restul raportului e complet; reîncearcă peste câteva minute.`);
+      }
+      return { rezultate };
     })(),
   ]);
 
