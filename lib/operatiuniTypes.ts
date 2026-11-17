@@ -79,6 +79,7 @@ export type Operatiune = {
   cantitate_mp_recoltat: number | null;
   // 2026-11-17 (Radu: „vreau raportul mai detaliat - ce utilaj a fost"):
   // opționale, aduse doar de istoricul din ParcelaPanel.
+  utilaj_id?: string | null;
   sesiune_inceput?: string | null;
   sesiune_sfarsit?: string | null;
   utilaje?: { nume: string } | null;

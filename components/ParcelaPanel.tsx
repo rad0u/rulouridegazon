@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabaseClient';
 import { Parcela } from '../lib/parcelaTypes';
 import { LABEL_OPERATIUNE, Operatiune } from '../lib/operatiuniTypes';
 import ConsumuriOperatiune from './ConsumuriOperatiune';
+import EditareOperatiune from './EditareOperatiune';
 
 const FORMAT_ORA = new Intl.DateTimeFormat('ro-RO', {
   timeZone: 'Europe/Bucharest',
@@ -36,6 +37,7 @@ export default function ParcelaPanel({
 }: ParcelaPanelProps) {
   const [istoric, setIstoric] = useState<Operatiune[]>([]);
   const [loadingIstoric, setLoadingIstoric] = useState(true);
+  const [editOpId, setEditOpId] = useState<string | null>(null);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -50,6 +52,7 @@ export default function ParcelaPanel({
 
   useEffect(() => {
     void loadIstoric();
+    setEditOpId(null);
     setEditingDescriere(false);
     setEditNume(parcela.nume);
     setEditTipGazon(parcela.tip_gazon ?? '');
@@ -122,7 +125,7 @@ export default function ParcelaPanel({
     const { data: rows, error: fetchError } = await supabase
       .from('operatiuni')
       .select(
-        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,sesiune_inceput,sesiune_sfarsit,utilaje(nume),utilizatori(nume),operatiuni_substante(id,cantitate,substante(nume,unitate_masura)),operatiuni_materii_prime(id,cantitate,materii_prime(nume,unitate_masura))',
+        'id,tip,data,ore_lucru,note,cantitate_mp_recoltat,utilaj_id,sesiune_inceput,sesiune_sfarsit,utilaje(nume),utilizatori(nume),operatiuni_substante(id,cantitate,substante(nume,unitate_masura)),operatiuni_materii_prime(id,cantitate,materii_prime(nume,unitate_masura))',
       )
       .eq('parcela_id', parcela.id)
       .order('data', { ascending: false })
@@ -272,6 +275,26 @@ export default function ParcelaPanel({
                   🚜 {op.utilaje?.nume ?? <span style={{ color: '#999' }}>utilaj nespecificat</span>}
                   {op.utilizatori?.nume && <span style={{ color: '#777' }}> · validat de {op.utilizatori.nume}</span>}
                 </div>
+                {editable && editOpId !== op.id && (
+                  <button
+                    type="button"
+                    onClick={() => setEditOpId(op.id)}
+                    style={{ fontSize: '0.8rem', padding: '0.1rem 0.5rem', marginTop: '0.2rem' }}
+                  >
+                    ✏️ Modifică
+                  </button>
+                )}
+                {editable && editOpId === op.id && (
+                  <EditareOperatiune
+                    op={op}
+                    fermaId={parcela.ferma_id}
+                    onCancel={() => setEditOpId(null)}
+                    onSaved={() => {
+                      setEditOpId(null);
+                      void loadIstoric();
+                    }}
+                  />
+                )}
                 {op.cantitate_mp_recoltat != null && <> · {op.cantitate_mp_recoltat} mp recoltați</>}
                 {editable ? (
                   <ConsumuriOperatiune

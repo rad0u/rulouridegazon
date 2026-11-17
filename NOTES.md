@@ -2686,3 +2686,8 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - Radu: „vreau raportul mai detaliat - ce utilaj a fost".
 - ParcelaPanel: fiecare operațiune arată acum utilajul (🚜), intervalul orar al sesiunii GPS (ora României) și cine a validat-o (utilizatori.nume). Sortare: dată desc, apoi ora de început desc.
 - Operatiune (lib/operatiuniTypes.ts): câmpuri opționale sesiune_inceput, sesiune_sfarsit, utilaje, utilizatori.
+
+## 2026-11-17 — Istoric operațiuni: buton „Modifică” pe fiecare operațiune
+- Radu: „și un buton de modificare a operațiunii la fiecare în parte".
+- components/EditareOperatiune.tsx (nou): corectare tip, dată, utilaj (utilajele fermei), ore, mp recoltați (doar la Recoltare), notă. Intervalul sesiunii GPS rămâne neschimbat; consumurile se corectează în continuare din ConsumuriOperatiune.
+- Vizibil doar pentru admin_central (ParcelaPanel `editable`).
