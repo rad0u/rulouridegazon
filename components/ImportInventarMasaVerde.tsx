@@ -5,6 +5,17 @@
 // (10, 3 etc.). Se potrivesc cu parcelele fermei după nume (apoi pe hartă, dacă
 // numele nu se potrivește) și se salvează ca inventar nou, cu data aleasă.
 // NU modifică parcelele (nici conturul, nici suprafața) — doar evidența masei verzi.
+//
+// 2026-11-22 (Radu): „voi măsura exact conturul verde, apoi voi măsura separat
+// poligoane noi în cadrul aceleiași parcele și le voi da nume" — zonele
+// calamitate se măsoară ca poligoane separate, în interiorul conturului verde.
+// Recunoaștere automată (se poate schimba manual pe fiecare rând, coloana „Tip"):
+//   - numele = numele parcelei („3", „10")            → contur masă verde;
+//   - numele = parcela + text („3 inundatie", „10-uscat",
+//     „3 calamitat")                                   → zonă calamitată, cauza = textul;
+//   - nume fără parcelă, dar cu un cuvânt de calamitate
+//     (calamit, inund, uscat, balt, ars, buruien...)   → zonă calamitată, parcela după hartă.
+// Suprafața zonelor calamitate se scade din masa verde a parcelei.
 
 import { useRef, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
@@ -23,7 +34,15 @@ type Rand = {
   c: CandidatPoligon;
   parcelaId: string; // 'ignora' | id parcelă
   nota: string | null;
+  tip: 'masa_verde' | 'calamitat';
+  cauza: string;
 };
+
+const CUVINTE_CALAMITATE = /calamit|inund|uscat|uscaciun|baltit|\barsa?\b|arsur|buruien|distrus|degradat|daun/;
+
+function normalizat(t: string): string {
+  return t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
 
 const fmt = (n: number) => Math.round(n).toLocaleString('ro-RO');
 const PRAG_SUPRAPUNERE = 0.5;
@@ -32,6 +51,37 @@ function azi(): string {
   const d = new Date();
   const p = (n: number) => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+// „3 inundatie" → parcela 3 + cauza „inundatie"; „P3 b Sport" rămâne parcela „P3 b Sport"
+// dacă există cu exact acest nume. Se alege cel mai lung început al numelui care e
+// exact numele unei parcele, urmat de separator și de un text cu litere.
+function parcelaSiCauza(nume: string, parcele: Parcela[]): { parcela: Parcela; cauza: string } | null {
+  const t = nume.trim();
+  if (!t) return null;
+  const exact = parcele.filter((p) => cheieNume(p.nume) === cheieNume(t));
+  if (exact.length > 0) return null; // numele întreg e o parcelă → contur verde
+  for (let i = t.length - 1; i > 0; i--) {
+    if (!/[-_\s/,:;]/.test(t[i])) continue;
+    const cap = t.slice(0, i);
+    const rest = t.slice(i).replace(/^[-_\s/,:;]+/, '').trim();
+    if (!rest || !/[a-zA-ZăâîșțĂÂÎȘȚşţŞŢ]/.test(rest)) continue;
+    const k = cheieNume(cap);
+    const gasite = k ? parcele.filter((p) => cheieNume(p.nume) === k) : [];
+    if (gasite.length === 1) return { parcela: gasite[0], cauza: rest };
+  }
+  return null;
+}
+
+function clasificare(c: CandidatPoligon, parcele: Parcela[]): Omit<Rand, 'c'> {
+  const pc = c.valid && c.sursa !== 'Linie' ? parcelaSiCauza(c.nume ?? '', parcele) : null;
+  if (pc) return { parcelaId: pc.parcela.id, nota: null, tip: 'calamitat', cauza: pc.cauza };
+  const r = potrivire(c, parcele);
+  if (r.parcelaId !== 'ignora' && r.nota && CUVINTE_CALAMITATE.test(normalizat(c.nume ?? ''))) {
+    // nume fără parcelă, dar cu un cuvânt de calamitate → zonă calamitată, parcela după hartă
+    return { ...r, tip: 'calamitat', cauza: (c.nume ?? '').trim() };
+  }
+  return { ...r, tip: 'masa_verde', cauza: '' };
 }
 
 function potrivire(c: CandidatPoligon, parcele: Parcela[]): { parcelaId: string; nota: string | null } {
@@ -112,10 +162,7 @@ export default function ImportInventarMasaVerde({
         ? await parseazaArhiva(new Uint8Array(await f.arrayBuffer()))
         : parseazaFisier(f.name, await f.text());
       setRanduri(
-        rez.candidati.map((c) => {
-          const { parcelaId, nota: n } = potrivire(c, parcele);
-          return { c, parcelaId, nota: n };
-        }),
+        rez.candidati.map((c) => ({ c, ...clasificare(c, parcele) })),
       );
       setNumeFisier(f.name);
       setFormat(rez.format);
@@ -130,15 +177,32 @@ export default function ImportInventarMasaVerde({
     setRanduri((prev) => prev.map((r, i) => (i === idx ? { ...r, parcelaId } : r)));
   }
 
+  function schimbaTip(idx: number, tip: Rand['tip']) {
+    setRanduri((prev) => prev.map((r, i) => (i === idx ? { ...r, tip } : r)));
+  }
+
+  function schimbaCauza(idx: number, cauza: string) {
+    setRanduri((prev) => prev.map((r, i) => (i === idx ? { ...r, cauza } : r)));
+  }
+
   const deSalvat = randuri.filter((r) => r.c.valid && r.parcelaId !== 'ignora');
   const parcelaDeLa = (id: string) => parcele.find((p) => p.id === id);
   const folositeDeMaiMulteOri = new Set<string>();
   {
     const nr = new Map<string, number>();
-    for (const r of deSalvat) nr.set(r.parcelaId, (nr.get(r.parcelaId) ?? 0) + 1);
+    for (const r of deSalvat) if (r.tip === 'masa_verde') nr.set(r.parcelaId, (nr.get(r.parcelaId) ?? 0) + 1);
     nr.forEach((n, id) => {
       if (n > 1) folositeDeMaiMulteOri.add(id);
     });
+  }
+
+  // Zona calamitată trebuie să fie în interiorul conturului verde al aceleiași parcele.
+  function avertizareInterior(r: Rand): string | null {
+    const verzi = randuri.filter((x) => x.tip === 'masa_verde' && x.parcelaId === r.parcelaId && x.c.valid);
+    if (verzi.length === 0) return 'Parcela nu are contur de masă verde în acest fișier — zona se scade totuși din masa verde.';
+    const es = esantioaneInterior(r.c.ring, 20);
+    const f = Math.max(...verzi.map((v) => fractieInPoligon(es, v.c.ring)));
+    return f < 0.9 ? `Doar ${Math.round(f * 100)}% din zonă e în conturul verde — verifică măsurătoarea.` : null;
   }
 
   async function salveaza() {
@@ -179,6 +243,8 @@ export default function ImportInventarMasaVerde({
         poligon_parcela: ringParcela.length >= 3 ? p.poligon_harta : null,
         suprafata_masa_verde_mp: Math.round(r.c.suprafataMp * 100) / 100,
         poligon_masa_verde: { type: 'Polygon', coordinates: [ringLonLat] },
+        tip: r.tip,
+        cauza: r.tip === 'calamitat' ? r.cauza.trim() || null : null,
       };
     });
 
@@ -194,7 +260,7 @@ export default function ImportInventarMasaVerde({
     setSalvez(false);
     reset();
     setDeschis(false);
-    setMesaj(`Inventar salvat: ${linii.length} ${linii.length === 1 ? 'parcelă' : 'parcele'}.`);
+    setMesaj(`Inventar salvat: ${linii.length} ${linii.length === 1 ? 'poligon' : 'poligoane'}.`);
     onSaved(inv.id);
   }
 
@@ -214,8 +280,9 @@ export default function ImportInventarMasaVerde({
       <p style={{ fontWeight: 'bold', marginTop: 0 }}>Import inventar masă verde</p>
       <p style={{ fontSize: '0.85rem', color: '#555', marginTop: 0 }}>
         Exportă din SW Maps contururile gazonului rămas (KML / GeoJSON / GPX / CSV sau arhiva .zip / .kmz), cu parcelele
-        numite ca în aplicație (10, 3 etc.). Parcelele fermei <strong>nu se modifică</strong> — importul doar ține
-        evidența masei verzi și rămâne în istoric.
+        numite ca în aplicație (10, 3 etc.). Zonele calamitate din interiorul conturului se măsoară ca poligoane separate,
+        numite parcela + cauza (ex. „3 inundație”, „10 uscat”) — se scad din masa verde. Parcelele fermei{' '}
+        <strong>nu se modifică</strong> — importul doar ține evidența masei verzi și rămâne în istoric.
       </p>
 
       <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '0.75rem' }}>
@@ -246,7 +313,10 @@ export default function ImportInventarMasaVerde({
         <>
           <p style={{ fontSize: '0.85rem', color: '#555' }}>
             {numeFisier} — format {format}, {randuri.length} {randuri.length === 1 ? 'poligon găsit' : 'poligoane găsite'};{' '}
-            {deSalvat.length} se vor importa.
+            {deSalvat.length} se vor importa
+            {deSalvat.some((r) => r.tip === 'calamitat') &&
+              ` (din care ${deSalvat.filter((r) => r.tip === 'calamitat').length} zone calamitate, scăzute din masa verde)`}
+            .
           </p>
           {avertismente.map((a, i) => (
             <p key={i} style={{ fontSize: '0.85rem', color: '#8a5a00', margin: '0.2rem 0' }}>
@@ -259,7 +329,8 @@ export default function ImportInventarMasaVerde({
               <thead>
                 <tr style={{ textAlign: 'left', borderBottom: '1px solid #ccc' }}>
                   <th style={{ padding: '0.3rem' }}>Din fișier</th>
-                  <th style={{ padding: '0.3rem', textAlign: 'right' }}>Masă verde măsurată</th>
+                  <th style={{ padding: '0.3rem', textAlign: 'right' }}>Suprafață măsurată</th>
+                  <th style={{ padding: '0.3rem' }}>Tip</th>
                   <th style={{ padding: '0.3rem' }}>Parcela din aplicație</th>
                   <th style={{ padding: '0.3rem', textAlign: 'right' }}>Suprafață totală parcelă</th>
                 </tr>
@@ -267,7 +338,7 @@ export default function ImportInventarMasaVerde({
               <tbody>
                 {randuri.map((r, i) => {
                   const p = r.parcelaId !== 'ignora' ? parcelaDeLa(r.parcelaId) : undefined;
-                  const depasire = p?.suprafata_mp != null && r.c.valid && r.c.suprafataMp > p.suprafata_mp * 1.02;
+                  const depasire = r.tip === 'masa_verde' && p?.suprafata_mp != null && r.c.valid && r.c.suprafataMp > p.suprafata_mp * 1.02;
                   return (
                     <tr key={r.c.cheie} style={{ borderBottom: '1px solid #eee', verticalAlign: 'top', opacity: r.parcelaId === 'ignora' ? 0.55 : 1 }}>
                       <td style={{ padding: '0.3rem' }}>
@@ -288,6 +359,29 @@ export default function ImportInventarMasaVerde({
                           </>
                         ) : (
                           '—'
+                        )}
+                      </td>
+                      <td style={{ padding: '0.3rem' }}>
+                        <select
+                          value={r.tip}
+                          disabled={!r.c.valid}
+                          onChange={(e) => schimbaTip(i, e.target.value as Rand['tip'])}
+                          style={{ padding: '0.3rem', background: r.tip === 'calamitat' ? '#fde7d6' : undefined }}
+                        >
+                          <option value="masa_verde">🟩 Masă verde (contur)</option>
+                          <option value="calamitat">🟧 Zonă calamitată</option>
+                        </select>
+                        {r.tip === 'calamitat' && (
+                          <input
+                            type="text"
+                            value={r.cauza}
+                            placeholder="cauza (ex. inundație)"
+                            onChange={(e) => schimbaCauza(i, e.target.value)}
+                            style={{ display: 'block', marginTop: '0.25rem', padding: '0.25rem', width: '100%', maxWidth: '200px' }}
+                          />
+                        )}
+                        {r.tip === 'calamitat' && r.parcelaId !== 'ignora' && avertizareInterior(r) && (
+                          <div style={{ color: '#8a5a00' }}>{avertizareInterior(r)}</div>
                         )}
                       </td>
                       <td style={{ padding: '0.3rem' }}>
@@ -323,7 +417,7 @@ export default function ImportInventarMasaVerde({
 
       <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.75rem', flexWrap: 'wrap' }}>
         <button onClick={() => void salveaza()} disabled={salvez || deSalvat.length === 0 || !dataInventar}>
-          {salvez ? 'Se salvează...' : `Salvează inventarul (${deSalvat.length} ${deSalvat.length === 1 ? 'parcelă' : 'parcele'})`}
+          {salvez ? 'Se salvează...' : `Salvează inventarul (${deSalvat.length} ${deSalvat.length === 1 ? 'poligon' : 'poligoane'})`}
         </button>
         <button onClick={inchide} disabled={salvez}>
           Închide

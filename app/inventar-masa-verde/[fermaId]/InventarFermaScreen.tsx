@@ -11,7 +11,9 @@ import {
   formatDataLunga,
   formatHa,
   formatMp,
+  masaVerdeEfectiva,
   type ComparatieParcela,
+  type TipZona,
   type Inventar,
   type RandInventar,
 } from '../../../lib/inventarMasaVerde';
@@ -23,6 +25,7 @@ import {
 type RandAnterior = {
   parcela_id: string | null;
   suprafata_masa_verde_mp: number;
+  tip: TipZona | null;
   inventar_masa_verde: { id: string; data_inventar: string; created_at: string } | null;
 };
 
@@ -36,7 +39,7 @@ async function calculeazaComparatie(
 
   const { data: anterioare } = await supabase
     .from('inventar_masa_verde_parcele')
-    .select('parcela_id, suprafata_masa_verde_mp, inventar_masa_verde!inner(id, data_inventar, created_at, ferma_id)')
+    .select('parcela_id, suprafata_masa_verde_mp, tip, inventar_masa_verde!inner(id, data_inventar, created_at, ferma_id)')
     .eq('inventar_masa_verde.ferma_id', fermaId)
     .lt('inventar_masa_verde.data_inventar', dataInventar)
     .in('parcela_id', parcelaIds);
@@ -54,9 +57,21 @@ async function calculeazaComparatie(
   for (const r of lista) {
     const ales = celMaiRecent.get(r.parcela_id!);
     if (!ales || r.inventar_masa_verde!.id !== ales.id) continue;
-    const c = (rezultat[r.parcela_id!] ??= { dataAnterior: ales.data, masaVerdeAnteriorMp: 0, recoltatMp: 0 });
-    c.masaVerdeAnteriorMp += Number(r.suprafata_masa_verde_mp);
+    const c = (rezultat[r.parcela_id!] ??= {
+      dataAnterior: ales.data,
+      masaVerdeAnteriorMp: 0,
+      recoltatMp: 0,
+      calamitateAnteriorMp: 0,
+    });
+    // 2026-11-22: masa verde efectivă = contur verde − zone calamitate
+    if (r.tip === 'calamitat') {
+      c.masaVerdeAnteriorMp -= Number(r.suprafata_masa_verde_mp);
+      c.calamitateAnteriorMp += Number(r.suprafata_masa_verde_mp);
+    } else {
+      c.masaVerdeAnteriorMp += Number(r.suprafata_masa_verde_mp);
+    }
   }
+  for (const id of Object.keys(rezultat)) rezultat[id].masaVerdeAnteriorMp = Math.max(0, rezultat[id].masaVerdeAnteriorMp);
 
   const cuAnterior = Object.keys(rezultat);
   if (cuAnterior.length === 0) return rezultat;
@@ -85,7 +100,7 @@ async function calculeazaComparatie(
 }
 
 type InventarCuTotal = Inventar & {
-  inventar_masa_verde_parcele: { suprafata_masa_verde_mp: number }[];
+  inventar_masa_verde_parcele: { suprafata_masa_verde_mp: number; tip: TipZona | null }[];
 };
 
 export default function InventarFermaScreen({ fermaId }: { fermaId: string }) {
@@ -103,7 +118,7 @@ export default function InventarFermaScreen({ fermaId }: { fermaId: string }) {
   const incarcaInventare = useCallback(async (alege?: string) => {
     const { data, error: err } = await supabase
       .from('inventar_masa_verde')
-      .select('id, ferma_id, data_inventar, nota, nume_fisier, created_at, inventar_masa_verde_parcele(suprafata_masa_verde_mp)')
+      .select('id, ferma_id, data_inventar, nota, nume_fisier, created_at, inventar_masa_verde_parcele(suprafata_masa_verde_mp, tip)')
       .eq('ferma_id', fermaId)
       .order('data_inventar', { ascending: false })
       .order('created_at', { ascending: false });
@@ -143,7 +158,7 @@ export default function InventarFermaScreen({ fermaId }: { fermaId: string }) {
     void (async () => {
       const { data, error: err } = await supabase
         .from('inventar_masa_verde_parcele')
-        .select('id, inventar_id, parcela_id, nume_parcela, suprafata_totala_mp, poligon_parcela, suprafata_masa_verde_mp, poligon_masa_verde')
+        .select('id, inventar_id, parcela_id, nume_parcela, suprafata_totala_mp, poligon_parcela, suprafata_masa_verde_mp, poligon_masa_verde, tip, cauza')
         .eq('inventar_id', selectat);
       if (!activ) return;
       if (err) setError(err.message);
@@ -239,7 +254,7 @@ export default function InventarFermaScreen({ fermaId }: { fermaId: string }) {
                     </thead>
                     <tbody>
                       {inventare.map((i) => {
-                        const total = i.inventar_masa_verde_parcele.reduce((s, r) => s + Number(r.suprafata_masa_verde_mp), 0);
+                        const total = masaVerdeEfectiva(i.inventar_masa_verde_parcele);
                         const activ = i.id === selectat;
                         return (
                           <tr
@@ -248,7 +263,7 @@ export default function InventarFermaScreen({ fermaId }: { fermaId: string }) {
                             style={{ borderBottom: '1px solid #eee', cursor: 'pointer', background: activ ? '#eef7ee' : undefined }}
                           >
                             <td style={{ padding: '0.4rem', fontWeight: activ ? 700 : 400 }}>{formatDataLunga(i.data_inventar)}</td>
-                            <td style={{ padding: '0.4rem', textAlign: 'right' }}>{i.inventar_masa_verde_parcele.length}</td>
+                            <td style={{ padding: '0.4rem', textAlign: 'right' }}>{i.inventar_masa_verde_parcele.filter((r) => r.tip !== 'calamitat').length}</td>
                             <td style={{ padding: '0.4rem', textAlign: 'right', whiteSpace: 'nowrap' }}>
                               {formatMp(total)} mp ({formatHa(total)} ha)
                             </td>

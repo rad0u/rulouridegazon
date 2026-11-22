@@ -28,16 +28,41 @@ export type RandInventar = {
   poligon_parcela: PoligonGeoJson | null;
   suprafata_masa_verde_mp: number;
   poligon_masa_verde: PoligonGeoJson;
+  // 2026-11-22 (Radu): „voi măsura exact conturul verde, apoi voi măsura separat
+  // poligoane noi în cadrul aceleiași parcele și le voi da nume" — tip
+  // 'calamitat' = zonă calamitată din interiorul conturului verde; suprafața ei
+  // (ținută tot în suprafata_masa_verde_mp) se SCADE din masa verde a parcelei.
+  // Inventarele vechi au doar 'masa_verde' (zonele erau ocolite în contur).
+  tip?: TipZona;
+  cauza?: string | null;
 };
+
+export type TipZona = 'masa_verde' | 'calamitat';
 
 export type GrupParcela = {
   cheie: string;
   nume: string;
   totalMp: number | null;
+  // masa verde EFECTIVĂ = contur verde − zone calamitate
   masaVerdeMp: number;
+  conturVerdeMp: number;
+  calamitateMp: number;
   poligonParcela: PoligonGeoJson | null;
   poligoaneMasaVerde: PoligonGeoJson[];
+  poligoaneCalamitate: PoligonGeoJson[];
+  cauze: { cauza: string; mp: number }[];
 };
+
+// Masa verde efectivă dintr-o listă de rânduri (contur verde − zone calamitate), min. 0.
+export function masaVerdeEfectiva(randuri: { suprafata_masa_verde_mp: number; tip?: TipZona | null }[]): number {
+  let verde = 0;
+  let calamitat = 0;
+  for (const r of randuri) {
+    if (r.tip === 'calamitat') calamitat += Number(r.suprafata_masa_verde_mp);
+    else verde += Number(r.suprafata_masa_verde_mp);
+  }
+  return Math.max(0, verde - calamitat);
+}
 
 // 2026-11-13 (Radu): comparația cu inventarul ANTERIOR al aceleiași parcele —
 // masa verde de atunci și suprafața (mp) de rulouri înregistrată ca recoltată
@@ -48,6 +73,8 @@ export type ComparatieParcela = {
   dataAnterior: string; // YYYY-MM-DD
   masaVerdeAnteriorMp: number;
   recoltatMp: number;
+  // 2026-11-22: zonele calamitate măsurate la inventarul anterior (0 la inventarele vechi)
+  calamitateAnteriorMp: number;
 };
 
 export function formatDataScurta(dataIso: string): string {
@@ -69,14 +96,31 @@ export function grupeazaPeParcela(randuri: RandInventar[]): GrupParcela[] {
         nume: r.nume_parcela,
         totalMp: r.suprafata_totala_mp,
         masaVerdeMp: 0,
+        conturVerdeMp: 0,
+        calamitateMp: 0,
         poligonParcela: r.poligon_parcela,
         poligoaneMasaVerde: [],
+        poligoaneCalamitate: [],
+        cauze: [],
       };
       grupuri.set(cheie, g);
     }
-    g.masaVerdeMp += Number(r.suprafata_masa_verde_mp);
-    g.poligoaneMasaVerde.push(r.poligon_masa_verde);
+    const mp = Number(r.suprafata_masa_verde_mp);
+    if (r.tip === 'calamitat') {
+      g.calamitateMp += mp;
+      g.poligoaneCalamitate.push(r.poligon_masa_verde);
+      const cauza = (r.cauza ?? '').trim() || 'nespecificat';
+      const ex = g.cauze.find((c) => c.cauza.toLowerCase() === cauza.toLowerCase());
+      if (ex) ex.mp += mp;
+      else g.cauze.push({ cauza, mp });
+    } else {
+      g.conturVerdeMp += mp;
+      g.poligoaneMasaVerde.push(r.poligon_masa_verde);
+    }
   }
+  grupuri.forEach((g) => {
+    g.masaVerdeMp = Math.max(0, g.conturVerdeMp - g.calamitateMp);
+  });
   return Array.from(grupuri.values()).sort((a, b) => colatorNume.compare(a.nume, b.nume));
 }
 

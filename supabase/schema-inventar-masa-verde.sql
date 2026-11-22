@@ -39,3 +39,11 @@ create policy "admin_central gestioneaza inventarul de masa verde" on public.inv
 create policy "admin_central gestioneaza parcelele inventarului de masa verde" on public.inventar_masa_verde_parcele
   for all using (auth.role() = 'authenticated' and is_admin_central())
   with check (auth.role() = 'authenticated' and is_admin_central());
+
+-- 2026-11-22 (Radu): zone calamitate măsurate separat, în interiorul conturului verde.
+-- Aplicat ca migrare `inventar_masa_verde_zone_calamitate`.
+alter table public.inventar_masa_verde_parcele
+  add column if not exists tip text not null default 'masa_verde',
+  add column if not exists cauza text;
+alter table public.inventar_masa_verde_parcele
+  add constraint inventar_masa_verde_parcele_tip_check check (tip in ('masa_verde', 'calamitat'));

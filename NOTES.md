@@ -2692,3 +2692,11 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - components/EditareOperatiune.tsx (nou): corectare tip, dată, utilaj (utilajele fermei), ore, mp recoltați (doar la Recoltare), notă. Intervalul sesiunii GPS rămâne neschimbat; consumurile se corectează în continuare din ConsumuriOperatiune.
 - Vizibil doar pentru admin_central (ParcelaPanel `editable`).
 - Completare (Radu: „la tip operațiune să pot introduce cantitatea și materia primă folosită dacă aleg însămânțare/fertilizare/tratament"): în EditareOperatiune, pentru Fertilizare solidă / Tratamente foliare se pot adăuga substanțe + cantitate, pentru Însămânțare materii prime + cantitate (mai multe linii, ml/g acceptate). INSERT în operatiuni_substante / operatiuni_materii_prime → stocul scade prin triggerele scade_stoc_*. Liniile existente se corectează din ConsumuriOperatiune (nu există ștergere — fără politică DELETE în RLS).
+
+## 2026-11-22 — Inventar masă verde: zone calamitate măsurate separat
+- Radu: „când am măsurat am ocolit zonele calamitate în același poligon. De acum voi măsura exact conturul verde, apoi voi măsura separat poligoane noi în cadrul aceleiași parcele și le voi da nume".
+- DB (migrare `inventar_masa_verde_zone_calamitate`): `inventar_masa_verde_parcele.tip` ('masa_verde' implicit | 'calamitat') + `cauza`. Inventarele vechi rămân neschimbate.
+- Import (components/ImportInventarMasaVerde.tsx): coloană „Tip” pe fiecare poligon (+ câmp cauză). Auto: nume = parcela → contur verde; nume = parcela + text („3 inundație”, „10-uscat”) → zonă calamitată (cauza = textul; numele întregi existente ca „P3 b Sport” rămân parcele); nume fără parcelă dar cu cuvânt de calamitate → calamitat, parcela după hartă. Avertizare dacă zona nu e ≥90% în conturul verde.
+- Calcul (lib/inventarMasaVerde.ts): masa verde efectivă = contur verde − zone calamitate. Comparația: calamitat nou = zone acum − zone la inventarul anterior; diferență nejustificată = anterior − actual − recoltat − calamitat nou.
+- Raport: coloane „Zone calamitate (mp)” și „Calamitat nou (mp)” (doar dacă există), zone portocalii pe desen, legendă cu cauzele și conturul verde măsurat.
+- Limită: la primul inventar cu zone separate, „calamitat nou” poate include zone vechi (ocolite anterior în contur) — menționat în raport.
