@@ -145,6 +145,7 @@ type RandMaterial = {
 };
 type RezCombustibil = {
   rezultate: {
+    utilaj_id?: string;
     nume: string;
     calibrat: boolean;
     eroare?: string;
@@ -186,7 +187,8 @@ async function consumMediuReferinta(
         let o = 0;
         for (const r of json.rezultate ?? []) {
           for (const lp of r.parcele ?? []) {
-            if (!lp.confirmat || lp.litri_total === null || lp.ore_total <= 0) continue;
+            // litri 0 = de obicei sondă fără date (capacitate trecută, dar nicio citire) — nu intră în medie
+            if (!lp.confirmat || lp.litri_total === null || lp.litri_total <= 0 || lp.ore_total <= 0) continue;
             if (lp.litri_total / lp.ore_total > 60) continue;
             l += lp.litri_total;
             o += lp.ore_total;
@@ -415,6 +417,29 @@ export async function incarcaConsumuriLunare(fermaId: string, luna: string): Pro
   // date citite." — pentru utilajele fără litri (sondă care nu transmite / necalibrată),
   // litri = ore × media L/h a utilajelor de același model, cu sondă, din aceeași lună.
   if (combustibil) {
+    // 2026-11-23: un utilaj cu capacitatea rezervorului completată, dar fără NICIO citire
+    // de nivel în lună (ex. F3 - JCB: sonda nu transmite), iese din funcție cu 0 L, nu
+    // cu „fără date". Verificăm direct citirile și îl tratăm ca utilaj fără date.
+    const cuZero = (combustibil.rezultate ?? []).filter(
+      (u) => u.utilaj_id && !u.eroare && (u.parcele ?? []).some((lp) => lp.ore_total > 0) && (u.parcele ?? []).every((lp) => !lp.litri_total),
+    );
+    await Promise.all(
+      cuZero.map(async (u) => {
+        const { count, error } = await supabase
+          .from('combustibil_citiri')
+          .select('id', { count: 'exact', head: true })
+          .eq('utilaj_id', u.utilaj_id!)
+          .not('nivel_litri', 'is', null)
+          .gt('nivel_litri', 0)
+          .gte('data_ora', `${deLa}T00:00:00+02:00`)
+          .lte('data_ora', `${panaLa}T23:59:59+02:00`);
+        if (error || (count ?? 0) > 0) return;
+        for (const p of Array.from(harta.values())) {
+          for (const m of [...p.motorina, ...p.motorinaNeconfirmata]) if (m.utilaj === u.nume) m.litri = null;
+        }
+      }),
+    );
+
     const faraDate = Array.from(
       new Set(
         Array.from(harta.values()).flatMap((p) =>
