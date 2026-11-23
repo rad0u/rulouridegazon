@@ -85,10 +85,16 @@ function TabelMotorina({ linii, pret, neconfirmat }: { linii: LinieMotorina[]; p
             <td>
               {m.utilaj}
               {m.litri === null && <span className="gri"> (fără senzor calibrat)</span>}
-              {consumSuspect(m.litri, m.ore) && <span style={{ color: '#b00020' }}> ⚠ consum suspect — verifică senzorul</span>}
+              {m.estimat && (
+                <span style={{ color: '#8a5a00' }}>
+                  {' '}
+                  * aproximat: {nf1.format(m.estimat.lph)} L/h × ore (media {m.estimat.referinta})
+                </span>
+              )}
+              {!m.estimat && consumSuspect(m.litri, m.ore) && <span style={{ color: '#b00020' }}> ⚠ consum suspect — verifică senzorul</span>}
             </td>
             <td className="n">{nf1.format(m.ore)}</td>
-            <td className="n">{m.litri === null ? '—' : nf1.format(m.litri)}</td>
+            <td className="n">{m.litri === null ? '—' : `${m.estimat ? '≈ ' : ''}${nf1.format(m.litri)}`}</td>
             {!neconfirmat && <td className="n">{m.litri === null || pret === null ? '—' : lei(m.litri * pret)}</td>}
           </tr>
         ))}

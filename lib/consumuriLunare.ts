@@ -24,7 +24,15 @@
 import { supabase, supabaseUrl } from './supabaseClient';
 import { LABEL_OPERATIUNE, type TipOperatiune } from './operatiuniTypes';
 
-export type LinieMotorina = { utilaj: string; ore: number; litri: number | null; sesiuni: number };
+export type LinieMotorina = {
+  utilaj: string;
+  ore: number;
+  litri: number | null;
+  sesiuni: number;
+  // 2026-11-23 (Radu): utilaj fără date de la sondă → litri APROXIMAȚI = ore × consumul
+  // mediu pe oră al utilajelor de același model (ex. celelalte JCB-uri) din aceeași lună.
+  estimat?: { lph: number; referinta: string };
+};
 export type LinieMaterial = { nume: string; um: string; cantitate: number; valoare: number | null };
 
 export type ParcelaConsum = {
@@ -145,6 +153,57 @@ type RezCombustibil = {
 };
 
 const rotunjit = (n: number, z = 2) => Math.round(n * 10 ** z) / 10 ** z;
+
+// „F3 - JCB" → „jcb"; „F5 - Belarus 1221.3" → „belarus 1221.3"
+function modelUtilaj(nume: string): string {
+  return nume
+    .replace(/^\s*F\d+\s*[-–]\s*/i, '')
+    .trim()
+    .toLowerCase();
+}
+
+// Consum mediu (L/h) pe parcele, din sesiunile confirmate ale utilajelor de referință,
+// în aceeași perioadă. Liniile peste 60 L/h (senzor suspect) nu intră în medie.
+async function consumMediuReferinta(
+  referinte: { id: string; nume: string; ferma_id: string }[],
+  deLa: string,
+  panaLa: string,
+  token: string | undefined,
+): Promise<{ lph: number; folosite: string[] } | null> {
+  let litri = 0;
+  let ore = 0;
+  const folosite: string[] = [];
+  await Promise.all(
+    referinte.map(async (u) => {
+      try {
+        const res = await fetch(
+          `${supabaseUrl}/functions/v1/get-combustibil-parcele?${new URLSearchParams({ ferma_id: u.ferma_id, utilaj_id: u.id, de_la: deLa, pana_la: panaLa, fara_zilnic: '1' })}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+        const json = (await res.json().catch(() => null)) as RezCombustibil | null;
+        if (!res.ok || !json) return;
+        let l = 0;
+        let o = 0;
+        for (const r of json.rezultate ?? []) {
+          for (const lp of r.parcele ?? []) {
+            if (!lp.confirmat || lp.litri_total === null || lp.ore_total <= 0) continue;
+            if (lp.litri_total / lp.ore_total > 60) continue;
+            l += lp.litri_total;
+            o += lp.ore_total;
+          }
+        }
+        if (o >= 1) {
+          litri += l;
+          ore += o;
+          folosite.push(u.nume);
+        }
+      } catch {
+        /* referința lipsește din medie */
+      }
+    }),
+  );
+  return ore >= 1 && litri > 0 ? { lph: litri / ore, folosite: folosite.sort() } : null;
+}
 
 function adaugaMaterial(lista: LinieMaterial[], nume: string, um: string, cant: number, pret: number | null) {
   const e = lista.find((x) => x.nume === nume && x.um === um);
@@ -347,6 +406,64 @@ export async function incarcaConsumuriLunare(fermaId: string, luna: string): Pro
         if (!p) continue;
         const linie: LinieMotorina = { utilaj: u.nume, ore: lp.ore_total, litri: lp.litri_total, sesiuni: lp.numar_sesiuni };
         (lp.confirmat ? p.motorina : p.motorinaNeconfirmata).push(linie);
+      }
+    }
+  }
+
+  // 2026-11-23 (Radu): „aproximează-mi în tabel consumul în funcție de consumul mediu
+  // pe oră al unui JCB [...] cu o notă că e aproximat. Asta doar acolo unde nu avem
+  // date citite." — pentru utilajele fără litri (sondă care nu transmite / necalibrată),
+  // litri = ore × media L/h a utilajelor de același model, cu sondă, din aceeași lună.
+  if (combustibil) {
+    const faraDate = Array.from(
+      new Set(
+        Array.from(harta.values()).flatMap((p) =>
+          [...p.motorina, ...p.motorinaNeconfirmata].filter((m) => m.litri === null && m.ore > 0).map((m) => m.utilaj),
+        ),
+      ),
+    );
+    if (faraDate.length > 0) {
+      const { data: toate } = await supabase
+        .from('utilaje')
+        .select('id,nume,ferma_id,tanc_capacitate_litri')
+        .eq('activ', true)
+        .not('tanc_capacitate_litri', 'is', null);
+      const calibrate = ((toate as { id: string; nume: string; ferma_id: string; tanc_capacitate_litri: number | null }[]) ?? []).filter(
+        (u) => Number(u.tanc_capacitate_litri) > 0,
+      );
+      const peModel = new Map<string, string[]>();
+      for (const n of faraDate) {
+        const m = modelUtilaj(n);
+        peModel.set(m, [...(peModel.get(m) ?? []), n]);
+      }
+      for (const [model, utilajeFaraDate] of Array.from(peModel.entries())) {
+        const referinte = calibrate.filter((u) => modelUtilaj(u.nume) === model && !utilajeFaraDate.includes(u.nume));
+        if (referinte.length === 0) {
+          avertismente.push(
+            `${utilajeFaraDate.join(', ')}: fără date de la sondă și fără alt utilaj de același model cu sondă — motorina nu se poate aproxima.`,
+          );
+          continue;
+        }
+        const medie = await consumMediuReferinta(referinte, deLa, panaLa, token);
+        if (!medie) {
+          avertismente.push(
+            `${utilajeFaraDate.join(', ')}: fără date de la sondă, iar utilajele de același model (${referinte.map((r) => r.nume).join(', ')}) nu au ore cu litri în ${textLuna(luna)} — motorina nu se poate aproxima.`,
+          );
+          continue;
+        }
+        const referinta = medie.folosite.join(', ');
+        let oreTot = 0;
+        for (const p of Array.from(harta.values())) {
+          for (const m of [...p.motorina, ...p.motorinaNeconfirmata]) {
+            if (m.litri !== null || !utilajeFaraDate.includes(m.utilaj)) continue;
+            m.litri = m.ore * medie.lph;
+            m.estimat = { lph: medie.lph, referinta };
+            if (p.motorina.includes(m)) oreTot += m.ore;
+          }
+        }
+        avertismente.push(
+          `APROXIMAT — ${utilajeFaraDate.join(', ')}: sonda nu transmite date, motorina e estimată ca ore × ${medie.lph.toFixed(1).replace('.', ',')} L/h (consumul mediu pe oră în ${textLuna(luna)} al: ${referinta}); ${oreTot.toFixed(1).replace('.', ',')} h confirmate pe parcele ≈ ${(oreTot * medie.lph).toFixed(0)} L.`,
+        );
       }
     }
   }
@@ -589,11 +706,11 @@ export async function exportaConsumuriExcel(r: RaportConsumuri): Promise<void> {
   };
   for (const p of r.parcele.filter((x) => x.areConsum)) {
     for (const m of p.motorina)
-      linie([p.nume, 'Motorină', m.utilaj, 'L', m.litri === null ? null : rotunjit(m.litri, 1), rotunjit(m.ore, 1), m.litri !== null && r.pretMotorina !== null ? rotunjit(m.litri * r.pretMotorina) : null, m.litri === null ? 'fără senzor calibrat' : null]);
+      linie([p.nume, 'Motorină', m.utilaj, 'L', m.litri === null ? null : rotunjit(m.litri, 1), rotunjit(m.ore, 1), m.litri !== null && r.pretMotorina !== null ? rotunjit(m.litri * r.pretMotorina) : null, m.estimat ? `APROXIMAT: ${rotunjit(m.estimat.lph, 1)} L/h × ore (media ${m.estimat.referinta})` : m.litri === null ? 'fără senzor calibrat' : null]);
     for (const s of p.substante) linie([p.nume, 'Fertilizanți / tratamente', s.nume, s.um, rotunjit(s.cantitate, 3), null, v(s.valoare), null]);
     for (const s of p.materiiPrime) linie([p.nume, 'Materii prime', s.nume, s.um, rotunjit(s.cantitate, 3), null, v(s.valoare), null]);
     for (const m of p.motorinaNeconfirmata)
-      linie([p.nume, 'Motorină (neconfirmat)', m.utilaj, 'L', m.litri === null ? null : rotunjit(m.litri, 1), rotunjit(m.ore, 1), null, 'orientativ, neconfirmat'], true);
+      linie([p.nume, 'Motorină (neconfirmat)', m.utilaj, 'L', m.litri === null ? null : rotunjit(m.litri, 1), rotunjit(m.ore, 1), null, m.estimat ? `orientativ, neconfirmat; APROXIMAT ${rotunjit(m.estimat.lph, 1)} L/h` : 'orientativ, neconfirmat'], true);
   }
   for (const l of r.inAfara)
     linie(['În afara parcelelor', 'Motorină', l.utilaj, 'L', l.litri === null ? null : rotunjit(l.litri, 1), l.ore === null ? null : rotunjit(l.ore, 1), l.litri !== null && r.pretMotorina !== null ? rotunjit(l.litri * r.pretMotorina) : null, [l.data, l.tip, l.locatie].filter(Boolean).join(' · ')]);
