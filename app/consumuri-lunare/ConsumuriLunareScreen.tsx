@@ -15,6 +15,7 @@ import { useUserRole } from '../../lib/useUserRole';
 import {
   exportaConsumuriExcel,
   incarcaConsumuriLunare,
+  aplicaPretMotorina,
   type LinieMaterial,
   type LinieMotorina,
   type RaportConsumuri,
@@ -126,7 +127,9 @@ export default function ConsumuriLunareScreen() {
   const [ferme, setFerme] = useState<{ id: string; nume: string }[]>([]);
   const [fermaId, setFermaId] = useState('');
   const [luna, setLuna] = useState(lunaTrecuta());
-  const [raport, setRaport] = useState<RaportConsumuri | null>(null);
+  const [raportBrut, setRaportBrut] = useState<RaportConsumuri | null>(null);
+  // 2026-11-23 (Radu): preț motorină introdus manual (lei/L), când ferma nu are achiziții cu preț
+  const [pretManual, setPretManual] = useState('');
   const [loading, setLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -145,13 +148,39 @@ export default function ConsumuriLunareScreen() {
     if (!/^\d{4}-\d{2}$/.test(luna)) return setError('Alege luna.');
     setLoading(true);
     setError(null);
-    setRaport(null);
+    setRaportBrut(null);
     try {
-      setRaport(await incarcaConsumuriLunare(fermaId, luna));
+      const r = await incarcaConsumuriLunare(fermaId, luna);
+      setRaportBrut(r);
+      // ultimul preț manual folosit pentru ferma asta (doar când nu există preț din achiziții)
+      let salvat = '';
+      try {
+        salvat = r.pretMotorinaAchizitii === null ? localStorage.getItem(`pretMotorinaManual:${fermaId}`) ?? '' : '';
+      } catch {
+        salvat = '';
+      }
+      setPretManual(salvat);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading(false);
+    }
+  }
+
+  const pretNumar = (() => {
+    const t = pretManual.trim().replace(',', '.');
+    if (t === '') return null;
+    const n = Number(t);
+    return Number.isFinite(n) && n > 0 ? n : NaN;
+  })();
+  const raport = raportBrut ? aplicaPretMotorina(raportBrut, pretNumar === null || Number.isNaN(pretNumar) ? null : pretNumar) : null;
+
+  function schimbaPret(v: string) {
+    setPretManual(v);
+    try {
+      if (fermaId) localStorage.setItem(`pretMotorinaManual:${fermaId}`, v);
+    } catch {
+      /* fără stocare locală — nu contează */
     }
   }
 
@@ -233,6 +262,50 @@ export default function ConsumuriLunareScreen() {
 
         {error && <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px' }}>{error}</p>}
 
+        {raportBrut && (
+          <div
+            style={{
+              display: 'flex',
+              gap: '0.6rem',
+              flexWrap: 'wrap',
+              alignItems: 'center',
+              margin: '0 0 1rem',
+              padding: '0.6rem 0.8rem',
+              borderRadius: '6px',
+              background: raportBrut.pretMotorinaAchizitii === null && pretNumar === null ? '#fff4e5' : '#f5f5f5',
+              border: '1px solid #e0c9a6',
+            }}
+          >
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', fontSize: '0.85rem', fontWeight: 600 }}>
+              Preț motorină (lei/L)
+              <input
+                type="text"
+                inputMode="decimal"
+                value={pretManual}
+                onChange={(e) => schimbaPret(e.target.value)}
+                placeholder={raportBrut.pretMotorinaAchizitii !== null ? nf2.format(raportBrut.pretMotorinaAchizitii) : 'ex. 7,20'}
+                style={{ width: '90px', padding: '0.4rem', borderRadius: '6px', border: '1px solid #ccc' }}
+              />
+            </label>
+            <span style={{ fontSize: '0.8rem', color: '#555' }}>
+              {pretNumar !== null && Number.isNaN(pretNumar)
+                ? 'Preț invalid — scrie un număr mai mare ca 0.'
+                : raportBrut.pretMotorinaAchizitii === null
+                  ? pretNumar === null
+                    ? 'Ferma nu are achiziții de motorină cu preț — introdu prețul ca să se calculeze valorile.'
+                    : 'Preț introdus manual — se folosește în raport, la tipărire și în Excel.'
+                  : pretNumar === null
+                    ? `Se folosește prețul mediu de achiziție (${nf2.format(raportBrut.pretMotorinaAchizitii)} lei/L). Poți scrie alt preț.`
+                    : 'Preț introdus manual, în locul prețului mediu de achiziție.'}
+            </span>
+            {pretManual !== '' && (
+              <button onClick={() => schimbaPret('')} style={{ fontSize: '0.8rem', padding: '0.2rem 0.6rem' }}>
+                Șterge
+              </button>
+            )}
+          </div>
+        )}
+
         {raport && t && (
           <div className="raport-cl">
             <div className="sumar">
@@ -241,7 +314,8 @@ export default function ConsumuriLunareScreen() {
               </h2>
               <p className="gri" style={{ margin: '0 0 0.6rem' }}>
                 Perioada {raport.deLa} – {raport.panaLa} · generat {raport.generatLa}
-                {raport.pretMotorina !== null && ` · motorină ${nf2.format(raport.pretMotorina)} lei/L (preț mediu de achiziție)`}
+                {raport.pretMotorina !== null &&
+                  ` · motorină ${nf2.format(raport.pretMotorina)} lei/L (${raport.pretMotorinaManual ? 'preț introdus manual' : 'preț mediu de achiziție'})`}
               </p>
               {raport.avertismente.map((a, i) => (
                 <div key={i} className="avert">

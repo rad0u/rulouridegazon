@@ -57,7 +57,10 @@ export type RaportConsumuri = {
   deLa: string;
   panaLa: string;
   generatLa: string;
-  pretMotorina: number | null; // lei / L
+  pretMotorina: number | null; // lei / L — prețul folosit în calcule
+  // 2026-11-23 (Radu): unde nu există achiziții cu preț, prețul se poate introduce manual.
+  pretMotorinaAchizitii: number | null; // preț mediu ponderat din rezervor_alimentari
+  pretMotorinaManual: boolean;
   parcele: ParcelaConsum[];
   inAfara: LucrareInAfara[];
   totaluri: {
@@ -75,6 +78,8 @@ export type RaportConsumuri = {
   };
   avertismente: string[];
 };
+
+const MESAJ_FARA_PRET = 'Nu există achiziții de motorină cu preț pentru fermă — motorina apare doar în litri. Poți introduce prețul manual (lei/L) deasupra raportului.';
 
 const LUNI = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie', 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
 
@@ -271,7 +276,7 @@ export async function incarcaConsumuriLunare(fermaId: string, luna: string): Pro
     }
     pretMotorina = q > 0 ? v / q : null;
   }
-  if (pretMotorina === null) avertismente.push('Nu există achiziții de motorină cu preț pentru fermă — motorina apare doar în litri.');
+  if (pretMotorina === null) avertismente.push(MESAJ_FARA_PRET);
 
   const harta = new Map<string, ParcelaConsum>();
   for (const p of (parceleRes.data as { id: string; nume: string; suprafata_mp: number | null; tip_gazon: string | null }[]) ?? []) {
@@ -411,6 +416,8 @@ export async function incarcaConsumuriLunare(fermaId: string, luna: string): Pro
     panaLa,
     generatLa: new Date().toLocaleString('ro-RO', { timeZone: 'Europe/Bucharest' }),
     pretMotorina,
+    pretMotorinaAchizitii: pretMotorina,
+    pretMotorinaManual: false,
     parcele,
     inAfara,
     totaluri: {
@@ -425,6 +432,46 @@ export async function incarcaConsumuriLunare(fermaId: string, luna: string): Pro
       mpRecoltat: parcele.reduce((s, p) => s + p.mpRecoltat, 0),
       substante: totSubst,
       materiiPrime: totMP,
+    },
+    avertismente,
+  };
+}
+
+const MESAJ_FARA_PRET_MANUAL_PREFIX = 'Preț motorină introdus manual: ';
+
+// 2026-11-23 (Radu): „acolo unde nu avem prețul motorinei [...] să am posibilitatea
+// să introduc eu manual într-un câmp prețul în lei/litru, astfel încât să-mi iasă
+// totuși raportul". Recalculează valorile de motorină fără a reciti datele.
+// pret = null → revine la prețul din achiziții (dacă există).
+export function aplicaPretMotorina(r: RaportConsumuri, pret: number | null): RaportConsumuri {
+  const manual = pret !== null;
+  const pretFolosit = manual ? pret : r.pretMotorinaAchizitii;
+  const parcele = r.parcele.map((p) => {
+    const valoareMotorina = pretFolosit === null ? null : p.litri * pretFolosit;
+    return { ...p, valoareMotorina, valoareTotala: (valoareMotorina ?? 0) + p.valoareSubstante + p.valoareMateriiPrime };
+  });
+  const t = r.totaluri;
+  const valoareMotorina = pretFolosit === null ? null : (t.litri + t.litriInAfara) * pretFolosit;
+  const avertismente = r.avertismente.filter((a) => a !== MESAJ_FARA_PRET && !a.startsWith(MESAJ_FARA_PRET_MANUAL_PREFIX));
+  if (manual) {
+    avertismente.unshift(
+      `${MESAJ_FARA_PRET_MANUAL_PREFIX}${pretFolosit!.toFixed(2)} lei/L` +
+        (r.pretMotorinaAchizitii === null
+          ? ' (ferma nu are achiziții de motorină cu preț).'
+          : ` (în locul prețului mediu de achiziție, ${r.pretMotorinaAchizitii.toFixed(2)} lei/L).`),
+    );
+  } else if (pretFolosit === null) {
+    avertismente.unshift(MESAJ_FARA_PRET);
+  }
+  return {
+    ...r,
+    pretMotorina: pretFolosit,
+    pretMotorinaManual: manual,
+    parcele,
+    totaluri: {
+      ...t,
+      valoareMotorina,
+      valoareTotala: (valoareMotorina ?? 0) + t.valoareSubstante + t.valoareMateriiPrime,
     },
     avertismente,
   };
@@ -511,7 +558,14 @@ export async function exportaConsumuriExcel(r: RaportConsumuri): Promise<void> {
   }
   ws.views = [{ state: 'frozen', ySplit: a1.number, xSplit: 1 }];
   ws.addRow([]);
-  nota(ws, r.pretMotorina === null ? 'Motorină: fără preț de achiziție — valoare necalculată.' : `Motorină la prețul mediu de achiziție al fermei: ${r.pretMotorina.toFixed(2)} lei/L.`);
+  nota(
+    ws,
+    r.pretMotorina === null
+      ? 'Motorină: fără preț de achiziție — valoare necalculată.'
+      : r.pretMotorinaManual
+        ? `Motorină la prețul introdus manual: ${r.pretMotorina.toFixed(2)} lei/L.`
+        : `Motorină la prețul mediu de achiziție al fermei: ${r.pretMotorina.toFixed(2)} lei/L.`,
+  );
   nota(ws, 'Fertilizanți și materii prime la prețul unitar mediu din gestiunea fermei.');
   nota(ws, 'Motorina din sesiunile neconfirmate e orientativă și nu intră în totaluri.');
   const fara = r.parcele.filter((x) => !x.areConsum).map((x) => x.nume);

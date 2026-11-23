@@ -2700,3 +2700,8 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - Calcul (lib/inventarMasaVerde.ts): masa verde efectivă = contur verde − zone calamitate. Comparația: calamitat nou = zone acum − zone la inventarul anterior; diferență nejustificată = anterior − actual − recoltat − calamitat nou.
 - Raport: coloane „Zone calamitate (mp)” și „Calamitat nou (mp)” (doar dacă există), zone portocalii pe desen, legendă cu cauzele și conturul verde măsurat.
 - Limită: la primul inventar cu zone separate, „calamitat nou” poate include zone vechi (ocolite anterior în contur) — menționat în raport.
+
+## 2026-11-23 — Consumuri lunare: preț motorină introdus manual
+- Radu: „acolo unde nu avem prețul motorinei [...] să am posibilitatea să introduc eu manual într-un câmp prețul în lei/litru, astfel încât să-mi iasă totuși raportul".
+- ConsumuriLunareScreen: câmp „Preț motorină (lei/L)" deasupra raportului (portocaliu când ferma nu are achiziții cu preț). Valoarea recalculează instant raportul (fără reîncărcare): valori motorină pe parcele, totaluri, tipărire, Excel. Gol = prețul mediu din achiziții (rezervor_alimentari), dacă există. Ultimul preț manual se ține în browser pe fermă (localStorage, best-effort).
+- lib/consumuriLunare.ts: `aplicaPretMotorina(raport, pret)`; câmpuri noi `pretMotorinaAchizitii`, `pretMotorinaManual`; nota din Excel și antetul raportului spun sursa prețului.
