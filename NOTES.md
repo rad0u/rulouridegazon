@@ -2754,3 +2754,27 @@ ecran costuri directe manuale; export lunar pentru contabilitate.
 - Șterse 12 parcele de test (10 fără poligon și fără operațiuni + „Parcelă B2/B3” Bobicești,
   cu cele 2 operațiuni de test din 07.08). Rămân 28 de parcele, toate cu ciclu deschis
   din 01.03.2026 (dată aproximativă, `complet = false`).
+
+### Consumuri lunare = raportul de costuri directe pentru contabilitate + lună închisă (2026-11-25)
+Decizie: în loc de o edge function separată care să „înghețe" consumul pe fiecare
+operațiune (`operatiuni_consum`, creată și ștearsă în aceeași zi, goală), raportul
+existent `/consumuri-lunare` devine exportul pentru contabilitate, iar luna se
+ÎNCHIDE după trimitere.
+- Tabel nou `consumuri_lunare_inchise` (ferma_id, luna 'AAAA-LL', raport jsonb,
+  inchis_de, inchis_la; unic pe fermă+lună; RLS admin_central; jurnal activitate).
+  Butoane „Închide luna (trimis la contabilitate)" / „Redeschide luna". O lună
+  închisă se încarcă din snapshot (exact cifrele trimise, inclusiv prețul manual
+  al motorinei); confirmarea avertizează dacă există sesiuni neconfirmate sau
+  motorină fără preț.
+- `lib/consumuriLunare.ts`: pe fiecare parcelă — ciclul activ la sfârșitul lunii
+  (`parcele_cicluri`, avertisment dacă ciclul s-a schimbat în lună / lipsește),
+  recoltat pe tip gazon (`operatiuni_recoltare_tipuri`), masa verde din cel mai
+  recent inventar ≤ sfârșitul lunii (masa_verde − calamitat), costuri directe
+  manuale (`costuri_directe_manuale`, intră în total). Materiale evaluate la
+  `pret_unitar_consum` (CMP la momentul consumului); fără el → CMP curent,
+  marcat „preț aproximat". Cod SmartBill din nomenclator.
+- Excel: Sumar cu ciclu / directe manuale / masă verde; Detaliat și Total pe
+  articole cu „Cod SmartBill"; foi noi „Producție" (recoltat pe tip + masă verde)
+  și „Explicații" (pentru contabilă).
+Rămas: ecran pentru cicluri (închidere/deschidere ciclu nou), ecran pentru
+costuri directe manuale, completarea codurilor SmartBill în nomenclatoare.

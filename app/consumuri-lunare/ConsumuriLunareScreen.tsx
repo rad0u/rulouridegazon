@@ -15,6 +15,9 @@ import { useUserRole } from '../../lib/useUserRole';
 import {
   exportaConsumuriExcel,
   incarcaConsumuriLunare,
+  incarcaLunaInchisa,
+  inchideLuna,
+  redeschideLuna,
   aplicaPretMotorina,
   type LinieMaterial,
   type LinieMotorina,
@@ -117,7 +120,11 @@ function TabelMaterial({ linii }: { linii: LinieMaterial[] }) {
       <tbody>
         {linii.map((m) => (
           <tr key={`${m.nume}|${m.um}`}>
-            <td>{m.nume}</td>
+            <td>
+              {m.nume}
+              {m.cod && <span className="gri"> · {m.cod}</span>}
+              {m.pretAproximat && <span style={{ color: '#8a5a00' }}> * preț aproximat</span>}
+            </td>
             <td>{m.um}</td>
             <td className="n">{nfq.format(m.cantitate)}</td>
             <td className="n">{lei(m.valoare)}</td>
@@ -138,6 +145,7 @@ export default function ConsumuriLunareScreen() {
   const [pretManual, setPretManual] = useState('');
   const [loading, setLoading] = useState(false);
   const [exportLoading, setExportLoading] = useState(false);
+  const [inchidereLoading, setInchidereLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -156,6 +164,13 @@ export default function ConsumuriLunareScreen() {
     setError(null);
     setRaportBrut(null);
     try {
+      // 2026-11-25: o lună închisă se afișează exact cum a fost trimisă la contabilitate.
+      const inchisa = await incarcaLunaInchisa(fermaId, luna);
+      if (inchisa) {
+        setRaportBrut(inchisa);
+        setPretManual('');
+        return;
+      }
       const r = await incarcaConsumuriLunare(fermaId, luna);
       setRaportBrut(r);
       // ultimul preț manual folosit pentru ferma asta (doar când nu există preț din achiziții)
@@ -179,7 +194,48 @@ export default function ConsumuriLunareScreen() {
     const n = Number(t);
     return Number.isFinite(n) && n > 0 ? n : NaN;
   })();
-  const raport = raportBrut ? aplicaPretMotorina(raportBrut, pretNumar === null || Number.isNaN(pretNumar) ? null : pretNumar) : null;
+  const raport = raportBrut
+    ? raportBrut.inchis
+      ? raportBrut // înghețat: prețul motorinei e deja cel folosit la închidere
+      : aplicaPretMotorina(raportBrut, pretNumar === null || Number.isNaN(pretNumar) ? null : pretNumar)
+    : null;
+
+  async function inchide() {
+    if (!raport || raport.inchis) return;
+    const neconf = raport.totaluri.litriNeconfirmati > 0 || raport.parcele.some((p) => p.motorinaNeconfirmata.length > 0);
+    const mesaj =
+      `Închizi ${raport.lunaText} pentru ${raport.fermaNume}?\n\n` +
+      'Cifrele se îngheață exact cum sunt acum (inclusiv prețul motorinei) și nu se mai schimbă la corecții ulterioare, până la redeschidere.' +
+      (neconf ? '\n\nATENȚIE: există sesiuni GPS NECONFIRMATE în lună — motorina lor NU intră în cifrele închise. Confirmă-le întâi în Activități parcele.' : '') +
+      (raport.pretMotorina === null ? '\n\nATENȚIE: motorina nu are preț — valoarea ei va lipsi din raportul închis.' : '');
+    if (!window.confirm(mesaj)) return;
+    setInchidereLoading(true);
+    setError(null);
+    try {
+      await inchideLuna(raport);
+      setRaportBrut(await incarcaLunaInchisa(raport.fermaId, raport.luna));
+    } catch (e) {
+      setError(`Luna nu s-a putut închide: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setInchidereLoading(false);
+    }
+  }
+
+  async function redeschide() {
+    if (!raport?.inchis) return;
+    if (!window.confirm(`Redeschizi ${raport.lunaText} pentru ${raport.fermaNume}? Raportul se va recalcula din datele curente — anunță contabilitatea dacă cifrele trimise se schimbă.`)) return;
+    setInchidereLoading(true);
+    setError(null);
+    try {
+      await redeschideLuna(raport.fermaId, raport.luna);
+      setRaportBrut(null);
+      await genereaza();
+    } catch (e) {
+      setError(`Luna nu s-a putut redeschide: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setInchidereLoading(false);
+    }
+  }
 
   function schimbaPret(v: string) {
     setPretManual(v);
@@ -262,13 +318,29 @@ export default function ConsumuriLunareScreen() {
               <button onClick={() => void exporta()} disabled={exportLoading} style={{ ...btn, background: '#f5f5f5' }}>
                 {exportLoading ? 'Se generează...' : 'Export Excel'}
               </button>
+              {raport.inchis ? (
+                <button onClick={() => void redeschide()} disabled={inchidereLoading} style={{ ...btn, background: '#fff6e0' }}>
+                  {inchidereLoading ? '...' : 'Redeschide luna'}
+                </button>
+              ) : (
+                <button onClick={() => void inchide()} disabled={inchidereLoading} style={{ ...btn, background: '#e3f0ff' }}>
+                  {inchidereLoading ? 'Se închide...' : 'Închide luna (trimis la contabilitate)'}
+                </button>
+              )}
             </>
           )}
         </div>
 
         {error && <p style={{ color: '#b00020', background: '#fdecea', padding: '0.75rem', borderRadius: '6px' }}>{error}</p>}
 
-        {raportBrut && (
+        {raportBrut?.inchis && (
+          <p style={{ background: '#eaf7ea', border: '1px solid #b7dcb7', padding: '0.6rem 0.8rem', borderRadius: '6px', margin: '0 0 1rem' }}>
+            <strong>Lună închisă</strong> la {raportBrut.inchis.la}
+            {raportBrut.inchis.de ? ` de ${raportBrut.inchis.de}` : ''} — cifrele sunt înghețate exact cum au fost trimise la contabilitate.
+          </p>
+        )}
+
+        {raportBrut && !raportBrut.inchis && (
           <div
             style={{
               display: 'flex',
@@ -320,6 +392,7 @@ export default function ConsumuriLunareScreen() {
               </h2>
               <p className="gri" style={{ margin: '0 0 0.6rem' }}>
                 Perioada {raport.deLa} – {raport.panaLa} · generat {raport.generatLa}
+                {raport.inchis && ` · LUNĂ ÎNCHISĂ (${raport.inchis.la})`}
                 {raport.pretMotorina !== null &&
                   ` · motorină ${nf2.format(raport.pretMotorina)} lei/L (${raport.pretMotorinaManual ? 'preț introdus manual' : 'preț mediu de achiziție'})`}
               </p>
@@ -334,28 +407,34 @@ export default function ConsumuriLunareScreen() {
                 <thead>
                   <tr>
                     <th>Parcelă</th>
+                    <th>Ciclu</th>
                     <th className="n">Ore lucru</th>
                     <th className="n">Motorină (L)</th>
                     <th className="n">Motorină</th>
                     <th className="n">Fertilizanți</th>
                     <th className="n">Materii prime</th>
+                    <th className="n">Directe manuale</th>
                     <th className="n">Total</th>
                     <th className="n">Recoltat (mp)</th>
+                    <th className="n">Masă verde (mp)</th>
                   </tr>
                 </thead>
                 <tbody>
                   {cuConsum.map((p) => (
                     <tr key={p.id}>
                       <td>{p.nume}</td>
+                      <td className="gri">{p.ciclu ? `din ${p.ciclu.dataStart}${p.ciclu.complet ? '' : ' · incomplet'}` : 'fără ciclu'}</td>
                       <td className="n">{nf1.format(p.oreLucru)}</td>
                       <td className="n">{nf1.format(p.litri)}</td>
                       <td className="n">{lei(p.valoareMotorina)}</td>
                       <td className="n">{lei(p.valoareSubstante)}</td>
                       <td className="n">{lei(p.valoareMateriiPrime)}</td>
+                      <td className="n">{p.valoareDirecteManuale ? lei(p.valoareDirecteManuale) : '—'}</td>
                       <td className="n">
                         <strong>{lei(p.valoareTotala)}</strong>
                       </td>
                       <td className="n">{p.mpRecoltat ? nf0.format(p.mpRecoltat) : '—'}</td>
+                      <td className="n">{p.masaVerdeMp === null ? '—' : nf0.format(p.masaVerdeMp)}</td>
                     </tr>
                   ))}
                   {(raport.inAfara.length > 0 || t.litriInAfara > 0) && (
@@ -363,24 +442,30 @@ export default function ConsumuriLunareScreen() {
                       <td>
                         <em>În afara parcelelor</em>
                       </td>
+                      <td />
                       <td className="n">{nf1.format(raport.inAfara.reduce((s, l) => s + (l.ore ?? 0), 0))}</td>
                       <td className="n">{nf1.format(t.litriInAfara)}</td>
                       <td className="n">{raport.pretMotorina === null ? '—' : lei(t.litriInAfara * raport.pretMotorina)}</td>
                       <td className="n">—</td>
                       <td className="n">—</td>
+                      <td className="n">—</td>
                       <td className="n">{raport.pretMotorina === null ? '—' : lei(t.litriInAfara * raport.pretMotorina)}</td>
+                      <td className="n">—</td>
                       <td className="n">—</td>
                     </tr>
                   )}
                   <tr className="tot">
                     <td>TOTAL</td>
+                    <td />
                     <td className="n">{nf1.format(t.oreLucru + raport.inAfara.reduce((s, l) => s + (l.ore ?? 0), 0))}</td>
                     <td className="n">{nf1.format(t.litri + t.litriInAfara)}</td>
                     <td className="n">{lei(t.valoareMotorina)}</td>
                     <td className="n">{lei(t.valoareSubstante)}</td>
                     <td className="n">{lei(t.valoareMateriiPrime)}</td>
+                    <td className="n">{t.valoareDirecteManuale ? lei(t.valoareDirecteManuale) : '—'}</td>
                     <td className="n">{lei(t.valoareTotala)}</td>
                     <td className="n">{t.mpRecoltat ? nf0.format(t.mpRecoltat) : '—'}</td>
+                    <td className="n">{t.masaVerdeMp ? nf0.format(t.masaVerdeMp) : '—'}</td>
                   </tr>
                 </tbody>
               </table>
@@ -390,6 +475,13 @@ export default function ConsumuriLunareScreen() {
                 </p>
               )}
               {faraConsum.length > 0 && <p className="gri">Parcele fără consumuri în lună: {faraConsum.map((p) => p.nume).join(', ')}.</p>}
+              {(t.recoltatPeTip ?? []).length > 0 && (
+                <p style={{ fontSize: '0.85rem' }}>
+                  <strong>Recoltat pe tip gazon:</strong> {t.recoltatPeTip.map((x) => `${x.tip} ${nf0.format(x.mp)} mp`).join(' · ')}
+                  {t.mpRecoltat - t.recoltatPeTip.reduce((s, x) => s + x.mp, 0) > 0 &&
+                    ` · fără tip ${nf0.format(t.mpRecoltat - t.recoltatPeTip.reduce((s, x) => s + x.mp, 0))} mp`}
+                </p>
+              )}
 
               {(t.substante.length > 0 || t.materiiPrime.length > 0) && (
                 <>
@@ -419,6 +511,7 @@ export default function ConsumuriLunareScreen() {
                   <span className="gri">
                     {p.suprafataMp ? `${nf2.format(p.suprafataMp / 10000)} ha` : ''}
                     {p.cultura ? ` · ${p.cultura}` : ''}
+                    {p.ciclu ? ` · ciclu din ${p.ciclu.dataStart}${p.ciclu.complet ? '' : ' (incomplet)'}` : ' · fără ciclu'}
                   </span>
                 </div>
                 <div style={{ fontSize: '0.85rem' }}>
@@ -428,6 +521,13 @@ export default function ConsumuriLunareScreen() {
                     <>
                       {' · '}
                       <strong>{nf0.format(p.mpRecoltat)} mp</strong> recoltați
+                      {(p.recoltatPeTip ?? []).length > 0 && ` (${p.recoltatPeTip.map((x) => `${x.tip} ${nf0.format(x.mp)}`).join(' · ')})`}
+                    </>
+                  )}
+                  {p.masaVerdeMp !== null && (
+                    <>
+                      {' · masă verde '}
+                      <strong>{nf0.format(p.masaVerdeMp)} mp</strong> (inventar {p.masaVerdeData})
                     </>
                   )}
                   {' · total consumuri '}
@@ -450,6 +550,36 @@ export default function ConsumuriLunareScreen() {
                   <>
                     <div className="sub">Materii prime — {lei(p.valoareMateriiPrime)}</div>
                     <TabelMaterial linii={p.materiiPrime} />
+                  </>
+                )}
+                {(p.directeManuale ?? []).length > 0 && (
+                  <>
+                    <div className="sub">Costuri directe manuale — {lei(p.valoareDirecteManuale)}</div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Data</th>
+                          <th>Categorie</th>
+                          <th>Descriere</th>
+                          <th>Document</th>
+                          <th className="n">Sumă (fără TVA)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {p.directeManuale.map((d, i) => (
+                          <tr key={i}>
+                            <td>{d.data}</td>
+                            <td>{d.categorie}</td>
+                            <td>
+                              {d.descriere}
+                              {d.cantitate !== null && <span className="gri"> · {nfq.format(d.cantitate)} {d.um ?? ''}</span>}
+                            </td>
+                            <td>{d.document ?? ''}</td>
+                            <td className="n">{lei(d.suma)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </>
                 )}
                 {p.motorinaNeconfirmata.length > 0 && (
@@ -495,7 +625,8 @@ export default function ConsumuriLunareScreen() {
 
             <p className="gri" style={{ marginTop: '1rem' }}>
               Motorina pe parcele = bilanțul nivelului din rezervor pe fiecare sesiune GPS confirmată în Activități parcele. Fertilizanții și
-              materiile prime = cantitățile declarate la confirmarea lucrărilor, la prețul mediu din gestiunea fermei.
+              materiile prime = cantitățile declarate la confirmarea lucrărilor, la costul mediu al gestiunii fermei din momentul consumului.
+              Doar costuri directe — costurile indirecte se înregistrează în contabilitate.
             </p>
           </div>
         )}
