@@ -134,12 +134,18 @@ function cantitateInBaza(text: string, um: string, baza: string | undefined): nu
 }
 
 type SubstantaLinie = { substanta_id: string; cantitate: string; um: string };
+type RecoltareLinie = { tip: string; mp: string };
+
+// Tipurile de gazon pe care le poate alege operatorul la recoltare (cerință Radu, 2026-11-25).
+// Trebuie să corespundă cu check-ul din operatiuni_recoltare_tipuri.tip_gazon.
+const TIPURI_GAZON_RECOLTAT = ['Rustic', 'Sport', 'Supersport', 'Pir'] as const;
 type MateriePrimaLinie = { materie_prima_id: string; cantitate: string; um: string };
 
 type FormSesiune = {
   tipLucrare: TipOperatiune | '';
   oreLucru: string;
-  cantitateMpRecoltat: string;
+  liniiRecoltare: RecoltareLinie[];
+  nimicRecoltat: boolean;
   note: string;
   locatie: string;
   substanteLinii: SubstantaLinie[];
@@ -213,7 +219,8 @@ function formGol(ore: number, inAfara = false): FormSesiune {
   return {
     tipLucrare: '',
     oreLucru: inAfara ? oreLucruImplicitAfara(ore) : oreLucruImplicit(ore),
-    cantitateMpRecoltat: '',
+    liniiRecoltare: [{ tip: '', mp: '' }],
+    nimicRecoltat: false,
     note: '',
     locatie: '',
     substanteLinii: [],
@@ -465,6 +472,31 @@ export default function ActivitatiParceleScreen() {
     });
   }
 
+  function adaugaRecoltareLinie(cheie: string) {
+    setForms((prev) => ({
+      ...prev,
+      [cheie]: { ...prev[cheie], liniiRecoltare: [...prev[cheie].liniiRecoltare, { tip: '', mp: '' }] },
+    }));
+  }
+
+  function actualizeazaRecoltareLinie(cheie: string, index: number, patch: Partial<RecoltareLinie>) {
+    setForms((prev) => ({
+      ...prev,
+      [cheie]: {
+        ...prev[cheie],
+        liniiRecoltare: prev[cheie].liniiRecoltare.map((l, i) => (i === index ? { ...l, ...patch } : l)),
+        error: null,
+      },
+    }));
+  }
+
+  function eliminaRecoltareLinie(cheie: string, index: number) {
+    setForms((prev) => ({
+      ...prev,
+      [cheie]: { ...prev[cheie], liniiRecoltare: prev[cheie].liniiRecoltare.filter((_, i) => i !== index) },
+    }));
+  }
+
   function adaugaSubstantaLinie(cheie: string) {
     setForms((prev) => ({
       ...prev,
@@ -592,20 +624,44 @@ export default function ActivitatiParceleScreen() {
     let cantitateMpRecoltat: number | null = null;
     let liniiSubstanteValide: SubstantaLinie[] = [];
     let liniiMateriiPrimeValide: MateriePrimaLinie[] = [];
+    let liniiRecoltareValide: { tip_gazon: string; mp: number }[] = [];
     const needsSubstante = !grup.utilaj_recoltare && TIPURI_CU_SUBSTANTE.includes(form.tipLucrare as TipOperatiune);
     const needsMateriiPrime =
       !grup.utilaj_recoltare && TIPURI_CU_MATERII_PRIME.includes(form.tipLucrare as TipOperatiune);
 
-    if (grup.utilaj_recoltare) {
+    if (grup.utilaj_recoltare && form.nimicRecoltat) {
+      // Utilajul de recoltare s-a deplasat / a stat pe parcelă fără să recolteze:
+      // se confirmă ca lucrare obișnuită, fără mp (înainte operatorii treceau 1 mp fictiv).
+      tip = 'Altele';
+    } else if (grup.utilaj_recoltare) {
       // Utilaj de recoltare: nicio alegere de tip, doar suprafața recoltată
       // (pentru toată ziua/parcela, nu per sesiune GPS).
-      const mp = form.cantitateMpRecoltat === '' ? NaN : Number(form.cantitateMpRecoltat);
-      if (Number.isNaN(mp) || mp <= 0) {
-        actualizeazaForm(cheie, { error: 'Introdu suprafața recoltată (mp), un număr pozitiv.' });
+      // Una sau mai multe linii tip gazon + mp (recoltare amestecată în aceeași zi).
+      const linii = form.liniiRecoltare.filter((l) => l.tip !== '' || l.mp !== '');
+      if (linii.length === 0) {
+        actualizeazaForm(cheie, { error: 'Alege tipul de gazon și introdu suprafața recoltată (mp).' });
         return;
       }
+      const tipuriVazute = new Set<string>();
+      for (const l of linii) {
+        const mp = l.mp === '' ? NaN : Number(l.mp);
+        if (!l.tip) {
+          actualizeazaForm(cheie, { error: 'Alege tipul de gazon pe fiecare linie.' });
+          return;
+        }
+        if (Number.isNaN(mp) || mp <= 0) {
+          actualizeazaForm(cheie, { error: 'Suprafața recoltată trebuie să fie un număr pozitiv pe fiecare linie.' });
+          return;
+        }
+        if (tipuriVazute.has(l.tip)) {
+          actualizeazaForm(cheie, { error: `${l.tip} apare de două ori — adună suprafețele pe o singură linie.` });
+          return;
+        }
+        tipuriVazute.add(l.tip);
+      }
+      liniiRecoltareValide = linii.map((l) => ({ tip_gazon: l.tip, mp: Number(l.mp) }));
       tip = 'Recoltare';
-      cantitateMpRecoltat = mp;
+      cantitateMpRecoltat = liniiRecoltareValide.reduce((s, l) => s + l.mp, 0);
     } else if (needsSubstante) {
       tip = form.tipLucrare as TipOperatiune;
       liniiSubstanteValide = form.substanteLinii.filter((l) => l.substanta_id && l.cantitate);
@@ -699,6 +755,19 @@ export default function ActivitatiParceleScreen() {
         actualizeazaForm(cheie, {
           saving: false,
           error: `Operațiunea a fost salvată, dar materiile prime nu s-au putut înregistra: ${mpErr.message}`,
+        });
+        return;
+      }
+    }
+
+    if (liniiRecoltareValide.length > 0) {
+      const primaOperatiuneId = opInsert[0].id;
+      const rows = liniiRecoltareValide.map((l) => ({ operatiune_id: primaOperatiuneId, ...l }));
+      const { error: recErr } = await supabase.from('operatiuni_recoltare_tipuri').insert(rows);
+      if (recErr) {
+        actualizeazaForm(cheie, {
+          saving: false,
+          error: `Recoltarea a fost salvată, dar tipurile de gazon nu s-au putut înregistra: ${recErr.message}`,
         });
         return;
       }
@@ -984,19 +1053,56 @@ export default function ActivitatiParceleScreen() {
                     </label>
                   </>
                 ) : grup.utilaj_recoltare ? (
-                  <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem' }}>
-                    Suprafață recoltată (mp)
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      inputMode="numeric"
-                      placeholder="mp"
-                      value={form.cantitateMpRecoltat}
-                      onChange={(e) => actualizeazaForm(cheie, { cantitateMpRecoltat: e.target.value })}
-                      style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '140px' }}
-                    />
-                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', fontSize: '0.8rem' }}>
+                    <label style={{ display: 'flex', gap: '0.4rem', alignItems: 'center' }}>
+                      <input
+                        type="checkbox"
+                        checked={form.nimicRecoltat}
+                        onChange={(e) => actualizeazaForm(cheie, { nimicRecoltat: e.target.checked, error: null })}
+                      />
+                      Nu s-a recoltat nimic (doar deplasare / staționare)
+                    </label>
+                    {!form.nimicRecoltat && <span>Gazon recoltat</span>}
+                    {!form.nimicRecoltat && form.liniiRecoltare.map((linie, index) => (
+                      <div key={index} style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <select
+                          value={linie.tip}
+                          onChange={(e) => actualizeazaRecoltareLinie(cheie, index, { tip: e.target.value })}
+                          style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', minWidth: '130px' }}
+                        >
+                          <option value="">Tip gazon…</option>
+                          {TIPURI_GAZON_RECOLTAT.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min="0"
+                          step="1"
+                          inputMode="numeric"
+                          placeholder="mp"
+                          value={linie.mp}
+                          onChange={(e) => actualizeazaRecoltareLinie(cheie, index, { mp: e.target.value })}
+                          style={{ padding: '0.5rem', borderRadius: '6px', border: '1px solid #ccc', width: '110px' }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => eliminaRecoltareLinie(cheie, index)}
+                          disabled={form.liniiRecoltare.length === 1}
+                          style={{ flex: '0 0 auto', padding: '0.5rem 0.9rem' }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))}
+                    {!form.nimicRecoltat && form.liniiRecoltare.length < TIPURI_GAZON_RECOLTAT.length && (
+                      <button type="button" onClick={() => adaugaRecoltareLinie(cheie)} style={{ alignSelf: 'flex-start' }}>
+                        + Alt tip de gazon
+                      </button>
+                    )}
+                  </div>
                 ) : (
                   <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.8rem', minWidth: '190px' }}>
                     Tip lucrare
@@ -1243,7 +1349,13 @@ export default function ActivitatiParceleScreen() {
                   </td>
                 ) : grup.utilaj_recoltare ? (
                   <td colSpan={2}>
-                    <strong>Recoltare</strong> — suprafață recoltată: ______________ mp
+                    <strong>Recoltare</strong>
+                    <span className="opt"><span className="cb" />Nu s-a recoltat nimic</span>
+                    {TIPURI_GAZON_RECOLTAT.map((t) => (
+                      <div key={t} className="linie">
+                        {t}: ______________ mp
+                      </div>
+                    ))}
                   </td>
                 ) : (
                   <>

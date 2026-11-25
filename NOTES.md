@@ -2711,3 +2711,46 @@ Radu: „la foile de parcurs tot nu văd locația pornire și locația sosire co
 - lib/consumuriLunare.ts: pentru liniile de motorină cu litri = null și ore > 0, model = numele fără prefixul fermei („F3 - JCB" → „jcb"); referințe = utilaje active calibrate cu același model, din orice fermă; medie L/h = Σ litri / Σ ore din sesiunile confirmate pe parcele ale referințelor în aceeași lună (fără linii > 60 L/h; referință cu < 1 h ignorată). litri = ore × medie; câmp `estimat { lph, referinta }`. Avertisment „APROXIMAT — …" în raport și Excel; fără referințe → avertisment, rămâne fără litri.
 - UI: „≈" în coloana Litri + „* aproximat: X L/h × ore (media …)"; Excel „Detaliat": nota APROXIMAT în coloana de observații. Valorile aproximate intră în totaluri.
 - Fix (aceeași zi): F3 - JCB a primit între timp capacitatea rezervorului (81 L) → funcția îl trata drept calibrat și întorcea 0 L (fără citiri), deci aproximarea nu pornea. Acum: utilajele cu ore > 0 dar 0 L peste tot și fără NICIO citire de nivel > 0 în lună sunt tratate ca „fără date" (litri = null) → intră la aproximare. În media de referință nu intră liniile cu 0 L.
+
+### Cost de producție — doar costuri directe, schema (2026-11-25)
+Decizie Radu: costurile indirecte și overhead-ul rămân în contabilitate
+(SmartBill Conta, contabilă nouă). Aplicația livrează DOAR costurile directe,
+lunar, pe fermă / parcelă / ciclu: cantități + valori (motorină, substanțe,
+materii prime), costuri directe manuale, ore lucrate, mp recoltați + masă
+verde rămasă. Înainte de 1 oct 2026 consumul s-a tratat empiric în
+contabilitate — aplicația NU estimează sold inițial; ciclurile începute
+înainte de 1 oct au `complet = false`. Cantitatea recoltată rămâne în mp
+(fără pulsuri / factor de conversie).
+
+Migrare `cost_productie_directe` (fișier `supabase/schema-cost-productie-directe.sql`):
+- `parcele_cicluri` — interval inclusiv, excludere suprapuneri (btree_gist),
+  `complet` generat; scriere admin_central, citire admin_ferma pe ferma lui.
+- `operatiuni_substante.pret_unitar_consum`, `operatiuni_materii_prime.pret_unitar_consum`
+  — CMP fixat la insert (trigger `aa_pret_consum_*`). Rândurile vechi = NULL →
+  job-ul folosește CMP curent și marchează `preturi_aproximate`.
+- `operatiuni_consum` — consumul înghețat pe operațiune (motorină din sondă ×
+  preț mediu rezervor, valoare materiale, ore, mp), scris doar de service role.
+- `costuri_directe_manuale` — servicii terți / ambalare / altele, pe parcelă.
+- `cod_smartbill` pe `substante_nomenclator` și `materii_prime_nomenclator`.
+
+Constatare: la recoltare, mp e salvat pe UN singur rând din grupul
+(utilaj, parcelă, zi) — restul sesiunilor GPS din grup au NULL intenționat
+(141 grupuri / 505 rânduri). Agregările trebuie să însumeze pe grup, nu să
+trateze NULL ca lipsă.
+
+Rămas: edge function care populează `operatiuni_consum`; ecran cicluri;
+ecran costuri directe manuale; export lunar pentru contabilitate.
+
+### Tip gazon la recoltare + curățenie parcele (2026-11-25)
+- Migrare `operatiuni_recoltare_tipuri` (operatiune_id, tip_gazon ∈ Rustic/Sport/Supersport/Pir, mp),
+  unic pe (operatiune, tip). Pe primul rând al grupului (utilaj, parcelă, zi);
+  `operatiuni.cantitate_mp_recoltat` = suma liniilor (compatibilitate cu rapoartele existente).
+- `/activitati-parcele`: la utilajele de recoltare, linii „tip gazon + mp” (+ Alt tip de gazon),
+  validare: tip obligatoriu, mp > 0, fără tip duplicat. Formularul printabil listează cele 4 tipuri.
+- Backfill din note: 113 recoltări cu „rustic”/„sport” (un singur tip) → linii create automat.
+  Rămase fără tip: 11 amestecate (rustic+sport în notă), 27 fără notă, 41 cu 1 mp fictiv
+  (note de tip „NU APARE NIMIC”, „nu este recoltat nimic”) — de decis cu Radu.
+- Parcela 9 Săbăreni (pir): recoltarea de 1 mp din 09.10 corectată la 0, ciclu „în creștere”.
+- Șterse 12 parcele de test (10 fără poligon și fără operațiuni + „Parcelă B2/B3” Bobicești,
+  cu cele 2 operațiuni de test din 07.08). Rămân 28 de parcele, toate cu ciclu deschis
+  din 01.03.2026 (dată aproximativă, `complet = false`).
