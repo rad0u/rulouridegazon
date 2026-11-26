@@ -2802,3 +2802,5 @@ costuri directe manuale, completarea codurilor SmartBill în nomenclatoare.
   prime. Codurile S1.. (poziția în lista fermei, folosite pe formularele tipărite) rămân neschimbate.
 - Dashboard: scoase cardurile „Cost de producție" și „Cheltuieli indirecte" (indirectele rămân în
   contabilitate). Paginile rămân accesibile direct la adresa lor.
+- 2026-11-26: „Tipărește stoc" la Substanțe (admin general) — listă nouă lângă buton: o fermă anume
+  (raport doar pentru ea, fără pagina de total) sau „Toate fermele (câte o pagină)" ca înainte.

@@ -82,9 +82,11 @@ const butonStyle: React.CSSProperties = {
 // stocului și totaluri. Codurile S1.. sunt aceleași ca în Activități
 // detectate pe parcele (poziția în lista fermei, ordonată nume + id). Bloc
 // ascuns pe ecran, vizibil doar la tipărire (@media print).
-function RaportStocSubstante({ stocuri, momentul }: { stocuri: SubstantaStoc[]; momentul: Date }) {
+// 2026-11-26 (Radu): „vreau stocul pe fiecare fermă în parte, în rapoarte separate" —
+// `fermaId` restrânge raportul la o singură fermă (fără pagina de total pe ferme).
+function RaportStocSubstante({ stocuri, momentul, fermaId = null }: { stocuri: SubstantaStoc[]; momentul: Date; fermaId?: string | null }) {
   const perFerma = new Map<string, { nume: string; randuri: SubstantaStoc[] }>();
-  for (const sub of stocuri) {
+  for (const sub of fermaId ? stocuri.filter((x) => x.ferma_id === fermaId) : stocuri) {
     const cheie = sub.ferma_id ?? 'fara-ferma';
     let grup = perFerma.get(cheie);
     if (!grup) {
@@ -321,6 +323,8 @@ function SubstanteAdminCentral() {
   const [editIntrareError, setEditIntrareError] = useState<string | null>(null);
 
   const [momentRaport, setMomentRaport] = useState<Date>(() => new Date());
+  // 2026-11-26: ferma pentru care se tipărește stocul ('' = toate, câte o pagină pe fermă).
+  const [fermaRaport, setFermaRaport] = useState('');
 
   // Reîncarcă stocul chiar înainte de tipărire, ca raportul să fie „la zi".
   async function tiparesteStoc() {
@@ -631,10 +635,23 @@ function SubstanteAdminCentral() {
           <button onClick={() => void incarca()} disabled={loading} style={{ ...butonStyle, background: loading ? '#eee' : '#f5f5f5' }}>
             {loading ? 'Se încarcă...' : 'Reîncarcă'}
           </button>
+          <select
+            value={fermaRaport}
+            onChange={(e) => setFermaRaport(e.target.value)}
+            title="Ferma pentru raportul de stoc"
+            style={{ ...butonStyle, background: '#fff' }}
+          >
+            <option value="">Toate fermele (câte o pagină)</option>
+            {ferme.map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.nume}
+              </option>
+            ))}
+          </select>
           <button
             onClick={() => void tiparesteStoc()}
             disabled={loading}
-            title="Reîncarcă stocul și tipărește pe A4 un raport la zi al stocului de substanțe."
+            title="Reîncarcă stocul și tipărește pe A4 un raport la zi al stocului de substanțe, pentru ferma aleasă."
             style={butonStyle}
           >
             Tipărește stoc
@@ -1205,7 +1222,7 @@ function SubstanteAdminCentral() {
           </div>
         </div>
       )}
-      <RaportStocSubstante stocuri={stocuri} momentul={momentRaport} />
+      <RaportStocSubstante stocuri={stocuri} momentul={momentRaport} fermaId={fermaRaport || null} />
     </main>
   );
 }
