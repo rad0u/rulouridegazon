@@ -2804,3 +2804,9 @@ costuri directe manuale, completarea codurilor SmartBill în nomenclatoare.
   contabilitate). Paginile rămân accesibile direct la adresa lor.
 - 2026-11-26: „Tipărește stoc" la Substanțe (admin general) — listă nouă lângă buton: o fermă anume
   (raport doar pentru ea, fără pagina de total) sau „Toate fermele (câte o pagină)" ca înainte.
+- 2026-11-26: Panoul parcelei (ParcelaPanel) — câmp nou „Cultivată în" (lună + an). Nu e coloană nouă
+  în `parcele`: e `data_start` al ciclului curent din `parcele_cicluri` (prima zi a lunii), ca să
+  existe o singură sursă (aceeași dată decide „complet/incomplet" în Consumuri lunare). La salvare
+  se actualizează ciclul curent (și se șterge nota „dată aproximativă") sau se creează unul, dacă
+  parcela nu are. Editabil doar de admin general (la fel ca restul descrierii și ca RLS-ul pe cicluri);
+  adminul de fermă îl vede.

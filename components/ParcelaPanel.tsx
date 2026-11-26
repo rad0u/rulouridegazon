@@ -16,6 +16,16 @@ function oraLocala(iso: string): string {
   return FORMAT_ORA.format(new Date(iso));
 }
 
+// 2026-11-26 (Radu): „anul și luna cultivării" = începutul ciclului de producție curent
+// (parcele_cicluri.data_start, la nivel de lună). O singură sursă: aceeași dată decide și
+// dacă ciclul e „complet" (început după 01.10.2026) în raportul Consumuri lunare.
+type CicluCurent = { id: string; data_start: string; data_sfarsit: string | null };
+const LUNI_RO = ['ianuarie', 'februarie', 'martie', 'aprilie', 'mai', 'iunie', 'iulie', 'august', 'septembrie', 'octombrie', 'noiembrie', 'decembrie'];
+function lunaAnText(data: string): string {
+  const [an, luna] = data.split('-').map(Number);
+  return `${LUNI_RO[luna - 1]} ${an}`;
+}
+
 interface ParcelaPanelProps {
   parcela: Parcela;
   tipuriGazon: { id: string; nume: string }[];
@@ -49,9 +59,25 @@ export default function ParcelaPanel({
   const [editSuprafata, setEditSuprafata] = useState(parcela.suprafata_mp?.toString() ?? '');
   const [savingDescriere, setSavingDescriere] = useState(false);
   const [errorDescriere, setErrorDescriere] = useState<string | null>(null);
+  const [ciclu, setCiclu] = useState<CicluCurent | null>(null);
+  const [editLunaCultivare, setEditLunaCultivare] = useState(''); // AAAA-LL
+
+  async function loadCiclu() {
+    const { data } = await supabase
+      .from('parcele_cicluri')
+      .select('id,data_start,data_sfarsit')
+      .eq('parcela_id', parcela.id)
+      .order('data_start', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    const c = (data as CicluCurent | null) ?? null;
+    setCiclu(c);
+    setEditLunaCultivare(c ? c.data_start.slice(0, 7) : '');
+  }
 
   useEffect(() => {
     void loadIstoric();
+    void loadCiclu();
     setEditOpId(null);
     setEditingDescriere(false);
     setEditNume(parcela.nume);
@@ -75,6 +101,10 @@ export default function ParcelaPanel({
       setErrorDescriere('Suprafața trebuie să fie un număr pozitiv.');
       return;
     }
+    if (editLunaCultivare !== '' && !/^\d{4}-\d{2}$/.test(editLunaCultivare)) {
+      setErrorDescriere('Alege luna și anul cultivării.');
+      return;
+    }
 
     setSavingDescriere(true);
 
@@ -93,6 +123,32 @@ export default function ParcelaPanel({
       setErrorDescriere(updateError.message);
       setSavingDescriere(false);
       return;
+    }
+
+    // Luna cultivării → începutul ciclului curent (sau un ciclu nou, dacă parcela nu are niciunul).
+    const dataStartNoua = editLunaCultivare ? `${editLunaCultivare}-01` : null;
+    if (dataStartNoua && dataStartNoua !== ciclu?.data_start) {
+      const { error: cicluErr } = ciclu
+        ? await supabase.from('parcele_cicluri').update({ data_start: dataStartNoua, nota: null }).eq('id', ciclu.id)
+        : await supabase.from('parcele_cicluri').insert({
+            parcela_id: parcela.id,
+            data_start: dataStartNoua,
+            tip_gazon: payload.tip_gazon,
+            suprafata_mp: payload.suprafata_mp,
+          });
+      if (cicluErr) {
+        const mesaj =
+          cicluErr.code === '23P01'
+            ? 'Luna cultivării se suprapune cu ciclul anterior al parcelei (care se încheie după această lună).'
+            : cicluErr.code === '23514'
+              ? 'Luna cultivării nu poate fi după data de încheiere a ciclului.'
+              : cicluErr.message;
+        setErrorDescriere(`Descrierea s-a salvat, dar luna cultivării nu: ${mesaj}`);
+        setSavingDescriere(false);
+        onParcelaUpdated?.({ ...parcela, ...payload });
+        return;
+      }
+      await loadCiclu();
     }
 
     onParcelaUpdated?.({ ...parcela, ...payload });
@@ -176,6 +232,15 @@ export default function ParcelaPanel({
               style={{ display: 'block', width: '100%', marginTop: '0.25rem', padding: '0.4rem' }}
             />
           </label>
+          <label style={{ display: 'block', marginBottom: '0.5rem' }}>
+            Cultivată în (luna și anul)
+            <input
+              type="month"
+              value={editLunaCultivare}
+              onChange={(e) => setEditLunaCultivare(e.target.value)}
+              style={{ display: 'block', width: '100%', marginTop: '0.25rem', padding: '0.4rem' }}
+            />
+          </label>
 
           {errorDescriere && <p style={{ color: '#b00020' }}>{errorDescriere}</p>}
 
@@ -189,6 +254,7 @@ export default function ParcelaPanel({
                 setEditNume(parcela.nume);
                 setEditTipGazon(parcela.tip_gazon ?? '');
                 setEditSuprafata(parcela.suprafata_mp?.toString() ?? '');
+                setEditLunaCultivare(ciclu ? ciclu.data_start.slice(0, 7) : '');
                 setErrorDescriere(null);
               }}
               disabled={savingDescriere}
@@ -210,6 +276,9 @@ export default function ParcelaPanel({
           )}
           <p>
             <strong>Suprafață:</strong> {parcela.suprafata_mp ?? '—'} mp
+          </p>
+          <p>
+            <strong>Cultivată în:</strong> {ciclu ? lunaAnText(ciclu.data_start) : '—'}
           </p>
           {editable && (
             <button onClick={() => setEditingDescriere(true)} style={{ marginBottom: '0.5rem' }}>
