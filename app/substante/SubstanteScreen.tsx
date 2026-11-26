@@ -6,7 +6,10 @@ import { useUserRole } from '../../lib/useUserRole';
 import { inBaza, parseazaNumar } from '../../lib/unitati';
 import CantitateCuUm from '../../components/CantitateCuUm';
 
-type NomenclatorItem = { id: string; nume: string; unitate_masura: string };
+// 2026-11-26 (Radu): codul de produs SmartBill, mutat din denumire în câmp propriu, afișat în listări.
+type NomenclatorItem = { id: string; nume: string; unitate_masura: string; cod_smartbill: string | null };
+type CuCod = { nomenclator?: { cod_smartbill: string | null } | null } | null | undefined;
+const codSmartbill = (x: CuCod) => x?.nomenclator?.cod_smartbill ?? null;
 type Ferma = { id: string; nume: string };
 
 type SubstantaStoc = {
@@ -17,6 +20,7 @@ type SubstantaStoc = {
   pret_unitar: number | null;
   ferma_id: string | null;
   ferme: { nume: string } | null;
+  nomenclator?: { cod_smartbill: string | null } | null;
 };
 
 type Intrare = {
@@ -27,7 +31,13 @@ type Intrare = {
   furnizor: string | null;
   nota: string | null;
   created_at: string;
-  substante: { nume: string; unitate_masura: string; ferma_id: string | null; ferme: { nume: string } | null } | null;
+  substante: {
+    nume: string;
+    unitate_masura: string;
+    ferma_id: string | null;
+    ferme: { nume: string } | null;
+    nomenclator?: { cod_smartbill: string | null } | null;
+  } | null;
   utilizatori: { nume: string } | null;
 };
 
@@ -105,16 +115,18 @@ function RaportStocSubstante({ stocuri, momentul }: { stocuri: SubstantaStoc[]; 
           </div>
           <table>
             <colgroup>
-              <col style={{ width: '7%' }} />
-              <col style={{ width: '33%' }} />
-              <col style={{ width: '13%' }} />
+              <col style={{ width: '6%' }} />
+              <col style={{ width: '15%' }} />
+              <col style={{ width: '27%' }} />
+              <col style={{ width: '12%' }} />
+              <col style={{ width: '12%' }} />
               <col style={{ width: '14%' }} />
-              <col style={{ width: '17%' }} />
-              <col style={{ width: '16%' }} />
+              <col style={{ width: '14%' }} />
             </colgroup>
             <thead>
               <tr>
                 <th>Cod</th>
+                <th>Cod SmartBill</th>
                 <th>Substanță</th>
                 <th>Stoc</th>
                 <th>Preț mediu</th>
@@ -128,6 +140,7 @@ function RaportStocSubstante({ stocuri, momentul }: { stocuri: SubstantaStoc[]; 
                 return (
                   <tr key={r.id}>
                     <td>S{i + 1}</td>
+                    <td>{codSmartbill(r) ?? '—'}</td>
                     <td>{r.nume}</td>
                     <td className="dr">
                       {r.stoc_curent} {r.unitate_masura}
@@ -141,7 +154,7 @@ function RaportStocSubstante({ stocuri, momentul }: { stocuri: SubstantaStoc[]; 
             </tbody>
             <tfoot>
               <tr>
-                <td colSpan={4} className="dr"><strong>Total valoare stoc — {grup.nume}</strong></td>
+                <td colSpan={5} className="dr"><strong>Total valoare stoc — {grup.nume}</strong></td>
                 <td className="dr"><strong>{formatLei(totalGrup(grup.randuri))}</strong></td>
                 <td />
               </tr>
@@ -232,7 +245,7 @@ export default function SubstanteScreen() {
   );
 }
 
-const initialNomenclatorForm = { nume: '', unitate_masura: 'kg' };
+const initialNomenclatorForm = { nume: '', unitate_masura: 'kg', cod_smartbill: '' };
 
 const initialAlimentareForm = {
   ferma_id: '',
@@ -321,17 +334,17 @@ function SubstanteAdminCentral() {
     setLoadError(null);
 
     const [nomenclatorRes, fermeRes, stocuriRes, intrariRes, transferuriRes] = await Promise.all([
-      supabase.from('substante_nomenclator').select('id, nume, unitate_masura').order('nume'),
+      supabase.from('substante_nomenclator').select('id, nume, unitate_masura, cod_smartbill').order('nume'),
       supabase.from('ferme').select('id, nume').order('nume'),
       supabase
         .from('substante')
-        .select('id, nume, unitate_masura, stoc_curent, pret_unitar, ferma_id, ferme(nume)')
+        .select('id, nume, unitate_masura, stoc_curent, pret_unitar, ferma_id, ferme(nume), nomenclator:substante_nomenclator(cod_smartbill)')
         .order('nume')
         .order('id'),
       supabase
         .from('substante_intrari')
         .select(
-          'id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferma_id, ferme(nume)), utilizatori(nume)',
+          'id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferma_id, ferme(nume), nomenclator:substante_nomenclator(cod_smartbill)), utilizatori(nume)',
         )
         .order('created_at', { ascending: false })
         .limit(50),
@@ -393,6 +406,7 @@ function SubstanteAdminCentral() {
     const { error: insertError } = await supabase.from('substante_nomenclator').insert({
       nume: nomenclatorForm.nume.trim(),
       unitate_masura: nomenclatorForm.unitate_masura.trim() || 'kg',
+      cod_smartbill: nomenclatorForm.cod_smartbill.trim().toUpperCase() || null,
     });
     setNomenclatorSaving(false);
 
@@ -650,6 +664,16 @@ function SubstanteAdminCentral() {
             />
           </label>
           <label>
+            Cod SmartBill
+            <input
+              type="text"
+              value={nomenclatorForm.cod_smartbill}
+              onChange={(e) => setNomenclatorForm({ ...nomenclatorForm, cod_smartbill: e.target.value })}
+              placeholder="ex. SABMAUX000423"
+              style={inputStyle}
+            />
+          </label>
+          <label>
             Unitate de măsură
             <select
               value={nomenclatorForm.unitate_masura}
@@ -886,6 +910,7 @@ function SubstanteAdminCentral() {
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
               <th style={{ padding: '0.4rem' }}>Fermă</th>
+              <th style={{ padding: '0.4rem' }}>Cod SmartBill</th>
               <th style={{ padding: '0.4rem' }}>Substanță</th>
               <th style={{ padding: '0.4rem' }}>Stoc curent</th>
               <th style={{ padding: '0.4rem' }}>Preț mediu</th>
@@ -895,7 +920,7 @@ function SubstanteAdminCentral() {
           <tbody>
             {loadedOnce && stocuri.length === 0 && (
               <tr>
-                <td colSpan={5} style={{ padding: '0.75rem', color: '#666' }}>
+                <td colSpan={6} style={{ padding: '0.75rem', color: '#666' }}>
                   Nicio substanță în gestiune încă — alimentează prima din formularul de mai sus.
                 </td>
               </tr>
@@ -903,6 +928,7 @@ function SubstanteAdminCentral() {
             {stocuri.map((s) => (
               <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ padding: '0.4rem' }}>{s.ferme?.nume ?? '—'}</td>
+                <td style={{ padding: '0.4rem', whiteSpace: 'nowrap', color: '#555' }}>{codSmartbill(s) ?? '—'}</td>
                 <td style={{ padding: '0.4rem' }}>{s.nume}</td>
                 <td style={{ padding: '0.4rem' }}>
                   {s.stoc_curent} {s.unitate_masura}
@@ -955,7 +981,9 @@ function SubstanteAdminCentral() {
                   >
                     <td style={{ padding: '0.4rem' }}>{formatData(i.data)}</td>
                     <td style={{ padding: '0.4rem' }}>{i.substante?.ferme?.nume ?? '—'}</td>
-                    <td style={{ padding: '0.4rem' }}>{i.substante?.nume ?? '—'}</td>
+                    <td style={{ padding: '0.4rem' }}>{i.substante?.nume ?? '—'}
+                      {codSmartbill(i.substante) && <span style={{ color: '#888', fontSize: '0.8rem' }}> · {codSmartbill(i.substante)}</span>}
+                    </td>
                     <td style={{ padding: '0.4rem' }}>
                       {i.cantitate} {i.substante?.unitate_masura ?? ''}
                     </td>
@@ -1143,7 +1171,7 @@ function SubstanteAdminCentral() {
                 type="text"
                 value={cautareNomenclator}
                 onChange={(e) => setCautareNomenclator(e.target.value)}
-                placeholder="Caută după denumire..."
+                placeholder="Caută după denumire sau cod..."
                 style={{ ...inputStyle, width: '100%', minWidth: 0 }}
               />
             </div>
@@ -1151,15 +1179,22 @@ function SubstanteAdminCentral() {
               <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
                 <thead>
                   <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+                    <th style={{ padding: '0.4rem', position: 'sticky', top: 0, background: '#fff' }}>Cod SmartBill</th>
                     <th style={{ padding: '0.4rem', position: 'sticky', top: 0, background: '#fff' }}>Denumire</th>
                     <th style={{ padding: '0.4rem', position: 'sticky', top: 0, background: '#fff' }}>U.M.</th>
                   </tr>
                 </thead>
                 <tbody>
                   {nomenclator
-                    .filter((n) => n.nume.toLowerCase().includes(cautareNomenclator.trim().toLowerCase()))
+                    .filter((n) => {
+                      const q = cautareNomenclator.trim().toLowerCase();
+                      return n.nume.toLowerCase().includes(q) || (n.cod_smartbill ?? '').toLowerCase().includes(q);
+                    })
                     .map((n) => (
                       <tr key={n.id} style={{ borderBottom: '1px solid #f5f5f5' }}>
+                        <td style={{ padding: '0.4rem', color: n.cod_smartbill ? '#333' : '#b00020', whiteSpace: 'nowrap' }}>
+                          {n.cod_smartbill ?? 'fără cod'}
+                        </td>
                         <td style={{ padding: '0.4rem' }}>{n.nume}</td>
                         <td style={{ padding: '0.4rem', color: '#888' }}>{n.unitate_masura}</td>
                       </tr>
@@ -1198,12 +1233,12 @@ function SubstanteAdminFerma() {
     const [stocuriRes, intrariRes] = await Promise.all([
       supabase
         .from('substante')
-        .select('id, nume, unitate_masura, stoc_curent, pret_unitar, ferma_id, ferme(nume)')
+        .select('id, nume, unitate_masura, stoc_curent, pret_unitar, ferma_id, ferme(nume), nomenclator:substante_nomenclator(cod_smartbill)')
         .order('nume')
         .order('id'),
       supabase
         .from('substante_intrari')
-        .select('id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferme(nume)), utilizatori(nume)')
+        .select('id, cantitate, pret_intrare_unitar, data, furnizor, nota, created_at, substante(nume, unitate_masura, ferme(nume), nomenclator:substante_nomenclator(cod_smartbill)), utilizatori(nume)')
         .order('created_at', { ascending: false })
         .limit(50),
     ]);
@@ -1271,6 +1306,7 @@ function SubstanteAdminFerma() {
         <table style={{ borderCollapse: 'collapse', width: '100%', fontSize: '0.9rem' }}>
           <thead>
             <tr style={{ textAlign: 'left', borderBottom: '1px solid #ddd' }}>
+              <th style={{ padding: '0.4rem' }}>Cod SmartBill</th>
               <th style={{ padding: '0.4rem' }}>Substanță</th>
               <th style={{ padding: '0.4rem' }}>Stoc curent</th>
               <th style={{ padding: '0.4rem' }}>Preț mediu</th>
@@ -1280,13 +1316,14 @@ function SubstanteAdminFerma() {
           <tbody>
             {loadedOnce && stocuri.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ padding: '0.75rem', color: '#666' }}>
+                <td colSpan={5} style={{ padding: '0.75rem', color: '#666' }}>
                   Nicio substanță în gestiune încă.
                 </td>
               </tr>
             )}
             {stocuri.map((s) => (
               <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                <td style={{ padding: '0.4rem', whiteSpace: 'nowrap', color: '#555' }}>{codSmartbill(s) ?? '—'}</td>
                 <td style={{ padding: '0.4rem' }}>{s.nume}</td>
                 <td style={{ padding: '0.4rem' }}>
                   {s.stoc_curent} {s.unitate_masura}
@@ -1324,7 +1361,9 @@ function SubstanteAdminFerma() {
             {intrari.map((i) => (
               <tr key={i.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
                 <td style={{ padding: '0.4rem' }}>{formatData(i.data)}</td>
-                <td style={{ padding: '0.4rem' }}>{i.substante?.nume ?? '—'}</td>
+                <td style={{ padding: '0.4rem' }}>{i.substante?.nume ?? '—'}
+                      {codSmartbill(i.substante) && <span style={{ color: '#888', fontSize: '0.8rem' }}> · {codSmartbill(i.substante)}</span>}
+                    </td>
                 <td style={{ padding: '0.4rem' }}>
                   {i.cantitate} {i.substante?.unitate_masura ?? ''}
                 </td>

@@ -110,18 +110,9 @@ function sectiuniPentru(rol: UserRole): Sectiune[] {
   sectiuni.push({
     titlu: 'Rapoarte',
     carduri: [
-      {
-        href: '/dashboard/cost-productie',
-        icon: '💰',
-        titlu: 'Cost de producție',
-        descriere: 'Cost per fermă / lună',
-      },
-      {
-        href: '/cheltuieli-indirecte',
-        icon: '🧾',
-        titlu: 'Cheltuieli indirecte',
-        descriere: 'Cheltuieli comune, neatribuite direct',
-      },
+      // 2026-11-25 (Radu): scoase din Dashboard „Cost de producție" și „Cheltuieli indirecte" —
+      // costurile indirecte rămân în contabilitate (SmartBill Conta); aplicația livrează doar
+      // costurile directe, prin „Consumuri lunare". Paginile rămân accesibile direct la adresa lor.
       // 2026-11-11 (Radu): listing Ferme–Parcele–Suprafețe măsurate (printabil A4) — doar admin general.
       ...(esteAdminCentral
         ? [

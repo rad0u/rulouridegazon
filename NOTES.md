@@ -2778,3 +2778,27 @@ existent `/consumuri-lunare` devine exportul pentru contabilitate, iar luna se
   și „Explicații" (pentru contabilă).
 Rămas: ecran pentru cicluri (închidere/deschidere ciclu nou), ecran pentru
 costuri directe manuale, completarea codurilor SmartBill în nomenclatoare.
+
+### Coduri SmartBill în câmp propriu + Dashboard curățat (2026-11-26)
+- Date: codul de produs era scris în denumire, între paranteze („ACTELLIC 50 EC (SABMAUX000423)").
+  Mutat în `substante_nomenclator.cod_smartbill` / `materii_prime_nomenclator.cod_smartbill`
+  (57 din 58; „Semințe gazon" nu are cod) și scos din denumire — atât în nomenclator, cât și în
+  `substante.nume` / `materii_prime.nume` (copii identice). Denumirea veche = nume + ' (' + cod + ')';
+  fiecare modificare e și în jurnalul de activitate.
+- Verificat 2026-11-26 cu exportul nomenclatorului SmartBill (CODURI_PRODUSE.xlsx, 1.994 produse):
+  toate cele 57 de coduri există în SmartBill, cu aceeași denumire — inclusiv cele cu formă
+  neobișnuită (SABOM014, SABMAUX00060/00037/00061, SABMAUX0000119, SABPRIM000272, MEDMAUX000013).
+  „Semințe gazon" (fără stoc, fără consumuri) nu are corespondent.
+  UM diferite față de SmartBill (contează la cantitățile din export): FERTIL 12,5, LIFE NG+,
+  SULFAT DE AMONIU, TOP DRESSING BIG BAG — aplicația kg, SmartBill t; NUTRI-MEAL 6-12-44 sac 25 kg —
+  aplicația kg, SmartBill bucată (sac); Green Tech Rooter 1L — aplicația l, SmartBill bucată.
+  Restul diferențelor sunt doar de scriere (l/litru, buc/bucata/rola/sac).
+  Decizie Radu: aplicația rămâne pe kg / l (consumuri mici, ex. 12 kg); contabilitatea schimbă
+  unitatea de măsură în SmartBill la cele 6 produse. Fără conversie în aplicație.
+- Afișare: coloană „Cod SmartBill" în Substanțe și Materii prime (nomenclator — căutare și după cod,
+  „fără cod" cu roșu —, stoc curent, raport printabil de stoc lângă codurile S1..), cod după denumire
+  în istoricul alimentărilor; câmp „Cod SmartBill" la adăugarea în nomenclator; export
+  „Stocuri ferme": coloană Cod SmartBill pe matricea de substanțe, codul din nomenclator la materii
+  prime. Codurile S1.. (poziția în lista fermei, folosite pe formularele tipărite) rămân neschimbate.
+- Dashboard: scoase cardurile „Cost de producție" și „Cheltuieli indirecte" (indirectele rămân în
+  contabilitate). Paginile rămân accesibile direct la adresa lor.

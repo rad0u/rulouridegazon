@@ -30,16 +30,21 @@ type Rand = {
   stoc_curent: number | null;
   pret_unitar: number | null;
   ferma_id: string | null;
+  // 2026-11-26: codul SmartBill e acum în nomenclator (scos din denumire).
+  nomenclator?: { cod_smartbill: string | null } | null;
 };
 
 type Ferma = { id: string; nume: string };
-type Nomenclator = { id: string; nume: string; unitate_masura: string };
+type Nomenclator = { id: string; nume: string; unitate_masura: string; cod_smartbill: string | null };
 type StocSubstanta = { nomenclator_id: string | null; ferma_id: string | null; stoc_curent: number | null; pret_unitar: number | null };
 
 const FORMAT_LEI = '#,##0.00';
 const FORMAT_CANT = '#,##0.##';
 
-function extrageCod(nume: string): { denumire: string; cod: string } {
+// 2026-11-26: codul vine din nomenclator (cod_smartbill); extragerea din denumire rămâne
+// doar ca rezervă pentru denumiri introduse ulterior cu codul în paranteză.
+function extrageCod(nume: string, codNomenclator?: string | null): { denumire: string; cod: string } {
+  if (codNomenclator) return { denumire: nume, cod: codNomenclator };
   const m = nume.match(/^(.*?)\s*\(([A-Z0-9.\-_/]+)\)\s*$/i);
   return m ? { denumire: m[1], cod: m[2] } : { denumire: nume, cod: '' };
 }
@@ -65,8 +70,8 @@ export async function exportaStocuriFerme(): Promise<void> {
   const [{ data: fermeData, error: errF }, { data: mpData, error: errM }, { data: nomData, error: errN }, { data: subData, error: errS }] =
     await Promise.all([
       supabase.from('ferme').select('id,nume').order('nume'),
-      supabase.from('materii_prime').select('nume,unitate_masura,stoc_curent,pret_unitar,ferma_id').order('nume'),
-      supabase.from('substante_nomenclator').select('id,nume,unitate_masura').order('nume'),
+      supabase.from('materii_prime').select('nume,unitate_masura,stoc_curent,pret_unitar,ferma_id,nomenclator:materii_prime_nomenclator(cod_smartbill)').order('nume'),
+      supabase.from('substante_nomenclator').select('id,nume,unitate_masura,cod_smartbill').order('nume'),
       supabase.from('substante').select('nomenclator_id,ferma_id,stoc_curent,pret_unitar').order('nume'),
     ]);
   if (errF) throw new Error(`Eroare la citirea fermelor: ${errF.message}`);
@@ -81,7 +86,7 @@ export async function exportaStocuriFerme(): Promise<void> {
   }));
 
   const ferme = (fermeData as Ferma[]) ?? [];
-  const randuri = ((mpData as Rand[]) ?? []).map((r) => ({
+  const randuri = ((mpData as unknown as Rand[]) ?? []).map((r) => ({
     ...r,
     stoc_curent: r.stoc_curent === null ? 0 : Number(r.stoc_curent),
     pret_unitar: r.pret_unitar === null ? null : Number(r.pret_unitar),
@@ -118,15 +123,15 @@ export async function exportaStocuriFerme(): Promise<void> {
 
   // ── Substanțe pe ferme: nomenclator (vertical) × ferme (orizontal) ───────
   const wsS = wb.addWorksheet(numeFoaie('Substanțe pe ferme', folosite));
-  wsS.columns = [{ width: 6 }, { width: 46 }, { width: 6 }, ...ferme.map(() => ({ width: 15 })), { width: 15 }];
+  wsS.columns = [{ width: 6 }, { width: 46 }, { width: 17 }, { width: 6 }, ...ferme.map(() => ({ width: 15 })), { width: 15 }];
   wsS.addRow([`Stoc substanțe pe ferme — la ${dataRo}`]).font = { bold: true, size: 13 };
   wsS.addRow(['', 'Celulă goală = substanța nu e în gestiunea fermei; 0 = e în gestiune, fără stoc.']).font = {
     italic: true,
     color: { argb: 'FF777777' },
   };
-  const antetS = wsS.addRow(['Nr.', 'Substanță', 'UM', ...ferme.map((f) => f.nume), 'Total']);
+  const antetS = wsS.addRow(['Nr.', 'Substanță', 'Cod SmartBill', 'UM', ...ferme.map((f) => f.nume), 'Total']);
   stilAntet(antetS);
-  const colTotal = 4 + ferme.length; // coloana „Total"
+  const colTotal = 5 + ferme.length; // coloana „Total"
   const literaCol = (n: number) => {
     let l = '';
     while (n > 0) {
@@ -144,14 +149,14 @@ export async function exportaStocuriFerme(): Promise<void> {
   }
   nomenclator.forEach((n, i) => {
     const valori = ferme.map((f) => stocPe.get(`${n.id}|${f.id}`));
-    const row = wsS.addRow([i + 1, n.nume, n.unitate_masura, ...valori.map((v) => (v === undefined ? null : v)), null]);
-    const prima = literaCol(4);
-    const ultima = literaCol(3 + ferme.length);
+    const row = wsS.addRow([i + 1, n.nume, n.cod_smartbill ?? '', n.unitate_masura, ...valori.map((v) => (v === undefined ? null : v)), null]);
+    const prima = literaCol(5);
+    const ultima = literaCol(4 + ferme.length);
     row.getCell(colTotal).value = {
       formula: `SUM(${prima}${row.number}:${ultima}${row.number})`,
       result: valori.reduce<number>((s, v) => s + (v ?? 0), 0),
     };
-    for (let c = 4; c <= colTotal; c++) row.getCell(c).numFmt = FORMAT_CANT;
+    for (let c = 5; c <= colTotal; c++) row.getCell(c).numFmt = FORMAT_CANT;
     row.getCell(colTotal).font = { bold: true };
   });
   if (nomenclator.length === 0) {
@@ -159,7 +164,7 @@ export async function exportaStocuriFerme(): Promise<void> {
   } else {
     wsS.autoFilter = { from: { row: antetS.number, column: 1 }, to: { row: wsS.rowCount, column: colTotal } };
   }
-  wsS.views = [{ state: 'frozen', xSplit: 3, ySplit: antetS.number }];
+  wsS.views = [{ state: 'frozen', xSplit: 4, ySplit: antetS.number }];
   wsS.pageSetup = { orientation: 'landscape', fitToPage: true, fitToWidth: 1, fitToHeight: 0, paperSize: 9 };
 
   // ── O foaie pe fermă (materii prime) ──────────────────────────────────────────────────────
@@ -175,7 +180,7 @@ export async function exportaStocuriFerme(): Promise<void> {
     const primulRand = antet.number + 1;
 
     lista.forEach((r, i) => {
-      const { denumire, cod } = extrageCod(r.nume);
+      const { denumire, cod } = extrageCod(r.nume, r.nomenclator?.cod_smartbill);
       const row = ws.addRow([i + 1, denumire, cod, r.unitate_masura, r.stoc_curent, r.pret_unitar, null]);
       row.getCell(7).value =
         r.pret_unitar === null ? null : { formula: `E${row.number}*F${row.number}`, result: r.stoc_curent * r.pret_unitar };
@@ -258,7 +263,7 @@ export async function exportaStocuriFerme(): Promise<void> {
     (numeFerma.get(a.ferma_id ?? '') ?? '').localeCompare(numeFerma.get(b.ferma_id ?? '') ?? '', 'ro') || a.nume.localeCompare(b.nume, 'ro'),
   );
   for (const r of sortate) {
-    const { denumire, cod } = extrageCod(r.nume);
+    const { denumire, cod } = extrageCod(r.nume, r.nomenclator?.cod_smartbill);
     const row = wsT.addRow([numeFerma.get(r.ferma_id ?? '') ?? '(fără fermă)', denumire, cod, r.unitate_masura, r.stoc_curent, r.pret_unitar, null]);
     row.getCell(7).value =
       r.pret_unitar === null ? null : { formula: `E${row.number}*F${row.number}`, result: r.stoc_curent * r.pret_unitar };
